@@ -10,7 +10,7 @@
 ## 🛠 Tech Stack
 * **Frontend:** [React Native](https://reactnative.dev/) with [Expo](https://expo.dev/) (TypeScript)
 * **Backend:** [Flask](https://flask.palletsprojects.com/) (Python)
-* **Database:** [Firebase](https://firebase.google.com/) (firebase-admin)
+* **Database:** [Supabase](https://supabase.com/) (SQL)
 * **Design:** [Figma Board](https://www.figma.com/design/jhOFiSLhLxZJhtdv2zpfOB/SpotOn-Board?node-id=0-1&p=f&t=67c62KVDqOPUEi95-0)
 
 ---
