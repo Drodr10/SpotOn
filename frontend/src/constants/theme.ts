@@ -1,11 +1,19 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Reusable colors and theme for the app.
+ * - Palette: brand/semantic colors used everywhere (same in light & dark).
+ * - Colors: theme-aware (light vs dark) for text, background, tint, etc.
  */
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
+/** Shared colors — use these for brand, buttons, status, etc. */
+export const Palette = {
+  black: '#28282B',
+  white: '#F5F5F5',
+  chalkgrey: '#DCDBD8',
+} as const;
+
+const tintColorLight = Palette.black;
 const tintColorDark = '#fff';
 
 export const Colors = {
@@ -27,27 +35,32 @@ export const Colors = {
   },
 };
 
+/** Custom font family names (loaded in _layout.tsx). Use with fontFamily: Fonts.SwitzerLight etc. */
+export const CustomFonts = {
+  SwitzerLight: 'SwitzerLight',
+  SwitzerSemibold: 'SwitzerSemibold',
+} as const;
+
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
+    ...CustomFonts,
   },
   default: {
     sans: 'normal',
     serif: 'serif',
     rounded: 'normal',
     mono: 'monospace',
+    ...CustomFonts,
   },
   web: {
     sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
     rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    ...CustomFonts,
   },
 });
