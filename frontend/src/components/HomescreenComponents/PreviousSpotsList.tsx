@@ -11,7 +11,7 @@ import React from 'react';
 import { FlatList, View, StyleSheet, Dimensions } from 'react-native';
 
 // ─── Components ──────────────────────────────────────────────────────────────
-import PreviousSpotCard, { PreviousSpotCardProps } from './PreviousSpotCard';
+import PreviousSpotCard, { PreviousSpotCardProps } from '../PreviousSpotCard';
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import mapPlaceholder from '@/assets/images/mapimageplaceholder.png';
@@ -78,3 +78,4 @@ const styles = StyleSheet.create({
     width: CARD_GAP,
   },
 });
+

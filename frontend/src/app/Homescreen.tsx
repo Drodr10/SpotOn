@@ -26,11 +26,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 // ─── Components ──────────────────────────────────────────────────────────────
-import ProfilePill from '@/src/components/ProfilePill';
-import SearchBar from '@/src/components/SearchBar';
-import SuggestionsList from '@/src/components/SuggestionsList';
-import PreviousSpotsList from '@/src/components/PreviousSpotsList';
-import AddListingFAB from '@/src/components/AddListingFAB';
+import ProfilePill from '@/src/components/HomescreenComponents/ProfilePill';
+import SearchBar from '@/src/components/HomescreenComponents/SearchBar';
+import SuggestionsList from '@/src/components/HomescreenComponents/SuggestionsList';
+import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList';
+import AddListingFAB from '@/src/components/HomescreenComponents/AddListingFAB';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';

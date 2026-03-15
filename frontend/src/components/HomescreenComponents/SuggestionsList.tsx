@@ -12,7 +12,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 
 // ─── Components ──────────────────────────────────────────────────────────────
-import SuggestionRow, { SuggestionIconType } from './SuggestionRow';
+import SuggestionRow, { SuggestionIconType } from '../SuggestionRow';
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 // TODO: Replace with real suggestion data from backend
@@ -50,3 +50,4 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.12)',
   },
 });
+
