@@ -13,7 +13,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React from 'react';
+import React, { useState} from 'react';
 import { useRouter } from 'expo-router';
 import {
   View,
@@ -39,6 +39,10 @@ import { CustomFonts } from '@/src/constants/theme';
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import logoAsset from '@/assets/images/spotonlogo.png';
 
+// ─── Auth & Supabase ───────────────────────────────────────────────────────────────
+import { supabase } from '../utils/supabase';
+import { JwtPayload } from '@supabase/supabase-js';
+
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
 const H_PAD          = screenWidth * 0.05;   // horizontal padding for sections
@@ -48,7 +52,17 @@ const SECTION_LABEL  = screenWidth * 0.045;  // ~18px — "Your Previous Spots"
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Homescreen() {
-  const router = useRouter();
+
+  //Load logged in user data from supabase.
+  const [claims, setClaims] = useState<JwtPayload | null>(null);
+
+  supabase.auth.getClaims().then(({ data }) => {
+      if (data) {
+        setClaims(data.claims);
+      }
+    });
+
+    const router = useRouter();
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -76,7 +90,7 @@ export default function Homescreen() {
           {/* Figma: profile pill left, logo right */}
           <View style={styles.header}>
             {/* Profile Pill — Figma: "profile" */}
-            <ProfilePill username="Diego" />
+            <ProfilePill username={claims ? claims.sub : "not logged in"} />
 
             {/* SpotOn Logo — Figma: "SpotOn Logo", ~75% opacity */}
             <Image

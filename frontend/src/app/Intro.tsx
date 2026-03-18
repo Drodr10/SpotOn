@@ -9,20 +9,18 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, } from 'react';
 import {
   View,
   Text,
   Image,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   Dimensions,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-// ─── Navigation ──────────────────────────────────────────────────────────────
-import { router } from 'expo-router';
+// ─── Auth & Supabase ───────────────────────────────────────────────────────────────
+import Auth from '@/src/components/Auth';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
@@ -30,7 +28,6 @@ import { CustomFonts } from '@/src/constants/theme';
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import frontImageAsset  from '@/assets/images/frontimage.jpeg';
 import spotonLogoAsset  from '@/assets/images/spotonlogo.png';
-import enterArrowAsset  from '@/assets/images/enter arrow.png';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -48,19 +45,9 @@ const FONT_INPUT    = screenWidth * 0.038;  // input placeholder / text
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Intro() {
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
 
-  /** Handles the enter arrow press — navigates to Homescreen. */
-  const handleLogin = () => {
-    // TODO: Before navigating, validate username/password against
-    // the backend: POST /api/auth/login { email, password }
-    // Store the returned session token for authenticated requests.
-    // Only navigate to Homescreen on successful login.
-
-    // replace() so the user can't swipe/go back to the Intro screen
-    router.replace('/Homescreen');
-  };
+  //State to toggle between Login and Sign Up forms
+  const [isNewUser, setIsNewUser] = useState<boolean>(false); 
 
   return (
     // Figma: "Introduction Page" — near-white background fills any gaps
@@ -101,58 +88,12 @@ export default function Intro() {
         </View>
 
         {/* ── Tagline — Figma: "Your Next Spot, Is Just A Tap Away." ────── */}
-        <Text style={styles.tagline}>Your Next Spot,{'\n'}Is Just A Tap Away.</Text>
+        <Text style={styles.tagline}>Your next spot,{'\n'}is just one tap away.</Text>
 
         {/* ── Group 2 — Login Fields — Figma: "Group 2" ─────────────────── */}
-        <View style={styles.loginGroup}>
 
-          {/* Username Login In — Figma: "Username Login In" */}
-          <TextInput
-            style={styles.input}
-            value={username}
-            onChangeText={setUsername}
-            placeholder="Username"
-            placeholderTextColor="rgba(0,0,0,0.4)"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+        <Auth styles={styles} isNewUser={isNewUser} handleTypeChange={setIsNewUser} />
 
-          {/* Password Login In — Figma: "Password Login In" */}
-          {/*
-            Wrapped in a View so the enter arrow can be positioned
-            absolutely over the right edge of the input field.
-          */}
-          <View style={styles.passwordRow}>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              placeholderTextColor="rgba(0,0,0,0.4)"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              // Submit on keyboard "done" key as well
-              onSubmitEditing={handleLogin}
-              returnKeyType="go"
-            />
-
-            {/* enter arrow — Figma: "enter arrow" */}
-            {/* Overlaps the right edge of the password field */}
-            <TouchableOpacity
-              style={styles.arrowButton}
-              onPress={handleLogin}
-              activeOpacity={0.7}
-            >
-              <Image
-                source={enterArrowAsset}
-                style={styles.arrowIcon}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          </View>
-
-        </View>
       </View>
     </View>
   );
@@ -194,6 +135,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: H_PAD,
     paddingTop: screenWidth * 0.06,
     paddingBottom: screenWidth * 0.08,
+    overflow: "scroll"
   },
 
   // ── Branding Row ────────────────────────────────────────────────────────────
@@ -228,7 +170,10 @@ const styles = StyleSheet.create({
   // ── Login Fields ────────────────────────────────────────────────────────────
   // Figma: "Group 2"
   loginGroup: {
-    gap: screenWidth * 0.035,
+    flex: 1,
+    justifyContent: 'center',
+    gap: screenWidth * 0.025,
+    marginVertical: screenWidth * 0.025,
   },
 
   // Shared pill-shaped input style (Username + Password)
@@ -263,4 +208,30 @@ const styles = StyleSheet.create({
     width: ARROW_SIZE,
     height: ARROW_SIZE,
   },
+
+  // Sign up / Log in toggle button
+  toggleButton: {
+    width: '100%',
+    height: INPUT_HEIGHT - 12,
+    alignSelf: 'center',
+    borderRadius: INPUT_RADIUS,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,1)',
+    paddingHorizontal: screenWidth * 0.05,
+    backgroundColor: '#333333',
+    fontFamily: CustomFonts.SwitzerLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  buttonText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: FONT_INPUT,
+    color: "#FFFFFF",
+  },
+  authError: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: FONT_INPUT - 2,
+    color: "#rgba(200, 0, 0, 1)",
+    paddingHorizontal: screenWidth * 0.05,
+  }
 });
