@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "supabase": "^2.76.17"
+    "supabase": "^2.82.0"
   },
   "dependencies": {
     "expo": "^55.0.6"
