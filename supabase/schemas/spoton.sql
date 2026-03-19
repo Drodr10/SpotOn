@@ -181,3 +181,61 @@ create policy "messages_conversation_participants_delete" on public.messages
   using (
     sender_id = (select auth.uid())
   );
+
+-- Trigger: Handle new user profile creation automatically
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = ''
+as $$
+begin
+  insert into public.profiles (id, full_name, email)
+  values (
+    new.id, 
+    coalesce(new.raw_user_meta_data->>'full_name', 'New User'), 
+    new.email
+  );
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- Enable PostGIS extension for spatial math
+create extension if not exists postgis;
+
+-- Add the 'location' column to listings
+alter table public.listings 
+add column if not exists location geography(Point, 4326);
+
+-- Populate 'location' from your existing lat/long data
+update public.listings 
+set location = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography;
+
+-- Create the Spatial Index (High-speed searching)
+create index if not exists idx_listings_location on public.listings using gist(location);
+
+create or replace function get_nearby_listings(
+  user_lat double precision, 
+  user_long double precision, 
+  max_meters float default 16093.4 -- 10 miles
+)
+returns setof public.listings 
+language plpgsql
+security definer 
+as $$
+begin
+  return query
+  select *
+  from public.listings
+  where is_active = true
+  and ST_DWithin(
+    location, 
+    ST_SetSRID(ST_MakePoint(user_long, user_lat), 4326)::geography, 
+    max_meters
+  )
+  order by location <-> ST_SetSRID(ST_MakePoint(user_long, user_lat), 4326)::geography;
+end;
+$$;
