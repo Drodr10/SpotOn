@@ -13,7 +13,8 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState} from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -60,6 +61,8 @@ export default function Homescreen() {
         setClaims(data.claims);
       }
     });
+
+    const router = useRouter();
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -123,10 +126,7 @@ export default function Homescreen() {
         {/* ── 6. Add Listing FAB ────────────────────────────────────────── */}
         {/* Absolutely positioned over all content, bottom-right */}
         <AddListingFAB
-          onPress={() => {
-            // TODO: Navigate to listing creation screen
-            console.log('Add listing tapped');
-          }}
+          onPress={() => router.push('./CreateListing' as any)}
         />
       </View>
     </SafeAreaView>
