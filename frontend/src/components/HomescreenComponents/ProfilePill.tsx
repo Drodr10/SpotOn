@@ -15,6 +15,10 @@ import { CustomFonts } from '@/src/constants/theme';
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import profileIconAsset from '@/assets/images/temprofileicon.png';
 
+// ─── Components ──────────────────────────────────────────────────────────────────
+import LogoutButton from '@/src/components/logout-button';
+
+
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
 const AVATAR_SIZE = screenWidth * 0.075;   // ~30px on 390px screen
@@ -36,6 +40,8 @@ export default function ProfilePill({ username }: ProfilePillProps) {
       <Image source={profileIconAsset} style={styles.avatar} />
       {/* Username label */}
       <Text style={styles.username}>{username}</Text>
+      {/* Logout button */}
+      <LogoutButton />
     </View>
   );
 }
