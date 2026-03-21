@@ -69,21 +69,19 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
     }
 
     console.log("Attempting to sign up with email: "+ email);
-    const { data, error } = await supabase.auth.signUp({ email, password, });
+    const { data, error } = await supabase.auth.signUp({ 
+      email,
+      password, 
+      options: {
+        data: {
+          full_name: fullName,
+        }
+      }});
 
     if (error) {
       console.log("Signup failed...\n" + error.message);
       handleError(error.message);
       return;
-    }
-
-    const resp = await supabase
-      .from("profiles")
-      .insert({ full_name: fullName, email: email })
-      .eq('id', data.user!.id);
-      
-    if (resp.error) {
-      console.log("Failed to update profile data...\n" + resp.error.message);
     }
     console.log("Signup successful!");
 

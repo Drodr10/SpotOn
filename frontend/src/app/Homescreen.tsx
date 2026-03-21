@@ -88,6 +88,7 @@ export default function Homescreen() {
           <View style={styles.header}>
             {/* Profile Pill — Figma: "profile" */}
             <ProfilePill username={claims ? claims.sub : "not logged in"} />
+            <ProfilePill username={claims ? claims.sub : "not logged in"} />
 
             {/* SpotOn Logo — Figma: "SpotOn Logo", ~75% opacity */}
             <Image
@@ -123,10 +124,7 @@ export default function Homescreen() {
         {/* ── 6. Add Listing FAB ────────────────────────────────────────── */}
         {/* Absolutely positioned over all content, bottom-right */}
         <AddListingFAB
-          onPress={() => {
-            // TODO: Navigate to listing creation screen
-            console.log('Add listing tapped');
-          }}
+          onPress={() => router.push('./CreateListing' as any)}
         />
       </View>
     </SafeAreaView>
