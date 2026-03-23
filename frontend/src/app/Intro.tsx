@@ -9,7 +9,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState,useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -54,7 +54,7 @@ export default function Intro() {
   const [isNewUser, setIsNewUser] =  useState<boolean>(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
+  useEffect(()  => {
     const sub = Keyboard.addListener('keyboardDidShow', ()  => {
       scrollRef.current?.scrollToEnd({animated: true });
     });
@@ -64,7 +64,7 @@ export default function Intro() {
   return (
     // Figma: "Introduction Page" — near-white background fills any gaps
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView ref={scrollRef} contentContainerStyle = {{ flexGrow: 1 }} bounces= {false} keyboardShouldPersistTaps="handled">
+      <ScrollView ref ={scrollRef}  contentContainerStyle = {{ flexGrow: 1 }} bounces= {false} keyboardShouldPersistTaps ="handled">
       <StatusBar style="dark" />
 
       {/* ── 1. frontimage — Figma: "frontimage" ──────────────────────────── */}
