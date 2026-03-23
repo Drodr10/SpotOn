@@ -9,13 +9,17 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState, } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   Image,
   StyleSheet,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
@@ -47,11 +51,20 @@ const FONT_INPUT    = screenWidth * 0.038;  // input placeholder / text
 export default function Intro() {
 
   //State to toggle between Login and Sign Up forms
-  const [isNewUser, setIsNewUser] = useState<boolean>(false); 
+  const [isNewUser, setIsNewUser] =  useState<boolean>(false);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', ()  => {
+      scrollRef.current?.scrollToEnd({animated: true });
+    });
+    return () =>  sub.remove();
+  }, []);
 
   return (
     // Figma: "Introduction Page" — near-white background fills any gaps
-    <View style={styles.screen}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView ref={scrollRef} contentContainerStyle = {{ flexGrow: 1 }} bounces= {false} keyboardShouldPersistTaps="handled">
       <StatusBar style="dark" />
 
       {/* ── 1. frontimage — Figma: "frontimage" ──────────────────────────── */}
@@ -95,7 +108,8 @@ export default function Intro() {
         <Auth styles={styles} isNewUser={isNewUser} handleTypeChange={setIsNewUser} />
 
       </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
