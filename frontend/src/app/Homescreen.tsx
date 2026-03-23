@@ -13,8 +13,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState} from 'react';
-import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,6 +24,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { router } from 'expo-router';
 
 // ─── Components ──────────────────────────────────────────────────────────────
 import ProfilePill from '@/src/components/HomescreenComponents/ProfilePill';
@@ -50,19 +50,42 @@ const SECTION_GAP    = screenWidth * 0.05;   // vertical spacing between section
 const LOGO_SIZE      = screenWidth * 0.12;   // ~47px
 const SECTION_LABEL  = screenWidth * 0.045;  // ~18px — "Your Previous Spots"
 
+//
+type ProfileData = {
+  id: string;
+  full_name: string;
+  email: string;
+  rating_avg: number;
+  created_at: string;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Homescreen() {
 
   //Load logged in user data from supabase.
   const [claims, setClaims] = useState<JwtPayload | null>(null);
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
 
-  supabase.auth.getClaims().then(({ data }) => {
-      if (data) {
+  useEffect(() => {
+    supabase.auth.getClaims().then(async (resp)  => {
+      const { data, error } = resp;
+
+        if (data) {
         setClaims(data.claims);
-      }
-    });
 
-    const router = useRouter();
+        const {data: profileData, error: profileError} = await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
+
+        if (profileData) {
+          setProfileData(profileData);
+        }
+        else
+          console.log("Error getting profile data: " + profileError)
+
+        } 
+        else
+          console.log("Error getting claims: " + error )
+      });
+    }, []);
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -90,7 +113,7 @@ export default function Homescreen() {
           {/* Figma: profile pill left, logo right */}
           <View style={styles.header}>
             {/* Profile Pill — Figma: "profile" */}
-            <ProfilePill username={claims ? claims.sub : "not logged in"} />
+            <ProfilePill username={profileData ? profileData.full_name : "not logged in" }/>
 
             {/* SpotOn Logo — Figma: "SpotOn Logo", ~75% opacity */}
             <Image
