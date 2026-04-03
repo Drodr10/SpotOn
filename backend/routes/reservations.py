@@ -3,6 +3,12 @@ from services.supabase_client import supabase
 
 reservations_bp = Blueprint('reservations', __name__)
 
+@reservations_bp.route('/reservations/<user_id>', methods=['GET'])
+def get_reservations(user_id):
+    # in sql this would be: SELECT * FROM reservations WHERE user_id = {user_id}
+    response = supabase.table("reservations").select("*").eq("user_id", user_id).execute()
+    return jsonify(response.data), 200
+
 @reservations_bp.route('/reservations', methods=['POST'])
 def book_spot():
     data = request.json
