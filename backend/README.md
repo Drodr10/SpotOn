@@ -50,6 +50,10 @@ Base URL: `http://localhost:5000/api`
 - **Description**: Creates a booking for a spot.
 - **Body**: `{ listing_id, renter_id, start_time, end_time, total_price }`
 
+### `GET /reservations/<user_id>`
+
+- **Description**: Returns all past reservations made by a specific user
+- **Response**:  `200 OK` with reservation data
 ---
 
 ## Messaging
