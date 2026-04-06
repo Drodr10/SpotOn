@@ -160,6 +160,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
             />
           </TouchableOpacity>
         </View>
+        <Text style={styles.authError}>{errorMessage}</Text>
       </View>
     );
   //Rendering if user is signing up for the first time
