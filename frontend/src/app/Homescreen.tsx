@@ -13,12 +13,13 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   Image,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Dimensions,
 } from 'react-native';
@@ -65,6 +66,15 @@ export default function Homescreen() {
   //Load logged in user data from supabase.
   const [claims, setClaims] = useState<JwtPayload | null>(null);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey((k) => k + 1);
+    // Small delay so the spinner is visible
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getClaims().then(async (resp)  => {
@@ -107,6 +117,9 @@ export default function Homescreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
 
           {/* ── 1. Header Row ─────────────────────────────────────────────── */}
@@ -130,7 +143,7 @@ export default function Homescreen() {
 
           {/* ── 3. Suggestions List ───────────────────────────────────────── */}
           <View style={styles.section}>
-            <SuggestionsList />
+            <SuggestionsList refreshKey={refreshKey} />
           </View>
 
           {/* ── 4. Section Label: "Your Previous Spots" ───────────────────── */}

@@ -1,42 +1,104 @@
 /**
- * SuggestionsList — Figma: "vertical list view"
+ * SuggestionsList — Tile grid of all active listings.
  *
- * Renders a short, non-scrollable vertical list of destination suggestions
- * below the SearchBar on HomeScreen. Uses .map() instead of FlatList so
- * it can safely sit inside a parent ScrollView without nesting warnings.
- * TODO: Replace with real backend suggestions.
+ * Fetches listings from Supabase and subscribes to realtime changes
+ * so new/updated/deleted listings appear instantly without refresh.
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, StyleSheet, ActivityIndicator, Text, Dimensions } from 'react-native';
 
-// ─── Components ──────────────────────────────────────────────────────────────
-import SuggestionRow, { SuggestionIconType } from '../SuggestionRow';
+// ─── Navigation ──────────────────────────────────────────────────────────────
+import { useFocusEffect } from '@react-navigation/native';
 
-// ─── Data ────────────────────────────────────────────────────────────────────
-// TODO: Replace with real suggestion data from backend
-interface SuggestionItem {
+// ─── Icons ───────────────────────────────────────────────────────────────────
+import { Ionicons } from '@expo/vector-icons';
+
+// ─── Supabase ────────────────────────────────────────────────────────────────
+import { supabase } from '@/src/utils/supabase';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+import { CustomFonts } from '@/src/constants/theme';
+
+const { width: screenWidth } = Dimensions.get('window');
+const TILE_GAP = screenWidth * 0.03;
+const TILE_WIDTH = (screenWidth - screenWidth * 0.1 - TILE_GAP) / 2; // 2 columns
+
+interface Listing {
   id: string;
-  name: string;
-  iconType: SuggestionIconType;
+  address: string;
+  price_per_hour: number;
 }
 
-const SUGGESTIONS_DATA: SuggestionItem[] = [
-  { id: '1', name: 'Reitz Union',             iconType: 'building'   },
-  { id: '2', name: 'Shands Hospital',          iconType: 'emergency'  },
-  { id: '3', name: 'Marston Science Library',  iconType: 'building'   },
-];
-
 // ─── Component ───────────────────────────────────────────────────────────────
-export default function SuggestionsList() {
+interface SuggestionsListProps {
+  refreshKey?: number;
+}
+
+export default function SuggestionsList({ refreshKey }: SuggestionsListProps) {
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchListings = async () => {
+    const { data, error } = await supabase
+      .from('listings')
+      .select('id, address, price_per_hour')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error) console.error('Failed to fetch listings:', error.message);
+    else setListings(data ?? []);
+    setLoading(false);
+  };
+
+  // Re-fetch every time this screen comes into focus (e.g. returning from CreateListing)
+  useFocusEffect(
+    useCallback(() => {
+      fetchListings();
+    }, [])
+  );
+
+  // Also re-fetch when parent bumps refreshKey (pull-to-refresh)
+  useEffect(() => {
+    fetchListings();
+  }, [refreshKey]);
+
+  useEffect(() => {
+    // Subscribe to realtime changes on the listings table
+    const channel = supabase
+      .channel('listings-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'listings' },
+        () => {
+          fetchListings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  if (loading) {
+    return <ActivityIndicator style={{ marginVertical: 16 }} />;
+  }
+
+  if (listings.length === 0) {
+    return (
+      <Text style={styles.emptyText}>No listings yet — be the first to add a spot!</Text>
+    );
+  }
+
   return (
-    <View>
-      {SUGGESTIONS_DATA.map((item, index) => (
-        <View key={item.id}>
-          {/* Hairline divider above every row except the first */}
-          {index > 0 && <View style={styles.divider} />}
-          <SuggestionRow name={item.name} iconType={item.iconType} />
+    <View style={styles.grid}>
+      {listings.map((item) => (
+        <View key={item.id} style={styles.tile}>
+          <Ionicons name="location-sharp" size={24} color="#4A90D9" style={styles.tileIcon} />
+          <Text style={styles.tileAddress} numberOfLines={2}>{item.address}</Text>
+          <Text style={styles.tilePrice}>${item.price_per_hour}/hr</Text>
         </View>
       ))}
     </View>
@@ -45,9 +107,42 @@ export default function SuggestionsList() {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.12)',
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: TILE_GAP,
+  },
+  tile: {
+    width: TILE_WIDTH,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: screenWidth * 0.035,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tileIcon: {
+    marginBottom: 8,
+  },
+  tileAddress: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 14,
+    color: '#000',
+    marginBottom: 6,
+  },
+  tilePrice: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: 'rgba(0,0,0,0.55)',
+  },
+  emptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 14,
+    color: 'rgba(0,0,0,0.45)',
+    textAlign: 'center',
+    marginVertical: 16,
   },
 });
 
