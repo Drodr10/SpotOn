@@ -49,6 +49,7 @@ export default function QuickSearch() {
   const [searchText, setSearchText] = useState('');
   const [firstName, setFirstName] = useState('');
   const [region, setRegion] = useState(GAINESVILLE_REGION);
+  const [pressedCoord, setPressedCoord] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const keyboardOffset = useRef(new Animated.Value(0)).current;
   const flashOpacity = useRef(new Animated.Value(0)).current;
@@ -115,8 +116,13 @@ export default function QuickSearch() {
   const handleSubmit = () => {
     const trimmed = searchText.trim();
     if (!trimmed) return;
-    router.push({ pathname: '/search', params: { query: trimmed } });
+    const coord = pressedCoord ?? region;
+    router.push({
+      pathname: '/search',
+      params: { query: trimmed, lat: String(coord.latitude), lng: String(coord.longitude) },
+    });
     setSearchText('');
+    setPressedCoord(null);
   };
 
   // Tapping or panning the map dismisses the keyboard
@@ -134,6 +140,9 @@ export default function QuickSearch() {
       duration: 500,
       useNativeDriver: true,
     }).start();
+
+    // Store the pressed coordinate for use in handleSubmit
+    setPressedCoord({ latitude, longitude });
 
     // Reverse geocode
     try {
