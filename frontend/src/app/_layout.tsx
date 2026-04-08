@@ -31,6 +31,7 @@ export default function RootLayout() {
         <Stack.Screen name="Homescreen" />
         <Stack.Screen name="search" />
         <Stack.Screen name="CreateListing" />
+        <Stack.Screen name="CreateListing2" />
       </Stack>
       <StatusBar style="auto" />
     </View>
