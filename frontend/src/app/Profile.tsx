@@ -119,7 +119,7 @@ export default function ProfilePage () {
     }
 
     const authUpdate: { email?: string; data?: { full_name?: string } } = {};
-    const profileUpdate: { full_name?: string; email?: string } = {};
+    const profileUpdate: { full_name?: string; } = {};
 
     if (nameChanged) {
       authUpdate.data = { full_name: name };
@@ -127,10 +127,8 @@ export default function ProfilePage () {
     }
     if (emailChanged) {
       authUpdate.email = email;
-      profileUpdate.email = email;
     }
 
-    // --- Execute Updates ---
     if (Object.keys(authUpdate).length > 0) {
       const { error: authError } = await supabase.auth.updateUser(authUpdate);
       if (authError) {
@@ -157,7 +155,7 @@ export default function ProfilePage () {
 
     if (emailChanged) {
       setSuccessMessage(
-        'Changes saved! Please check your new email address to confirm the change.'
+        'Please check your new email address to confirm the change.'
       );
       if (nameChanged) {
         setUser({ ...user, full_name: name });
