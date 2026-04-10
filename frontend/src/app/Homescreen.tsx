@@ -162,7 +162,7 @@ export default function Homescreen() {
         {/* ── 6. Add Listing FAB ────────────────────────────────────────── */}
         {/* Absolutely positioned over all content, bottom-right */}
         <AddListingFAB
-          onPress={() => router.push('./CreateListing' as any)}
+          onPress={() => router.push('./CreateListing2' as any)}
         />
       </View>
     </SafeAreaView>

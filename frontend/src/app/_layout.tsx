@@ -27,8 +27,11 @@ export default function RootLayout() {
     <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="QuickSearch" />
         <Stack.Screen name="Homescreen" />
+        <Stack.Screen name="search" />
         <Stack.Screen name="CreateListing" />
+        <Stack.Screen name="CreateListing2" />
       </Stack>
       <StatusBar style="auto" />
     </View>

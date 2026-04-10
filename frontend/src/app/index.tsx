@@ -15,7 +15,7 @@ export default function Index() {
   // Checks for existing session on app launch and navigates to Homescreen if found
   supabase.auth.getClaims().then(({ data }) => {
     if (data) {
-      router.replace('/Homescreen');
+      router.replace('/QuickSearch');
     }
   });
 
