@@ -46,11 +46,16 @@ const PREVIOUS_SPOTS_DATA: SpotItem[] = [
   },
 ];
 
+//adding for reusability across components
+type SpotsListProp = {
+  spots: SpotItem[] | null;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
-export default function PreviousSpotsList() {
+export default function PreviousSpotsList({ spots }: SpotsListProp) {
   return (
     <FlatList
-      data={PREVIOUS_SPOTS_DATA}
+      data={spots ? spots : PREVIOUS_SPOTS_DATA}
       keyExtractor={(item) => item.id}
       horizontal
       showsHorizontalScrollIndicator={false}
