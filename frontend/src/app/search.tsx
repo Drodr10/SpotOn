@@ -39,6 +39,11 @@ import { CustomFonts, Palette } from '@/src/constants/theme';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset  from '@/assets/images/cabin.png';
 
+import { StripeProvider } from "@stripe/stripe-react-native";
+import { stripe } from "../utils/stripe"
+
+import PaymentCard from "@/src/components/PaymentCard"
+
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -127,6 +132,16 @@ export default function SearchScreen() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hours, setHours] = useState<number>(1);
+  const [publishableKey, setPublishableKey] = useState<string>("");
+
+  const fetchPublishableKey = async () => {
+        const key = await stripe.getKey();
+        if (key)
+            setPublishableKey(key);
+        else
+            console.log("Error fetching publishable key");
+  }
 
   const initialRegion = {
     latitude: userLat,
@@ -170,6 +185,9 @@ export default function SearchScreen() {
       setLoading(false);
     })();
   }, []);
+  useEffect(() => {
+    fetchPublishableKey();
+  });
 
   const handleCardPress = (listing: Listing) => {
     setSelectedId(listing.id);
@@ -185,6 +203,7 @@ export default function SearchScreen() {
   };
 
   return (
+    <StripeProvider publishableKey={publishableKey} merchantIdentifier="merchant.identifier">
     <View style={styles.screenContainer}>
       <StatusBar style="dark" />
 
@@ -246,11 +265,43 @@ export default function SearchScreen() {
             data={listings}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <NearbyLocationCard
-                item={item}
-                selected={selectedId === item.id}
-                onPress={() => handleCardPress(item)}
-              />
+              <>
+                <NearbyLocationCard
+                  item={item}
+                  selected={selectedId === item.id}
+                  onPress={() => handleCardPress(item)}
+                />
+                {selectedId && selectedId === item.id ? 
+                <View style={styles.priceOverview}>
+                  <View>
+                    <Text style={styles.durationCardText}>Duration (Hours)</Text>
+                    <View style={styles.durationIncrementerBody}>
+                      <TouchableOpacity onPress={() => {hours > 1 ? setHours(hours - 1) : null}}>
+                        <Text style={styles.durationCardIncrementerText}>-</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.durationCardIncrementerText}>{hours}</Text>
+                      <TouchableOpacity onPress={() => setHours(hours + 1)}>
+                        <Text style={styles.durationCardIncrementerText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View>
+                      <Text style={styles.durationCardText}>Total:</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.totalText}>${Math.round(item.price_per_hour * 100) / 100} x {hours}</Text>
+                      <Text style={styles.totalSumText}>
+                        ${item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100} with tax
+                      </Text>
+                    </View>
+                  </View>
+                  <PaymentCard 
+                    listingId={item.id} 
+                    price={item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100}
+                    hours={hours}
+                  />
+                </View>: 
+                null}
+              </>
             )}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
@@ -260,6 +311,7 @@ export default function SearchScreen() {
 
       </View>
     </View>
+    </StripeProvider>
   );
 }
 
@@ -337,6 +389,38 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: screenHeight * 0.08,
   },
+  priceOverview: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  durationCardText:{
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  durationIncrementerBody:{
+    flex: 1,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+    marginBottom: 8,
+    marginRight: 32,
+    marginLeft: 32,
+  },
+  durationCardIncrementerText: {
+    fontSize: 48,
+    fontWeight: "bold",
+  },
+  totalText: {
+    fontSize: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  totalSumText: {
+    fontSize: 24,
+    marginBottom: 8,
+  }
 });
 
 // ─── Card Styles ──────────────────────────────────────────────────────────────
