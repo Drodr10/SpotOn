@@ -44,6 +44,7 @@ import logoAsset from '@/assets/images/spotonlogo.png';
 // ─── Auth & Supabase ───────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
 import { JwtPayload } from '@supabase/supabase-js';
+import { api } from "../utils/api"
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -61,6 +62,17 @@ type ProfileData = {
   created_at: string;
 }
 
+type SpotsListProp = {
+  listingData: {
+    id: string;
+    owner_id: string;
+    address: string;
+    price_per_hour: number;
+    photo_url: string;
+  },
+  end_time: Date;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Homescreen() {
 
@@ -69,6 +81,8 @@ export default function Homescreen() {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const [pastReservationData, setPastReservationData] = useState<SpotsListProp[] | null>(null);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -96,6 +110,14 @@ export default function Homescreen() {
       setProfileData(profileData);
     });
   }, []);
+
+  useEffect(() =>{
+    if (!claims) return;
+    const fetchPastReservations = async () => {
+      setPastReservationData(await api.getReservations(claims.sub));
+    };
+    fetchPastReservations();
+  }, [claims]);
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -155,7 +177,7 @@ export default function Homescreen() {
           {/* ── 5. Previous Spots List ────────────────────────────────────── */}
           {/* Sits directly below the label and scrolls with the page */}
           <View style={styles.previousSpotsContainer}>
-            <PreviousSpotsList spots={null}/>
+            <PreviousSpotsList spots={pastReservationData}/>
           </View>
 
         </ScrollView>

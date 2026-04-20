@@ -24,10 +24,15 @@ const reserveSpot = async (listing_id: string, price: number, renter_id: string,
     });
 }
 
-const getReservations = async (userId: string) => {
+const getActiveReservation = async (userId: string) => {
     console.log("Fetching active reservation...")
     const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`);
     const data = await resp.json();
+
+    if (!resp.ok) {
+        console.log("Failed to fetch active reservation.");
+        return null;
+    }
     
     for (const reservation of data) {
         const endTime = new Date(reservation.end_time);
@@ -46,4 +51,26 @@ const getReservations = async (userId: string) => {
     return null;
 }
 
-export const api = { reserveSpot, getReservations}
+const getReservations = async (userId: string) => {
+    console.log("Fetching all user  reservations...")
+    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`);
+    const data = await resp.json();
+    if (!resp.ok)
+        return null;
+    
+    const listings = [];
+
+    for (const reservation of data) {
+        const { data: listingData, error } = await supabase.from("listings").select("*").eq("id", reservation.listing_id).single();
+        if (error) {
+            console.log(error)
+            return null;
+        }
+        listings.push({ listingData, end_time: new Date(reservation.end_time) });
+    }
+    
+    console.log(data);
+    return listings;
+}
+
+export const api = { reserveSpot, getActiveReservation, getReservations }

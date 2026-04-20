@@ -28,13 +28,15 @@ type ActiveReservation = {
 }
 
 export default function CurrentListingCard({ userId }: CurrentListingCardProps) {
-    const [activeReservation, setActiveReservation] = useState<ActiveReservation | null>(null)
-    const fetchReservation = async () => {setActiveReservation(await api.getReservations(userId))}
-    const [timeString, setTimeString] = useState<string>("")
+    const [activeReservation, setActiveReservation] = useState<ActiveReservation | null>(null);
+    const fetchReservation = async () => {setActiveReservation(await api.getActiveReservation(userId))};
+    const [loading, setLoading] = useState<boolean>(true);
+    const [timeString, setTimeString] = useState<string>("");
 
 
     useEffect(() => {
         fetchReservation();
+        setLoading(false);
     }, []);
     useEffect(() => {
         if (!activeReservation) return;
@@ -65,6 +67,7 @@ export default function CurrentListingCard({ userId }: CurrentListingCardProps) 
         return () => clearInterval(intervalId);
     }, [activeReservation])
 
+    if (loading) return (<View style={styles.container}><Text style={styles.headerText}>Loading...</Text></View>)
 
     return(
     <View style={styles.container}>
