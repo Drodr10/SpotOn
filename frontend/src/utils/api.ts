@@ -24,4 +24,26 @@ const reserveSpot = async (listing_id: string, price: number, renter_id: string,
     });
 }
 
-export const api = { reserveSpot }
+const getReservations = async (userId: string) => {
+    console.log("Fetching active reservation...")
+    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`);
+    const data = await resp.json();
+    
+    for (const reservation of data) {
+        const endTime = new Date(reservation.end_time);
+        console.log(`Reservation ${reservation.id} ends at ${endTime}, now is ${new Date()}`)
+
+        if (new Date() < endTime) {
+            const { data: listingData, error } = await supabase.from("listings").select("*").eq("id", reservation.listing_id).single();
+            if (error) {
+                console.log(error)
+                return null;
+            }
+
+            return { listingData, endTime };
+        }
+    }
+    return null;
+}
+
+export const api = { reserveSpot, getReservations}

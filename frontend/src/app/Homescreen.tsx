@@ -33,6 +33,7 @@ import SearchBar from '@/src/components/HomescreenComponents/SearchBar';
 import SuggestionsList from '@/src/components/HomescreenComponents/SuggestionsList';
 import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList';
 import AddListingFAB from '@/src/components/HomescreenComponents/AddListingFAB';
+import CurrentListingCard from '@/src/components/HomescreenComponents/currentListingCard';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
@@ -139,10 +140,11 @@ export default function Homescreen() {
           <View style={styles.section}>
             <SearchBar />
           </View>
-
-          {/* ── 3. Suggestions List ───────────────────────────────────────── */}
+          
           <View style={styles.section}>
-            <SuggestionsList refreshKey={refreshKey} />
+            { claims ? 
+            <CurrentListingCard userId={claims!.sub}/>
+          : <Text>Loading...</Text>}
           </View>
 
           {/* ── 4. Section Label: "Your Previous Spots" ───────────────────── */}
