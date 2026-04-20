@@ -30,6 +30,7 @@ export default function PaymentCard ({ listingId, price, hours } : PaymentProps)
     const [claims, setClaims] = useState<JwtPayload>();
     
     const initializePaymentSheet = async () => {
+        setLoading(true);
         const {
             paymentIntent,
             customerSessionClientSecret,
@@ -76,7 +77,8 @@ export default function PaymentCard ({ listingId, price, hours } : PaymentProps)
             await initializePaymentSheet();
         };
         setupPayment();
-    }, []);
+    }, [price, hours]);
+    
     useEffect(() => {
         supabase.auth.getClaims().then(async (resp) => {
         const {data, error} = resp;
