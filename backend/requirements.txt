@@ -4,3 +4,4 @@ python-dotenv
 supabase
 requests
 gunicorn
+stripe>=5.0.0
