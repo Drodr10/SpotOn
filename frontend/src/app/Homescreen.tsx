@@ -77,25 +77,24 @@ export default function Homescreen() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getClaims().then(async (resp)  => {
-      const { data, error } = resp;
+    supabase.auth.getClaims().then(async (resp) => {
+      const {data, error} = resp;
 
-        if (data) {
-        setClaims(data.claims);
+      if (error || !data) {
+        console.log("Error in finding matching user ID: " + (error ? error : "Data error"));
+        return;
+      }
+      setClaims(data.claims);
+      const { data: profileData, error: profileError } =  await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
 
-        const {data: profileData, error: profileError} = await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
+      if (profileError || !profileData) {
+        console.log("Error in retriving user profile data: " + (profileError ? profileError : "Data error"));
+        return;
+      }
 
-        if (profileData) {
-          setProfileData(profileData);
-        }
-        else
-          console.log("Error getting profile data: " + profileError)
-
-        } 
-        else
-          console.log("Error getting claims: " + error )
-      });
-    }, []);
+      setProfileData(profileData);
+    });
+  }, []);
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -154,7 +153,7 @@ export default function Homescreen() {
           {/* ── 5. Previous Spots List ────────────────────────────────────── */}
           {/* Sits directly below the label and scrolls with the page */}
           <View style={styles.previousSpotsContainer}>
-            <PreviousSpotsList />
+            <PreviousSpotsList spots={null}/>
           </View>
 
         </ScrollView>
@@ -162,7 +161,7 @@ export default function Homescreen() {
         {/* ── 6. Add Listing FAB ────────────────────────────────────────── */}
         {/* Absolutely positioned over all content, bottom-right */}
         <AddListingFAB
-          onPress={() => router.push('./CreateListing' as any)}
+          onPress={() => router.push('./CreateListing2' as any)}
         />
       </View>
     </SafeAreaView>
