@@ -32,6 +32,8 @@ export default function RootLayout() {
         <Stack.Screen name="search" />
         <Stack.Screen name="CreateListing" />
         <Stack.Screen name="CreateListing2" />
+        <Stack.Screen name="Messages" />
+        <Stack.Screen name="Chat" />
       </Stack>
       <StatusBar style="auto" />
     </View>
