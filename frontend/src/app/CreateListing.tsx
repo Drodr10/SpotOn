@@ -10,7 +10,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,9 @@ import MapView, { Marker, MapPressEvent } from 'react-native-maps';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+
+// ─── Auth & Supabase ─────────────────────────────────────────────────────────
+import { supabase } from '../utils/supabase';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -70,6 +73,15 @@ export default function CreateListing() {
   const [pricePerHour, setPricePerHour] = useState('');
   const [pin, setPin] = useState<{ latitude: number; longitude: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        setOwnerId(data.session.user.id);
+      }
+    });
+  }, []);
 
   /** Drop a pin wherever the user taps on the map */
   const handleMapPress = (e: MapPressEvent) => {
@@ -95,28 +107,23 @@ export default function CreateListing() {
       return;
     }
 
-    // ── Submit to backend ─────────────────────────────────────────────────
+    if (!ownerId) {
+      Alert.alert('Not Logged In', 'Please log in before creating a listing.');
+      return;
+    }
+
+    // ── Submit to Supabase ────────────────────────────────────────────────
     setSubmitting(true);
     try {
-      // TODO: Replace with actual owner_id from authenticated user session
-      const body = {
+      const { error } = await supabase.from('listings').insert({
+        owner_id: ownerId,
         address: trimmedAddress,
         price_per_hour: price,
         latitude: pin.latitude,
         longitude: pin.longitude,
-      };
-
-      // TODO: Point to actual backend URL (env variable)
-      const res = await fetch('http://localhost:5000/api/listings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error ?? 'Failed to create listing');
-      }
+      if (error) throw new Error(error.message);
 
       Alert.alert('Success', 'Your parking spot has been listed!', [
         { text: 'OK', onPress: () => router.back() },

@@ -7,7 +7,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React from 'react';
+import { useState, useEffect} from 'react';
 import { FlatList, View, StyleSheet, Dimensions } from 'react-native';
 
 // ─── Components ──────────────────────────────────────────────────────────────
@@ -46,23 +46,42 @@ const PREVIOUS_SPOTS_DATA: SpotItem[] = [
   },
 ];
 
+//adding for reusability across components
+type SpotsListProp = {
+  listingData: {
+    id: string;
+    owner_id: string;
+    address: string;
+    price_per_hour: number;
+    photo_url: string;
+  },
+  end_time: Date;
+}
+
+type PreviousSpotsListProps = {
+  spots: SpotsListProp[] | null;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
-export default function PreviousSpotsList() {
+export default function PreviousSpotsList({ spots }: PreviousSpotsListProps) {
+
+  if (!spots) return null;
+
   return (
     <FlatList
-      data={PREVIOUS_SPOTS_DATA}
-      keyExtractor={(item) => item.id}
+      data={spots}
+      keyExtractor={(item) => item.listingData.id}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.listContent}
       ItemSeparatorComponent={() => <View style={styles.separator} />}
       renderItem={({ item }) => (
         <PreviousSpotCard
-          name={item.name}
-          price={item.price}
-          date={item.date}
-          duration={item.duration}
-          mapImage={item.mapImage}
+          name={item.listingData.address}
+          price={item.listingData.price_per_hour.toString()}
+          date={item.end_time.toString()}
+          duration={item.end_time.toString()}
+          mapImage={mapPlaceholder}
         />
       )}
     />

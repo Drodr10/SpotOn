@@ -6,8 +6,7 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React from 'react'
-
+import React from 'react';
 import { View, Text, Image, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 
@@ -15,7 +14,7 @@ import { router } from 'expo-router';
 import { CustomFonts } from '@/src/constants/theme';
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
-import profileIconAsset from '@/assets/images/temprofileicon.png';
+import homeIcon from '@/assets/images/homeicon.png';
 
 // ─── Components ──────────────────────────────────────────────────────────────────
 import LogoutButton from '@/src/components/logout-button';
@@ -23,27 +22,22 @@ import LogoutButton from '@/src/components/logout-button';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
-const AVATAR_SIZE = screenWidth * 0.075;   // ~30px on 390px screen
-const FONT_SIZE   = screenWidth * 0.035;   // ~14px
+const FONT_SIZE   = screenWidth * 0.035;
 const H_PAD       = screenWidth * 0.03;
 const V_PAD       = screenWidth * 0.015;
 const GAP         = screenWidth * 0.02;
 
 // ─── Props ───────────────────────────────────────────────────────────────────
-interface ProfilePillProps {
-  username: string;
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
-export default function ProfilePill({ username }: ProfilePillProps) {
+export default function HomePill() {
   return (
     <View style={styles.pill}>
       {/* Circular avatar */}
-      <TouchableOpacity onPress={() => router.push('./Profile')}>
-        <Image source={profileIconAsset} style={styles.avatar} />
-        </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.push('./Homescreen')}>
+        <Image source={homeIcon} style={styles.icon} />
+      </TouchableOpacity>
       {/* Username label */}
-      <Text style={styles.username}>{username}</Text>
+      <Text style={styles.username}>Home</Text>
       {/* Logout button */}
       <LogoutButton />
     </View>
@@ -62,10 +56,9 @@ const styles = StyleSheet.create({
     gap: GAP,
     alignSelf: 'flex-start',
   },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 999,
+  icon: {
+    width: 30,
+    height: 30,
   },
   username: {
     fontFamily: CustomFonts.SwitzerLight,
@@ -73,4 +66,3 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
-

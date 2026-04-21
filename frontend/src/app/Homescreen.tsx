@@ -13,12 +13,13 @@
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   Image,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Dimensions,
 } from 'react-native';
@@ -32,6 +33,7 @@ import SearchBar from '@/src/components/HomescreenComponents/SearchBar';
 import SuggestionsList from '@/src/components/HomescreenComponents/SuggestionsList';
 import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList';
 import AddListingFAB from '@/src/components/HomescreenComponents/AddListingFAB';
+import CurrentListingCard from '@/src/components/HomescreenComponents/currentListingCard';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
@@ -42,6 +44,7 @@ import logoAsset from '@/assets/images/spotonlogo.png';
 // ─── Auth & Supabase ───────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
 import { JwtPayload } from '@supabase/supabase-js';
+import { api } from "../utils/api"
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -59,33 +62,62 @@ type ProfileData = {
   created_at: string;
 }
 
+type SpotsListProp = {
+  listingData: {
+    id: string;
+    owner_id: string;
+    address: string;
+    price_per_hour: number;
+    photo_url: string;
+  },
+  end_time: Date;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Homescreen() {
 
   //Load logged in user data from supabase.
   const [claims, setClaims] = useState<JwtPayload | null>(null);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [pastReservationData, setPastReservationData] = useState<SpotsListProp[] | null>(null);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey((k) => k + 1);
+    // Small delay so the spinner is visible
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   useEffect(() => {
-    supabase.auth.getClaims().then(async (resp)  => {
-      const { data, error } = resp;
+    supabase.auth.getClaims().then(async (resp) => {
+      const {data, error} = resp;
 
-        if (data) {
-        setClaims(data.claims);
+      if (error || !data) {
+        console.log("Error in finding matching user ID: " + (error ? error : "Data error"));
+        return;
+      }
+      setClaims(data.claims);
+      const { data: profileData, error: profileError } =  await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
 
-        const {data: profileData, error: profileError} = await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
+      if (profileError || !profileData) {
+        console.log("Error in retriving user profile data: " + (profileError ? profileError : "Data error"));
+        return;
+      }
 
-        if (profileData) {
-          setProfileData(profileData);
-        }
-        else
-          console.log("Error getting profile data: " + profileError)
+      setProfileData(profileData);
+    });
+  }, []);
 
-        } 
-        else
-          console.log("Error getting claims: " + error )
-      });
-    }, []);
+  useEffect(() =>{
+    if (!claims) return;
+    const fetchPastReservations = async () => {
+      setPastReservationData(await api.getReservations(claims.sub));
+    };
+    fetchPastReservations();
+  }, [claims]);
 
   return (
     // SafeAreaView keeps content away from notch/status bar/home indicator
@@ -107,6 +139,9 @@ export default function Homescreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         >
 
           {/* ── 1. Header Row ─────────────────────────────────────────────── */}
@@ -127,10 +162,11 @@ export default function Homescreen() {
           <View style={styles.section}>
             <SearchBar />
           </View>
-
-          {/* ── 3. Suggestions List ───────────────────────────────────────── */}
+          
           <View style={styles.section}>
-            <SuggestionsList />
+            { claims ? 
+            <CurrentListingCard userId={claims!.sub}/>
+          : <Text>Loading...</Text>}
           </View>
 
           {/* ── 4. Section Label: "Your Previous Spots" ───────────────────── */}
@@ -141,7 +177,7 @@ export default function Homescreen() {
           {/* ── 5. Previous Spots List ────────────────────────────────────── */}
           {/* Sits directly below the label and scrolls with the page */}
           <View style={styles.previousSpotsContainer}>
-            <PreviousSpotsList />
+            <PreviousSpotsList spots={pastReservationData}/>
           </View>
 
         </ScrollView>
@@ -149,7 +185,7 @@ export default function Homescreen() {
         {/* ── 6. Add Listing FAB ────────────────────────────────────────── */}
         {/* Absolutely positioned over all content, bottom-right */}
         <AddListingFAB
-          onPress={() => router.push('./CreateListing' as any)}
+          onPress={() => router.push('./CreateListing2' as any)}
         />
       </View>
     </SafeAreaView>

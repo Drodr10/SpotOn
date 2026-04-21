@@ -2,24 +2,11 @@
  * search.tsx — Figma: "Search / Map Screen"
  *
  * Full-screen map view with a semi-transparent "Nearby Locations" bottom panel.
- *
- * Layout:
- *   1. MapView — fills the entire screen as a background layer
- *   2. Nearby Locations panel — absolute overlay anchored to the bottom (~53% height)
- *      ├── Header row: SpotOn logo + "SpotOn" text
- *      ├── "Location: [query]" subtitle
- *      └── Scrollable FlatList of nearby parking listing cards
- *
- * Navigation:
- *   Arrives from SearchBar via:
- *     router.push({ pathname: '/search', params: { query: '...' } })
- *
- * Install dependency (if not already installed):
- *   npx expo install react-native-maps
+ * Queries Supabase for active listings within a 5-mile radius of the user's location.
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -28,6 +15,7 @@ import {
   StyleSheet,
   Dimensions,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -41,177 +29,289 @@ import MapView, { Marker } from 'react-native-maps';
 // ─── Icons ───────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
 
+// ─── Supabase ─────────────────────────────────────────────────────────────────
+import { supabase } from '../utils/supabase';
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts, Palette } from '@/src/constants/theme';
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset  from '@/assets/images/cabin.png';
-import clockIconAsset  from '@/assets/images/clock.png';
+
+import { StripeProvider } from "@stripe/stripe-react-native";
+import { stripe } from "../utils/stripe"
+
+import PaymentCard from "@/src/components/PaymentCard"
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-const H_PAD        = screenWidth * 0.045;   // horizontal padding inside the panel
-const V_PAD        = screenWidth * 0.04;   // vertical padding inside the panel
-const PANEL_HEIGHT = screenHeight * 0.56;   // bottom panel takes ~53% of screen
+const H_PAD        = screenWidth * 0.045;
+const V_PAD        = screenWidth * 0.04;
+const PANEL_HEIGHT = screenHeight * 0.56;
 
-const LOGO_SIZE    = screenWidth * 0.09;    // SpotOn logo in panel header
-const ICON_SIZE    = screenWidth * 0.045;   // cabin / clock icon in cards
-const BACK_SIZE    = screenWidth * 0.06;    // back-button icon
+const LOGO_SIZE    = screenWidth * 0.09;
+const BACK_SIZE    = screenWidth * 0.06;
+const ICON_SIZE    = screenWidth * 0.045;
 
-const FONT_TITLE   = screenWidth * 0.042;   // card location title
-const FONT_LABEL   = screenWidth * 0.032;   // card details text
-const FONT_HEADER  = screenWidth * 0.05;    // "SpotOn" header text
-const FONT_QUERY   = screenWidth * 0.031;   // "Location: ..." subtitle
+const FONT_TITLE   = screenWidth * 0.042;
+const FONT_LABEL   = screenWidth * 0.032;
+const FONT_HEADER  = screenWidth * 0.05;
+const FONT_QUERY   = screenWidth * 0.031;
+const FONT_DIST    = screenWidth * 0.028;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-interface NearbyLocation {
+interface Listing {
   id: string;
-  title: string;
-  housingType: string;
-  timing: string;
-  price: string;
+  owner_id: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  price_per_hour: number;
+  is_active: boolean;
+  photo_url: string | null;
+  created_at: string;
+  distance: number; // computed client-side (miles)
 }
 
-// ─── Placeholder Data ─────────────────────────────────────────────────────────
-// TODO: Replace with real data from backend search API.
-// These listings should come from a nearby-locations query (0–5 mile radius)
-// using the geocoded coordinates of the searched query.
-const NEARBY_LOCATIONS_DATA: NearbyLocation[] = [
-  { id: '1', title: 'Univ. Avenue',   housingType: 'Residential', timing: '3 - 7 PM | Wed 15th.',    price: '$3.85 / hr' },
-  { id: '2', title: 'SW 34th Street', housingType: 'Commercial',  timing: '8 AM - 6 PM | Mon-Fri',   price: '$2.50 / hr' },
-  { id: '3', title: 'Archer Road',    housingType: 'Residential', timing: '5 - 10 PM | Thu 16th.',   price: '$4.25 / hr' },
-  { id: '4', title: 'NW 13th Street', housingType: 'Commercial',  timing: '9 AM - 5 PM | Sat 18th.', price: '$1.75 / hr' },
-  { id: '5', title: 'Museum Road',    housingType: 'Residential', timing: '12 - 8 PM | Fri 17th.',   price: '$5.00 / hr' },
-];
+// ─── Haversine helper ─────────────────────────────────────────────────────────
+function getDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
-// ─── Default map region ───────────────────────────────────────────────────────
-// Centered on Gainesville, FL. latitudeDelta / longitudeDelta control zoom level.
-// TODO: Geocode the search query to coordinates and center map on result.
-const DEFAULT_REGION = {
-  latitude: 29.6516,
-  longitude: -82.3248,
-  latitudeDelta: 0.04,
-  longitudeDelta: 0.04,
-};
-
-// Placeholder marker — same as map center until geocoding is implemented.
-// TODO: Replace with geocoded coordinates derived from the search query.
-const MARKER_COORDINATE = {
-  latitude: DEFAULT_REGION.latitude,
-  longitude: DEFAULT_REGION.longitude,
-};
-
-// ─── NearbyLocationCard (inline component) ────────────────────────────────────
-// Figma: "Listing 1 / 2 / ..." cards inside the Nearby Locations panel.
-// Kept inline here to avoid over-extracting for a simple card.
-function NearbyLocationCard({ item }: { item: NearbyLocation }) {
+// ─── NearbyLocationCard ───────────────────────────────────────────────────────
+function NearbyLocationCard({
+  item,
+  selected,
+  onPress,
+}: {
+  item: Listing;
+  selected: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={cardStyles.card}>
-      {/* Location Title — Figma: "Univ. Avenue" */}
-      <Text style={cardStyles.title}>{item.title}</Text>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
+      <View style={[cardStyles.card, selected && cardStyles.cardSelected]}>
+        <Text style={cardStyles.title}>{item.address}</Text>
 
-      {/* ── Details section ──────────────────────────────────────────────── */}
-      <View style={cardStyles.detailsRow}>
-
-        {/* Type Of Housing — Figma: "Type Of Housing" */}
-        <View style={cardStyles.detailItem}>
-          <Image source={cabinIconAsset} style={cardStyles.detailIcon} resizeMode="contain" />
-          <Text style={cardStyles.detailText}>{item.housingType}</Text>
+        <View style={cardStyles.detailsRow}>
+          <View style={cardStyles.detailItem}>
+            <Image source={cabinIconAsset} style={cardStyles.detailIcon} resizeMode="contain" />
+            <Text style={cardStyles.detailText}>Parking Spot</Text>
+          </View>
         </View>
 
-        {/* Timing — Figma: "Timing" */}
-        <View style={cardStyles.detailItem}>
-          <Image source={clockIconAsset} style={cardStyles.detailIcon} resizeMode="contain" />
-          <Text style={cardStyles.detailText}>{item.timing}</Text>
-        </View>
-
+        <Text style={cardStyles.price}>${Number(item.price_per_hour).toFixed(2)} / hr</Text>
+        <Text style={cardStyles.distance}>{item.distance.toFixed(1)} mi away</Text>
       </View>
-
-      {/* Price — Figma: "$3.85 / hr" */}
-      <Text style={cardStyles.price}>{item.price}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 // ─── Main Screen Component ────────────────────────────────────────────────────
 export default function SearchScreen() {
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
 
-  // Read the search query passed from SearchBar via Expo Router params
-  const { query } = useLocalSearchParams<{ query: string }>();
+  const { query, lat: latParam, lng: lngParam } = useLocalSearchParams<{
+    query: string;
+    lat: string;
+    lng: string;
+  }>();
+
+  const userLat = latParam ? parseFloat(latParam) : 29.6516;
+  const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
+
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hours, setHours] = useState<number>(1);
+  const [publishableKey, setPublishableKey] = useState<string>("");
+
+  const fetchPublishableKey = async () => {
+        const key = await stripe.getKey();
+        if (key)
+            setPublishableKey(key);
+        else
+            console.log("Error fetching publishable key");
+  }
+
+  const initialRegion = {
+    latitude: userLat,
+    longitude: userLng,
+    latitudeDelta: 0.04,
+    longitudeDelta: 0.04,
+  };
+
+  // ─── Fetch listings from Supabase ─────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const latDelta = 0.0724;
+      const lngDelta = 0.0724 / Math.cos(userLat * Math.PI / 180);
+
+      const { data, error } = await supabase
+        .from('listings')
+        .select('*')
+        .eq('is_active', true)
+        .gte('latitude', userLat - latDelta)
+        .lte('latitude', userLat + latDelta)
+        .gte('longitude', userLng - lngDelta)
+        .lte('longitude', userLng + lngDelta);
+
+      if (error) {
+        console.error('Supabase listings error:', error);
+        setLoading(false);
+        return;
+      }
+
+      // Client-side exact 5-mile Haversine filter + sort by distance
+      const withDistance: Listing[] = (data ?? [])
+        .map((l: any) => ({
+          ...l,
+          distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
+        }))
+        .filter((l: Listing) => l.distance <= 5)
+        .sort((a: Listing, b: Listing) => a.distance - b.distance);
+
+      setListings(withDistance);
+      setLoading(false);
+    })();
+  }, []);
+  useEffect(() => {
+    fetchPublishableKey();
+  });
+
+  const handleCardPress = (listing: Listing) => {
+    setSelectedId(listing.id);
+    mapRef.current?.animateToRegion(
+      {
+        latitude: listing.latitude,
+        longitude: listing.longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      },
+      500,
+    );
+  };
 
   return (
-    // flex: 1 fills the screen; map and panel are layered inside via position: absolute
+    <StripeProvider publishableKey={publishableKey} merchantIdentifier="merchant.identifier">
     <View style={styles.screenContainer}>
-      {/* Dark status bar icons — light map background */}
       <StatusBar style="dark" />
 
-      {/* ── 1. Mapping System API — Figma: "Mapping System API" ──────────── */}
-      {/*
-        position: 'absolute' + full width/height lets the map sit behind
-        the Nearby Locations panel while still covering the whole screen.
-        mapPadding shifts the visible map center upward so the marker renders
-        in the upper half of the screen, above the Nearby Locations panel.
-      */}
+      {/* ── Map ────────────────────────────────────────────────────────────── */}
       <MapView
+        ref={mapRef}
         style={styles.map}
-        initialRegion={DEFAULT_REGION}
+        initialRegion={initialRegion}
+        showsUserLocation={true}
         mapPadding={{ top: 0, right: 0, bottom: PANEL_HEIGHT, left: 0 }}
       >
-        {/* Placeholder marker — TODO: replace with geocoded query location */}
+        {/* Blue pin at the searched/pressed location */}
         <Marker
-          coordinate={MARKER_COORDINATE}
-          title={query ?? 'Search Result'}
+          coordinate={{ latitude: userLat, longitude: userLng }}
+          title={query ?? 'Searched Location'}
+          pinColor="#007AFF"
         />
+
+        {listings.map((listing) => (
+          <Marker
+            key={listing.id}
+            coordinate={{ latitude: listing.latitude, longitude: listing.longitude }}
+            title={listing.address}
+            pinColor={selectedId === listing.id ? '#007AFF' : '#E02020'}
+            onPress={() => handleCardPress(listing)}
+          />
+        ))}
       </MapView>
 
-      {/* Back button — absolute overlay in the top-left, above the map */}
+      {/* ── Back Button ────────────────────────────────────────────────────── */}
       <SafeAreaView style={styles.backButtonWrapper} edges={['top']}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={BACK_SIZE} color="#000" />
         </TouchableOpacity>
       </SafeAreaView>
 
-      {/* ── 2. Nearby Locations Panel — Figma: "Nearby Locations" ────────── */}
-      {/*
-        Absolutely anchored to the bottom of the screen.
-        Semi-transparent warm gray with rounded top corners.
-        Takes up ~53% of screen height.
-      */}
+      {/* ── Nearby Locations Panel ─────────────────────────────────────────── */}
       <View style={styles.panel}>
 
-        {/* ── Panel Header ────────────────────────────────────────────────── */}
-        {/* Figma: SpotOn logo (left) + "SpotOn" label (right of logo) */}
         <View style={styles.panelHeader}>
-          <Image
-            source={spotonLogoAsset}
-            style={styles.panelLogo}
-            resizeMode="contain"
-          />
+          <Image source={spotonLogoAsset} style={styles.panelLogo} resizeMode="contain" />
           <Text style={styles.panelHeaderText}>SpotOn</Text>
         </View>
 
-        {/* ── Location Searched Text ─────────────────────────────────────── */}
-        {/* Figma: small subtitle showing what the user searched */}
         <Text style={styles.locationQuery} numberOfLines={1}>
           Location: {query ?? '—'}
         </Text>
 
-        {/* ── ListView of Nearby Locations ───────────────────────────────── */}
-        {/* Figma: scrollable list of listing cards */}
-        <FlatList<NearbyLocation>
-          data={NEARBY_LOCATIONS_DATA}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <NearbyLocationCard item={item} />}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={styles.cardSeparator} />}
-        />
+        {loading ? (
+          <ActivityIndicator
+            size="large"
+            color="#000"
+            style={styles.loader}
+          />
+        ) : listings.length === 0 ? (
+          <Text style={styles.emptyText}>No spots found within 5 miles</Text>
+        ) : (
+          <FlatList<Listing>
+            data={listings}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <>
+                <NearbyLocationCard
+                  item={item}
+                  selected={selectedId === item.id}
+                  onPress={() => handleCardPress(item)}
+                />
+                {selectedId && selectedId === item.id ? 
+                <View style={styles.priceOverview}>
+                  <View>
+                    <Text style={styles.durationCardText}>Duration (Hours)</Text>
+                    <View style={styles.durationIncrementerBody}>
+                      <TouchableOpacity onPress={() => {hours > 1 ? setHours(hours - 1) : null}}>
+                        <Text style={styles.durationCardIncrementerText}>-</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.durationCardIncrementerText}>{hours}</Text>
+                      <TouchableOpacity onPress={() => setHours(hours + 1)}>
+                        <Text style={styles.durationCardIncrementerText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View>
+                      <Text style={styles.durationCardText}>Total:</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.totalText}>${Math.round(item.price_per_hour * 100) / 100} x {hours}</Text>
+                      <Text style={styles.totalSumText}>
+                        ${item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100} with tax
+                      </Text>
+                    </View>
+                  </View>
+                  <PaymentCard 
+                    listingId={item.id} 
+                    price={item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100}
+                    hours={hours}
+                  />
+                </View>: 
+                null}
+              </>
+            )}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContent}
+            ItemSeparatorComponent={() => <View style={styles.cardSeparator} />}
+          />
+        )}
 
       </View>
     </View>
+    </StripeProvider>
   );
 }
 
@@ -219,10 +319,8 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
-    backgroundColor: Palette.chalkgrey
+    backgroundColor: Palette.chalkgrey,
   },
-
-  // ── Map ─────────────────────────────────────────────────────────────────────
   map: {
     position: 'absolute',
     top: 0,
@@ -230,8 +328,6 @@ const styles = StyleSheet.create({
     width: screenWidth,
     height: screenHeight,
   },
-
-  // ── Back Button ─────────────────────────────────────────────────────────────
   backButtonWrapper: {
     position: 'absolute',
     top: 0,
@@ -243,8 +339,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     padding: screenWidth * 0.02,
   },
-
-  // ── Nearby Locations Panel ───────────────────────────────────────────────────
   panel: {
     position: 'absolute',
     bottom: 0,
@@ -258,8 +352,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: H_PAD,
     paddingTop: V_PAD,
   },
-
-  // ── Panel Header row ─────────────────────────────────────────────────────────
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -275,27 +367,64 @@ const styles = StyleSheet.create({
     fontSize: FONT_HEADER,
     color: '#000000',
   },
-
-  // ── Location query subtitle ──────────────────────────────────────────────────
   locationQuery: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: FONT_QUERY,
     color: '#000000',
     marginBottom: screenWidth * 0.05,
   },
-
-  // ── FlatList content ─────────────────────────────────────────────────────────
   listContent: {
     paddingBottom: V_PAD,
   },
   cardSeparator: {
     height: screenWidth * 0.025,
   },
+  loader: {
+    marginTop: screenHeight * 0.08,
+  },
+  emptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: FONT_LABEL,
+    color: 'rgba(0,0,0,0.55)',
+    textAlign: 'center',
+    marginTop: screenHeight * 0.08,
+  },
+  priceOverview: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  durationCardText:{
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  durationIncrementerBody:{
+    flex: 1,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+    marginBottom: 8,
+    marginRight: 32,
+    marginLeft: 32,
+  },
+  durationCardIncrementerText: {
+    fontSize: 48,
+    fontWeight: "bold",
+  },
+  totalText: {
+    fontSize: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  totalSumText: {
+    fontSize: 24,
+    marginBottom: 8,
+  }
 });
 
 // ─── Card Styles ──────────────────────────────────────────────────────────────
 const cardStyles = StyleSheet.create({
-  // Figma: listing card — subtle dark transparent bg, black border, rounded corners
   card: {
     backgroundColor: 'rgba(3, 3, 3, 0.14)',
     borderWidth: 1,
@@ -305,23 +434,21 @@ const cardStyles = StyleSheet.create({
     paddingHorizontal: screenWidth * 0.04,
     paddingVertical: screenWidth * 0.03,
   },
-
-  // Location title — Figma: "Univ. Avenue"
+  cardSelected: {
+    borderColor: '#007AFF',
+    borderWidth: 1.5,
+  },
   title: {
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: FONT_TITLE,
     color: '#000000',
     marginBottom: screenWidth * 0.015,
   },
-
-  // Column that stacks Type Of Housing above Timing
   detailsRow: {
     flexDirection: 'column',
     gap: screenWidth * 0.015,
     marginBottom: screenWidth * 0.015,
   },
-
-  // A single icon + text pair (housing type OR timing)
   detailItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -336,11 +463,15 @@ const cardStyles = StyleSheet.create({
     fontSize: FONT_LABEL,
     color: '#000000',
   },
-
-  // Price — Figma: "$3.85 / hr"
   price: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: FONT_LABEL,
     color: '#000000',
+  },
+  distance: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: FONT_DIST,
+    color: 'rgba(0,0,0,0.5)',
+    marginTop: screenWidth * 0.008,
   },
 });

@@ -59,7 +59,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
     }
     console.log("Login successful!");
 
-    router.replace('/Homescreen');
+    router.replace('/QuickSearch');
   };
 
   const handleSignup = async () => { 
@@ -85,7 +85,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
     }
     console.log("Signup successful!");
 
-    router.replace('/Homescreen');
+    router.replace('/QuickSearch');
   };
 
   //Sets displayed error message based on Supabase error message.
@@ -160,6 +160,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
             />
           </TouchableOpacity>
         </View>
+        <Text style={styles.authError}>{errorMessage}</Text>
       </View>
     );
   //Rendering if user is signing up for the first time
