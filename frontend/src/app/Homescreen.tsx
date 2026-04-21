@@ -22,6 +22,7 @@ import {
   RefreshControl,
   StyleSheet,
   Dimensions,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -34,6 +35,9 @@ import SuggestionsList from '@/src/components/HomescreenComponents/SuggestionsLi
 import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList';
 import AddListingFAB from '@/src/components/HomescreenComponents/AddListingFAB';
 import CurrentListingCard from '@/src/components/HomescreenComponents/currentListingCard';
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+import { Ionicons } from '@expo/vector-icons';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
@@ -150,12 +154,22 @@ export default function Homescreen() {
             {/* Profile Pill — Figma: "profile" */}
             <ProfilePill username={profileData ? profileData.full_name : "not logged in" }/>
 
-            {/* SpotOn Logo — Figma: "SpotOn Logo", ~75% opacity */}
-            <Image
-              source={logoAsset}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+            <View style={styles.headerRight}>
+              {/* Messages button */}
+              <TouchableOpacity
+                style={styles.messagesBtn}
+                onPress={() => router.push('./Messages' as any)}
+              >
+                <Ionicons name="chatbubbles-outline" size={LOGO_SIZE * 0.72} color="#000" />
+              </TouchableOpacity>
+
+              {/* SpotOn Logo — Figma: "SpotOn Logo", ~75% opacity */}
+              <Image
+                source={logoAsset}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
           </View>
 
           {/* ── 2. Search Bar ─────────────────────────────────────────────── */}
@@ -215,6 +229,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: screenWidth * 0.02,
     paddingBottom: SECTION_GAP,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: screenWidth * 0.03,
+  },
+  messagesBtn: {
+    padding: screenWidth * 0.01,
   },
   logo: {
     width: LOGO_SIZE,

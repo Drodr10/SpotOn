@@ -16,6 +16,7 @@ import {
   Dimensions,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -99,6 +100,13 @@ function NearbyLocationCard({
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
       <View style={[cardStyles.card, selected && cardStyles.cardSelected]}>
+        {item.photo_url ? (
+          <Image
+            source={{ uri: item.photo_url }}
+            style={cardStyles.photo}
+            resizeMode="cover"
+          />
+        ) : null}
         <Text style={cardStyles.title}>{item.address}</Text>
 
         <View style={cardStyles.detailsRow}>
@@ -134,6 +142,14 @@ export default function SearchScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hours, setHours] = useState<number>(1);
   const [publishableKey, setPublishableKey] = useState<string>("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [messagingId, setMessagingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getClaims().then(({ data }) => {
+      if (data) setCurrentUserId(data.claims.sub);
+    });
+  }, []);
 
   const fetchPublishableKey = async () => {
         const key = await stripe.getKey();
@@ -299,6 +315,58 @@ export default function SearchScreen() {
                     price={item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100}
                     hours={hours}
                   />
+                  {currentUserId && currentUserId !== item.owner_id && (
+                    <TouchableOpacity
+                      style={styles.messageBtn}
+                      disabled={messagingId === item.id}
+                      onPress={async () => {
+                        setMessagingId(item.id);
+                        try {
+                          // Find existing conversation or create one
+                          const { data: existing } = await supabase
+                            .from('conversations')
+                            .select('id')
+                            .eq('renter_id', currentUserId)
+                            .eq('owner_id', item.owner_id)
+                            .maybeSingle();
+
+                          let convId: string;
+                          if (existing) {
+                            convId = existing.id;
+                          } else {
+                            const { data: created, error } = await supabase
+                              .from('conversations')
+                              .insert({ renter_id: currentUserId, owner_id: item.owner_id })
+                              .select('id')
+                              .single();
+                            if (error || !created) {
+                              Alert.alert('Error', 'Could not start conversation');
+                              return;
+                            }
+                            convId = created.id;
+                          }
+
+                          const { data: ownerProfile } = await supabase
+                            .from('profiles')
+                            .select('full_name')
+                            .eq('id', item.owner_id)
+                            .single();
+
+                          router.push({
+                            pathname: './Chat',
+                            params: { conversationId: convId, otherUserName: ownerProfile?.full_name ?? 'Owner' },
+                          } as any);
+                        } finally {
+                          setMessagingId(null);
+                        }
+                      }}
+                    >
+                      <Ionicons name="chatbubble-outline" size={screenWidth * 0.045} color="#fff" />
+                      <Text style={styles.messageBtnText}>
+                        {messagingId === item.id ? 'Opening...' : 'Message Owner'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>: 
                 null}
               </>
@@ -420,7 +488,23 @@ const styles = StyleSheet.create({
   totalSumText: {
     fontSize: 24,
     marginBottom: 8,
-  }
+  },
+  messageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    paddingVertical: screenWidth * 0.03,
+    paddingHorizontal: screenWidth * 0.04,
+    marginTop: 12,
+    gap: 8,
+  },
+  messageBtnText: {
+    color: '#fff',
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: screenWidth * 0.038,
+  },
 });
 
 // ─── Card Styles ──────────────────────────────────────────────────────────────
@@ -462,6 +546,12 @@ const cardStyles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: FONT_LABEL,
     color: '#000000',
+  },
+  photo: {
+    width: '100%',
+    height: screenWidth * 0.35,
+    borderRadius: 8,
+    marginBottom: screenWidth * 0.025,
   },
   price: {
     fontFamily: CustomFonts.SwitzerLight,
