@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMotionUsageDescription": "SpotOn uses device motion for a subtle 3D car preview that responds when you move your phone."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -39,7 +42,8 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
