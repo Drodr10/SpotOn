@@ -62,3 +62,16 @@ Base URL: `http://localhost:5000/api`
 
 - **Description**: Fetches all messages for a specific chat.
 - **Response**: Sorted by `sent_at` ascending.
+
+
+## Stripe
+
+### 'GET /stripe/key
+
+- **Description**: Returns the stripe publishable key that is used in in the frontend stripe integration.
+- **Response**: `{ publishableKey }` with `200 OK`.
+
+### 'POST /stripe/payment-sheet
+- **Description**: Generates and returns a payment sheet used for creating a promptable transaction for the user.
+- **Body**: `{price}`, where price is given in cents. 
+- **Response**: `{ paymentIntent, customerSessionClientSecret, customer }`.
