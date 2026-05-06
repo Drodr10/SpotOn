@@ -18,7 +18,8 @@ const reserveSpot = async (listing_id: string, price: number, renter_id: string,
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${session.access_token}`
+            "Authorization": `Bearer ${session.access_token}`,
+            "ngrok-skip-browser-warning": "true"
         },
         body: JSON.stringify(body)
     });
@@ -26,7 +27,9 @@ const reserveSpot = async (listing_id: string, price: number, renter_id: string,
 
 const getActiveReservation = async (userId: string) => {
     console.log("Fetching active reservation...")
-    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`);
+    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+    });
     const data = await resp.json();
 
     if (!resp.ok) {
@@ -53,7 +56,9 @@ const getActiveReservation = async (userId: string) => {
 
 const getReservations = async (userId: string) => {
     console.log("Fetching all user  reservations...")
-    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`);
+    const resp = await fetch(`https://${API_IP}/api/reservations/${userId}`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+    });
     const data = await resp.json();
     if (!resp.ok)
         return null;

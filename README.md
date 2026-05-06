@@ -1,3 +1,5 @@
+<img width="512" height="512" alt="Icon 1" src="https://github.com/user-attachments/assets/8bf5448a-66a3-4e95-a658-b9dd2c7dca71" />
+
 # SpotOn
 
 **SpotOn** is a peer-to-peer parking marketplace designed to alleviate the daily frustrations of campus parking. By connecting students, residents, and local businesses with drivers in need of a spot, we turn underutilized spaces into a shared community resource.

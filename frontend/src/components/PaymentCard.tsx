@@ -52,9 +52,8 @@ export default function PaymentCard ({ listingId, price, hours } : PaymentProps)
         if(!error)
             setLoading(false);
         else {
+            setLoading(false);
             Alert.alert(`Error: ${error.code}`, error.message);
-            console.log("Error creating payment sheet:", error);
-
         }
     }
 

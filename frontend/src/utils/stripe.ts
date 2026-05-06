@@ -2,7 +2,8 @@ const API_IP = process.env.EXPO_PUBLIC_IP ?? "nulled";
 
 const getKey = async () : Promise<string | null> => {
     const resp = await fetch(`https://${API_IP}/api/stripe/key`, {
-        method: "GET"
+        method: "GET",
+        headers: { "ngrok-skip-browser-warning": "true" }
     });
     if (!resp.ok)
         return null;
@@ -16,7 +17,8 @@ const fetchPaymentSheetParams = async (price: number) => {
     const resp = await fetch(`https://${API_IP}/api/stripe/payment-sheet`, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true"
         },
         body: JSON.stringify({ price})
     })
