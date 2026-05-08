@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 
 // ─── Supabase ───────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase'
+import { triggerLightHaptic } from '@/src/utils/haptics';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -20,6 +21,7 @@ import logoutImg from '@/assets/images/templogouticon.png'
 export default function LogoutButton({}) {
 
     const onSignOut = async () => {
+        triggerLightHaptic();
         await supabase.auth.signOut();
         router.replace('/Intro');
     }

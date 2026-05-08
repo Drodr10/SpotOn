@@ -12,6 +12,7 @@ import { Pressable, StyleSheet, Dimensions } from 'react-native';
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
+import { withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -29,7 +30,7 @@ export default function AddListingFAB({ onPress }: AddListingFABProps) {
   return (
     <Pressable
       style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-      onPress={onPress}
+      onPress={withLightHaptic(onPress)}
       // Accessible label for screen readers
       accessibilityLabel="Add a parking listing"
       accessibilityRole="button"

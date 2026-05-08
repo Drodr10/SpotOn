@@ -16,15 +16,23 @@ import { stripe } from "../utils/stripe"
 import { api } from "../utils/api"
 
 import { supabase } from '@/src/utils/supabase';
+import { triggerLightHaptic } from '@/src/utils/haptics';
 import { JwtPayload } from '@supabase/supabase-js';
 
 type PaymentProps = {
     listingId: string;
     price: number;
     hours: number;
+    /**
+     * Optional success hook. When provided, REPLACES the default navigation
+     * to the home screen — the caller is responsible for navigating. The
+     * payload includes the same fields PaymentCard already knows about so
+     * the caller can build a confirmation message etc.
+     */
+    onPaymentSuccess?: (info: { listingId: string; price: number; hours: number }) => void;
 }
 
-export default function PaymentCard ({ listingId, price, hours } : PaymentProps) {
+export default function PaymentCard ({ listingId, price, hours, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
     const [claims, setClaims] = useState<JwtPayload>();
@@ -58,6 +66,7 @@ export default function PaymentCard ({ listingId, price, hours } : PaymentProps)
     }
 
     const openPaymentSheet = async () => {
+        triggerLightHaptic();
         const { error } = await presentPaymentSheet();
 
         if (error) {
@@ -67,15 +76,20 @@ export default function PaymentCard ({ listingId, price, hours } : PaymentProps)
         } else {
             Alert.alert("Payment Successful");
             await api.reserveSpot(listingId, price, claims!.sub, Date.now(), Date.now() + 3600 * hours * 1000);
-            router.push('./Homescreen');
+            if (onPaymentSuccess) {
+                // Caller takes over post-payment navigation (e.g. routing to chat).
+                onPaymentSuccess({ listingId, price, hours });
+            } else {
+                router.push('./Homescreen');
+            }
         }
     }
 
     useEffect(() => {
-        const setupPayment = async () => {
-            await initializePaymentSheet();
-        };
-        setupPayment();
+        const timeout = setTimeout(() => {
+            initializePaymentSheet();
+        }, 500);
+        return () => clearTimeout(timeout);
     }, [price, hours]);
     
     useEffect(() => {

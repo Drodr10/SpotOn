@@ -20,6 +20,7 @@ import {
 import HomePill from '@/src/components/ProfilePageComponents/HomePill';
 import EditableProfileCard from '@/src/components/ProfilePageComponents/EditableProfileCard';
 import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList'
+import { triggerLightHaptic } from '@/src/utils/haptics';
 
 
 import logoAsset from '@/assets/images/spotonlogo.png';
@@ -58,6 +59,7 @@ export default function ProfilePage () {
   const inputArea = useRef<TextInput>(null);
 
   const editEmail = () => {
+    triggerLightHaptic();
     setEditing(!editing);
   };
 
@@ -90,6 +92,7 @@ export default function ProfilePage () {
   if (!user) return null;
 
   const saveChanges = async () => {
+    triggerLightHaptic();
     setLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
@@ -213,7 +216,7 @@ export default function ProfilePage () {
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
           <TouchableOpacity
             style={styles.button}
-            onPress={loading ? () => {} : saveChanges}>
+            onPress={loading ? undefined : saveChanges}>
             <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Save Changes'}</Text>
           </TouchableOpacity>
         </View>

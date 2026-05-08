@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback } from "react";
 import { View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -11,6 +12,7 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     SwitzerLight: require("../../assets/fonts/Switzer-Light.otf"),
     SwitzerSemibold: require("../../assets/fonts/Switzer-Semibold.otf"),
+    BevellierMedium: require("../../assets/fonts/Bevellier-Medium.otf"),
   });
 
   const onLayoutRootView = useCallback(async () => {
@@ -24,7 +26,7 @@ export default function RootLayout() {
   }
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="QuickSearch" />
@@ -36,6 +38,6 @@ export default function RootLayout() {
         <Stack.Screen name="Chat" />
       </Stack>
       <StatusBar style="auto" />
-    </View>
+    </GestureHandlerRootView>
   );
 }

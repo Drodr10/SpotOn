@@ -1,22 +1,22 @@
 /**
- * search.tsx — Figma: "Search / Map Screen"
+ * search.tsx — Figma: "Search / Map Screen" (387-82) + listing detail (389-166).
  *
- * Full-screen map view with a semi-transparent "Nearby Locations" bottom panel.
- * Queries Supabase for active listings within a 5-mile radius of the user's location.
+ * Full-screen map view with a draggable "Nearby Locations" bottom sheet panel
+ * and an in-place listing detail state.
  */
 
 // ─── React & React Native ────────────────────────────────────────────────────
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   Image,
-  FlatList,
   StyleSheet,
-  Dimensions,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  useWindowDimensions,
+  ScrollView as RNScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -30,37 +30,39 @@ import MapView, { Marker } from 'react-native-maps';
 // ─── Icons ───────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
 
-// ─── Supabase ─────────────────────────────────────────────────────────────────
+// ─── Gestures + Animations (Reanimated v3+) ─────────────────────────────────
+import { FlatList, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+
+// ─── Supabase / Stripe ───────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { stripe } from '../utils/stripe';
+import PaymentCard from '@/src/components/PaymentCard';
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants / Components / Assets ─────────────────────────────────────────
 import { CustomFonts, Palette } from '@/src/constants/theme';
-
-// ─── Assets ──────────────────────────────────────────────────────────────────
+import FilterToggle from '@/src/components/FilterToggle';
+import HourScroller from '@/src/components/HourScroller';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
-import cabinIconAsset  from '@/assets/images/cabin.png';
+import cabinIconAsset from '@/assets/images/cabin.png';
+import placeholderImageAsset from '@/assets/images/mapimageplaceholder.png';
+import calendarImg from '@/assets/images/calendar.png';
 
-import { StripeProvider } from "@stripe/stripe-react-native";
-import { stripe } from "../utils/stripe"
-
-import PaymentCard from "@/src/components/PaymentCard"
-
-// ─── Responsive sizing ───────────────────────────────────────────────────────
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-const H_PAD        = screenWidth * 0.045;
-const V_PAD        = screenWidth * 0.04;
-const PANEL_HEIGHT = screenHeight * 0.56;
-
-const LOGO_SIZE    = screenWidth * 0.09;
-const BACK_SIZE    = screenWidth * 0.06;
-const ICON_SIZE    = screenWidth * 0.045;
-
-const FONT_TITLE   = screenWidth * 0.042;
-const FONT_LABEL   = screenWidth * 0.032;
-const FONT_HEADER  = screenWidth * 0.05;
-const FONT_QUERY   = screenWidth * 0.031;
-const FONT_DIST    = screenWidth * 0.028;
+// ─── Booking utilities ───────────────────────────────────────────────────────
+import { getTaxRateForCoords, type TaxResult } from '@/src/utils/tax';
+import {
+  findOrCreateConversation,
+  insertBookingConfirmationMessage,
+} from '@/src/utils/conversations';
+import DateRangePicker from '@/src/components/DateRangePicker';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Listing {
@@ -73,60 +75,127 @@ interface Listing {
   is_active: boolean;
   photo_url: string | null;
   created_at: string;
-  distance: number; // computed client-side (miles)
+  distance: number; // miles, computed client-side
 }
 
 // ─── Haversine helper ─────────────────────────────────────────────────────────
 function getDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3958.8;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── NearbyLocationCard ───────────────────────────────────────────────────────
+// ─── NearbyLocationCard (image removed per Figma 387-82) ─────────────────────
 function NearbyLocationCard({
   item,
   selected,
   onPress,
+  fontTitle,
+  fontLabel,
+  fontPrice,
+  fontDist,
+  iconSize,
 }: {
   item: Listing;
   selected: boolean;
   onPress: () => void;
+  fontTitle: number;
+  fontLabel: number;
+  fontPrice: number;
+  fontDist: number;
+  iconSize: number;
 }) {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
+    <TouchableOpacity
+      onPress={() => {
+        triggerLightHaptic();
+        onPress();
+      }}
+      activeOpacity={0.85}
+    >
       <View style={[cardStyles.card, selected && cardStyles.cardSelected]}>
-        {item.photo_url ? (
-          <Image
-            source={{ uri: item.photo_url }}
-            style={cardStyles.photo}
-            resizeMode="cover"
-          />
-        ) : null}
-        <Text style={cardStyles.title}>{item.address}</Text>
+        <Text style={[cardStyles.title, { fontSize: fontTitle }]} numberOfLines={2}>
+          {item.address}
+        </Text>
 
         <View style={cardStyles.detailsRow}>
           <View style={cardStyles.detailItem}>
-            <Image source={cabinIconAsset} style={cardStyles.detailIcon} resizeMode="contain" />
-            <Text style={cardStyles.detailText}>Parking Spot</Text>
+            <Image
+              source={cabinIconAsset}
+              style={[cardStyles.detailIcon, { width: iconSize, height: iconSize }]}
+              resizeMode="contain"
+            />
+            <Text style={[cardStyles.detailText, { fontSize: fontLabel }]}>
+              Parking Spot
+            </Text>
           </View>
         </View>
 
-        <Text style={cardStyles.price}>${Number(item.price_per_hour).toFixed(2)} / hr</Text>
-        <Text style={cardStyles.distance}>{item.distance.toFixed(1)} mi away</Text>
+        <View style={cardStyles.bottomRow}>
+          <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
+            ${Number(item.price_per_hour).toFixed(2)}
+            <Text style={cardStyles.priceUnit}> / hr</Text>
+          </Text>
+          <Text style={[cardStyles.distance, { fontSize: fontDist }]}>
+            {item.distance.toFixed(1)} mi away
+          </Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
 }
 
-// ─── Main Screen Component ────────────────────────────────────────────────────
+// ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function SearchScreen() {
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
+  const listRef = useRef<FlatList<Listing>>(null);
+
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  // Responsive sizing — recomputed when dimensions change
+  const sizes = useMemo(() => {
+    // Approximate height of the panel header area when detail view is open
+    // (handle + logo row + location text, no FilterToggle).
+    const DETAIL_HEADER_HEIGHT = Math.round(
+      screenWidth * 0.02 +         // panel paddingTop (V_PAD * 0.5)
+      21 +                          // handleArea (8+5+8)
+      screenWidth * 0.09 +          // logo row height (LOGO_SIZE)
+      screenWidth * 0.015 +         // marginBottom after header
+      screenWidth * 0.031 * 1.4 +   // locationQuery line height
+      screenWidth * 0.03,           // marginBottom after locationQuery
+    );
+    return {
+      H_PAD: screenWidth * 0.045,
+      V_PAD: screenWidth * 0.04,
+      LOGO_SIZE: screenWidth * 0.09,
+      BACK_SIZE: screenWidth * 0.06,
+      ICON_SIZE: screenWidth * 0.045,
+      FONT_TITLE: screenWidth * 0.042,
+      FONT_LABEL: screenWidth * 0.032,
+      FONT_HEADER: screenWidth * 0.05,
+      FONT_QUERY: screenWidth * 0.031,
+      FONT_DIST: screenWidth * 0.028,
+      FONT_PRICE: screenWidth * 0.05,
+      ESTIMATED_ITEM_HEIGHT: screenWidth * 0.32,
+      DETAIL_HEADER_HEIGHT,
+    };
+  }, [screenWidth]);
+
+  // Bottom-sheet panel heights.
+  // COLLAPSED = floor; only handle + logo row visible.
+  // MIN = default starting height (56% of screen).
+  // MAX = fully expanded (88% of screen).
+  const PANEL_COLLAPSED_HEIGHT = screenWidth * 0.25;
+  const PANEL_MIN_HEIGHT = screenHeight * 0.56;
+  const PANEL_MAX_HEIGHT = screenHeight * 0.88;
+  const PANEL_DETAIL_HEIGHT = screenHeight * 0.7;
 
   const { query, lat: latParam, lng: lngParam } = useLocalSearchParams<{
     query: string;
@@ -140,10 +209,25 @@ export default function SearchScreen() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hours, setHours] = useState<number>(1);
-  const [publishableKey, setPublishableKey] = useState<string>("");
+  const [publishableKey, setPublishableKey] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [messagingId, setMessagingId] = useState<string | null>(null);
+  const [filterIndex, setFilterIndex] = useState(0); // FilterToggle: 0=Hourly, 1=Weekly
+  /**
+   * Three-state view machine:
+   *  - 'list'    → map + draggable Nearby Locations panel
+   *  - 'detail'  → list card pressed; image + selected card + Continue/Back
+   *  - 'booking' → Continue pressed; full-screen booking view (Hourly Current/Schedule)
+   */
+  const [viewState, setViewState] = useState<'list' | 'detail' | 'booking'>('list');
+  const isDetailView = viewState === 'detail';
+  const [detailContentHeight, setDetailContentHeight] = useState(0);
+
+  // ─── Animated panel state (Reanimated worklets) ────────────────────────
+  const panelHeight = useSharedValue(PANEL_MIN_HEIGHT);
+  const startHeight = useSharedValue(PANEL_MIN_HEIGHT);
+  const isDetailViewSV = useSharedValue(0); // 0 = list, 1 = detail (gates pan gesture)
+  const detailOpacity = useSharedValue(0);
+  const listOpacity = useSharedValue(1);
 
   useEffect(() => {
     supabase.auth.getClaims().then(({ data }) => {
@@ -152,12 +236,10 @@ export default function SearchScreen() {
   }, []);
 
   const fetchPublishableKey = async () => {
-        const key = await stripe.getKey();
-        if (key)
-            setPublishableKey(key);
-        else
-            console.log("Error fetching publishable key");
-  }
+    const key = await stripe.getKey();
+    if (key) setPublishableKey(key);
+    else console.log('Error fetching publishable key');
+  };
 
   const initialRegion = {
     latitude: userLat,
@@ -166,12 +248,12 @@ export default function SearchScreen() {
     longitudeDelta: 0.04,
   };
 
-  // ─── Fetch listings from Supabase ─────────────────────────────────────────
+  // ─── Fetch listings ─────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       setLoading(true);
       const latDelta = 0.0724;
-      const lngDelta = 0.0724 / Math.cos(userLat * Math.PI / 180);
+      const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
 
       const { data, error } = await supabase
         .from('listings')
@@ -188,7 +270,6 @@ export default function SearchScreen() {
         return;
       }
 
-      // Client-side exact 5-mile Haversine filter + sort by distance
       const withDistance: Listing[] = (data ?? [])
         .map((l: any) => ({
           ...l,
@@ -201,10 +282,87 @@ export default function SearchScreen() {
       setLoading(false);
     })();
   }, []);
+
   useEffect(() => {
     fetchPublishableKey();
-  });
+  }, []);
 
+  // ─── Detail view animation orchestration ────────────────────────────────
+  useEffect(() => {
+    if (isDetailView) {
+      isDetailViewSV.value = 1;
+      // Use measured content height when available; fall back to fixed constant.
+      const targetH =
+        detailContentHeight > 0
+          ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
+          : PANEL_DETAIL_HEIGHT;
+      panelHeight.value = withSpring(targetH, { damping: 20, stiffness: 140 });
+      detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
+      listOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
+    } else {
+      isDetailViewSV.value = 0;
+      panelHeight.value = withSpring(PANEL_MIN_HEIGHT, { damping: 22, stiffness: 140 });
+      detailOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
+      listOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
+    }
+  }, [isDetailView, PANEL_DETAIL_HEIGHT, PANEL_MIN_HEIGHT, PANEL_MAX_HEIGHT]);
+
+  // Refine panel height once the detail content finishes measuring its layout.
+  useEffect(() => {
+    if (isDetailView && detailContentHeight > 0) {
+      const target = Math.min(
+        PANEL_MAX_HEIGHT,
+        sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
+      );
+      panelHeight.value = withSpring(target, { damping: 20, stiffness: 140 });
+    }
+  }, [detailContentHeight]);
+
+  // ─── Pan gesture for the drag handle ───────────────────────────────────
+  const panGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .onStart(() => {
+          if (isDetailViewSV.value === 1) return;
+          startHeight.value = panelHeight.value;
+        })
+        .onUpdate((e) => {
+          if (isDetailViewSV.value === 1) return;
+          const next = startHeight.value - e.translationY;
+          panelHeight.value = Math.min(
+            PANEL_MAX_HEIGHT,
+            Math.max(PANEL_COLLAPSED_HEIGHT, next),
+          );
+        })
+        .onEnd(() => {
+          if (isDetailViewSV.value === 1) return;
+          panelHeight.value = withSpring(panelHeight.value, {
+            damping: 22,
+            stiffness: 180,
+          });
+        }),
+    [PANEL_COLLAPSED_HEIGHT, PANEL_MAX_HEIGHT],
+  );
+
+  const animatedPanelStyle = useAnimatedStyle(() => ({
+    height: panelHeight.value,
+  }));
+  const animatedListStyle = useAnimatedStyle(() => ({
+    opacity: listOpacity.value,
+  }));
+  const animatedDetailStyle = useAnimatedStyle(() => ({
+    opacity: detailOpacity.value,
+    // pointerEvents handled via prop below
+  }));
+
+  // ─── Selection helpers ─────────────────────────────────────────────────
+  const scrollListToListing = (listingId: string) => {
+    const idx = listings.findIndex((l) => l.id === listingId);
+    if (idx < 0) return;
+    listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
+  };
+
+  // List → map (existing behavior). Pressing a list card opens detail view.
   const handleCardPress = (listing: Listing) => {
     setSelectedId(listing.id);
     mapRef.current?.animateToRegion(
@@ -216,185 +374,343 @@ export default function SearchScreen() {
       },
       500,
     );
+    setViewState('detail');
   };
 
+  // Map pin → list. Selects + scrolls list, but does NOT open detail view.
+  const handleMarkerPress = (listing: Listing) => {
+    setSelectedId(listing.id);
+    scrollListToListing(listing.id);
+  };
+
+  const handleBackFromDetail = () => {
+    setViewState('list');
+  };
+
+  const handleContinueFromDetail = () => {
+    setViewState('booking');
+  };
+
+  const handleBackFromBooking = () => {
+    setViewState('detail');
+  };
+
+  const selectedListing = useMemo(
+    () => listings.find((l) => l.id === selectedId) ?? null,
+    [listings, selectedId],
+  );
+
+  // ─── Render ─────────────────────────────────────────────────────────────
   return (
     <StripeProvider publishableKey={publishableKey} merchantIdentifier="merchant.identifier">
-    <View style={styles.screenContainer}>
-      <StatusBar style="dark" />
+      <View style={[styles.screenContainer, { backgroundColor: Palette.chalkgrey }]}>
+        <StatusBar style="dark" />
 
-      {/* ── Map ────────────────────────────────────────────────────────────── */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        initialRegion={initialRegion}
-        showsUserLocation={true}
-        mapPadding={{ top: 0, right: 0, bottom: PANEL_HEIGHT, left: 0 }}
-      >
-        {/* Blue pin at the searched/pressed location */}
-        <Marker
-          coordinate={{ latitude: userLat, longitude: userLng }}
-          title={query ?? 'Searched Location'}
-          pinColor="#007AFF"
-        />
-
-        {listings.map((listing) => (
+        {/* ── Map ──────────────────────────────────────────────────────── */}
+        <MapView
+          ref={mapRef}
+          style={[styles.map, { width: screenWidth, height: screenHeight }]}
+          initialRegion={initialRegion}
+          showsUserLocation
+          mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
+        >
+          <Marker
+            coordinate={{ latitude: userLat, longitude: userLng }}
+            title={query ?? 'Searched Location'}
+            pinColor="#007AFF"
+          />
+          {listings.map((listing) => (
           <Marker
             key={listing.id}
             coordinate={{ latitude: listing.latitude, longitude: listing.longitude }}
             title={listing.address}
             pinColor={selectedId === listing.id ? '#007AFF' : '#E02020'}
-            onPress={() => handleCardPress(listing)}
+              onPress={() => {
+                triggerLightHaptic();
+                handleMarkerPress(listing);
+              }}
           />
-        ))}
-      </MapView>
+          ))}
+        </MapView>
 
-      {/* ── Back Button ────────────────────────────────────────────────────── */}
-      <SafeAreaView style={styles.backButtonWrapper} edges={['top']}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={BACK_SIZE} color="#000" />
-        </TouchableOpacity>
-      </SafeAreaView>
+        {/* ── Back Button ──────────────────────────────────────────────── */}
+        <SafeAreaView style={styles.backButtonWrapper} edges={['top']}>
+          <TouchableOpacity
+            style={[
+              styles.backButton,
+              {
+                margin: screenWidth * 0.04,
+                padding: screenWidth * 0.02,
+              },
+            ]}
+            onPress={withLightHaptic(() => router.back())}
+          >
+            <Ionicons name="arrow-back" size={sizes.BACK_SIZE} color="#000" />
+          </TouchableOpacity>
+        </SafeAreaView>
 
-      {/* ── Nearby Locations Panel ─────────────────────────────────────────── */}
-      <View style={styles.panel}>
+        {/* ── Animated Bottom Sheet Panel ─────────────────────────────── */}
+        <Animated.View
+          style={[
+            styles.panel,
+            {
+              left: sizes.H_PAD * 0.25,
+              right: sizes.H_PAD * 0.25,
+              borderTopLeftRadius: screenWidth * 0.1,
+              borderTopRightRadius: screenWidth * 0.1,
+              paddingHorizontal: sizes.H_PAD,
+              paddingTop: sizes.V_PAD * 0.5,
+            },
+            animatedPanelStyle,
+          ]}
+        >
+          {/* Drag handle — only this responds to the pan gesture */}
+          <GestureDetector gesture={panGesture}>
+            <View style={styles.handleArea}>
+              <View style={styles.handlePill} />
+            </View>
+          </GestureDetector>
 
-        <View style={styles.panelHeader}>
-          <Image source={spotonLogoAsset} style={styles.panelLogo} resizeMode="contain" />
-          <Text style={styles.panelHeaderText}>SpotOn</Text>
-        </View>
+          <View style={[styles.panelHeader, { marginBottom: screenWidth * 0.015 }]}>
+            <Image
+              source={spotonLogoAsset}
+              style={{ width: sizes.LOGO_SIZE, height: sizes.LOGO_SIZE }}
+              resizeMode="contain"
+            />
+            <Text style={[styles.panelHeaderText, { fontSize: sizes.FONT_HEADER }]}>
+              SpotOn
+            </Text>
+          </View>
 
-        <Text style={styles.locationQuery} numberOfLines={1}>
-          Location: {query ?? '—'}
-        </Text>
+          <Text
+            style={[
+              styles.locationQuery,
+              { fontSize: sizes.FONT_QUERY, marginBottom: screenWidth * 0.03 },
+            ]}
+            numberOfLines={1}
+          >
+            Location: {query ?? '—'}
+          </Text>
 
-        {loading ? (
-          <ActivityIndicator
-            size="large"
-            color="#000"
-            style={styles.loader}
-          />
-        ) : listings.length === 0 ? (
-          <Text style={styles.emptyText}>No spots found within 5 miles</Text>
-        ) : (
-          <FlatList<Listing>
-            data={listings}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <>
-                <NearbyLocationCard
-                  item={item}
-                  selected={selectedId === item.id}
-                  onPress={() => handleCardPress(item)}
-                />
-                {selectedId && selectedId === item.id ? 
-                <View style={styles.priceOverview}>
-                  <View>
-                    <Text style={styles.durationCardText}>Duration (Hours)</Text>
-                    <View style={styles.durationIncrementerBody}>
-                      <TouchableOpacity onPress={() => {hours > 1 ? setHours(hours - 1) : null}}>
-                        <Text style={styles.durationCardIncrementerText}>-</Text>
-                      </TouchableOpacity>
-                      <Text style={styles.durationCardIncrementerText}>{hours}</Text>
-                      <TouchableOpacity onPress={() => setHours(hours + 1)}>
-                        <Text style={styles.durationCardIncrementerText}>+</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <View>
-                      <Text style={styles.durationCardText}>Total:</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.totalText}>${Math.round(item.price_per_hour * 100) / 100} x {hours}</Text>
-                      <Text style={styles.totalSumText}>
-                        ${item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100} with tax
-                      </Text>
-                    </View>
-                  </View>
-                  <PaymentCard 
-                    listingId={item.id} 
-                    price={item.price_per_hour * hours + Math.round(item.price_per_hour * 0.07) + Math.round(item.price_per_hour * 0.07 * 100)/100}
-                    hours={hours}
+          {/* Filter Selection (Figma 387-82) — hidden while detail view is open */}
+          {!isDetailView && (
+            <View style={{ marginBottom: screenWidth * 0.04 }}>
+              <FilterToggle
+                options={['Hourly', 'Weekly']}
+                value={filterIndex}
+                onChange={setFilterIndex}
+              />
+            </View>
+          )}
+
+          {/* Shared wrapper — detailOverlay's top:0 is relative to here (after the header) */}
+          <View style={{ flex: 1 }}>
+
+          {/* List view (fades out in detail state) */}
+          <Animated.View
+            style={[styles.listContainer, animatedListStyle]}
+            pointerEvents={isDetailView ? 'none' : 'auto'}
+          >
+            {loading ? (
+              <ActivityIndicator
+                size="large"
+                color="#000"
+                style={{ marginTop: screenHeight * 0.08 }}
+              />
+            ) : listings.length === 0 ? (
+              <Text
+                style={[
+                  styles.emptyText,
+                  { fontSize: sizes.FONT_LABEL, marginTop: screenHeight * 0.08 },
+                ]}
+              >
+                No spots found within 5 miles
+              </Text>
+            ) : (
+              <FlatList<Listing>
+                ref={listRef}
+                data={listings}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <NearbyLocationCard
+                    item={item}
+                    selected={selectedId === item.id}
+                    onPress={() => handleCardPress(item)}
+                    fontTitle={sizes.FONT_TITLE}
+                    fontLabel={sizes.FONT_LABEL}
+                    fontPrice={sizes.FONT_PRICE}
+                    fontDist={sizes.FONT_DIST}
+                    iconSize={sizes.ICON_SIZE}
                   />
-                  {currentUserId && currentUserId !== item.owner_id && (
-                    <TouchableOpacity
-                      style={styles.messageBtn}
-                      disabled={messagingId === item.id}
-                      onPress={async () => {
-                        setMessagingId(item.id);
-                        try {
-                          // Find existing conversation or create one
-                          const { data: existing } = await supabase
-                            .from('conversations')
-                            .select('id')
-                            .eq('renter_id', currentUserId)
-                            .eq('owner_id', item.owner_id)
-                            .maybeSingle();
-
-                          let convId: string;
-                          if (existing) {
-                            convId = existing.id;
-                          } else {
-                            const { data: created, error } = await supabase
-                              .from('conversations')
-                              .insert({ renter_id: currentUserId, owner_id: item.owner_id })
-                              .select('id')
-                              .single();
-                            if (error || !created) {
-                              Alert.alert('Error', 'Could not start conversation');
-                              return;
-                            }
-                            convId = created.id;
-                          }
-
-                          const { data: ownerProfile } = await supabase
-                            .from('profiles')
-                            .select('full_name')
-                            .eq('id', item.owner_id)
-                            .single();
-
-                          router.push({
-                            pathname: './Chat',
-                            params: { conversationId: convId, otherUserName: ownerProfile?.full_name ?? 'Owner' },
-                          } as any);
-                        } finally {
-                          setMessagingId(null);
-                        }
-                      }}
-                    >
-                      <Ionicons name="chatbubble-outline" size={screenWidth * 0.045} color="#fff" />
-                      <Text style={styles.messageBtnText}>
-                        {messagingId === item.id ? 'Opening...' : 'Message Owner'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>: 
-                null}
-              </>
+                )}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: sizes.V_PAD }}
+                ItemSeparatorComponent={() => <View style={{ height: screenWidth * 0.025 }} />}
+                onScrollToIndexFailed={(info) => {
+                  // Safe fallback: estimate offset, then retry once layout is ready.
+                  const offset = info.index * sizes.ESTIMATED_ITEM_HEIGHT;
+                  listRef.current?.scrollToOffset({ offset, animated: true });
+                  setTimeout(() => {
+                    listRef.current?.scrollToIndex({
+                      index: info.index,
+                      animated: true,
+                      viewPosition: 0,
+                    });
+                  }, 250);
+                }}
+              />
             )}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={styles.cardSeparator} />}
+          </Animated.View>
+
+          {/* Detail view (Figma 389-166) — overlays the list when a card is pressed */}
+          <Animated.View
+            style={[styles.detailOverlay, animatedDetailStyle]}
+            pointerEvents={isDetailView ? 'auto' : 'none'}
+          >
+            {selectedListing && (
+              <ListingDetailView
+                listing={selectedListing}
+                screenWidth={screenWidth}
+                fontTitle={sizes.FONT_TITLE}
+                fontLabel={sizes.FONT_LABEL}
+                fontPrice={sizes.FONT_PRICE}
+                fontDist={sizes.FONT_DIST}
+                iconSize={sizes.ICON_SIZE}
+                onBack={handleBackFromDetail}
+                onContentHeight={setDetailContentHeight}
+                onContinue={handleContinueFromDetail}
+              />
+            )}
+          </Animated.View>
+
+          </View>{/* end shared wrapper */}
+        </Animated.View>
+
+        {/* ── Booking View (Hourly Current / Schedule, Figma 389-196 / 389-224) ── */}
+        {viewState === 'booking' && selectedListing && (
+          <BookingView
+            listing={selectedListing}
+            mode={filterIndex === 0 ? 'hourly' : 'weekly'}
+            currentUserId={currentUserId}
+            screenWidth={screenWidth}
+            screenHeight={screenHeight}
+            sizes={sizes}
+            onBack={handleBackFromBooking}
+            onPaymentDone={() => setViewState('list')}
           />
         )}
-
       </View>
-    </View>
     </StripeProvider>
   );
 }
 
-// ─── Screen Styles ────────────────────────────────────────────────────────────
+// ─── Listing Detail Subview (Figma 389-166) ─────────────────────────────────
+function ListingDetailView({
+  listing,
+  screenWidth,
+  fontTitle,
+  fontLabel,
+  fontPrice,
+  fontDist,
+  iconSize,
+  onBack,
+  onContinue,
+  onContentHeight,
+}: {
+  listing: Listing;
+  screenWidth: number;
+  fontTitle: number;
+  fontLabel: number;
+  fontPrice: number;
+  fontDist: number;
+  iconSize: number;
+  onBack: () => void;
+  onContinue: () => void;
+  onContentHeight: (h: number) => void;
+}) {
+  const imgSource = listing.photo_url ? { uri: listing.photo_url } : placeholderImageAsset;
+  const actionButtonHeight = screenWidth * 0.11;
+  return (
+    <View style={detailStyles.wrap}>
+      {/* Inner view measured so the panel can auto-fit its height */}
+      <View onLayout={(e) => onContentHeight(e.nativeEvent.layout.height)}>
+      {/* Image */}
+      <Image
+        source={imgSource}
+        style={[
+          detailStyles.image,
+          {
+            aspectRatio: 16 / 9,
+            borderRadius: screenWidth * 0.04,
+          },
+        ]}
+        resizeMode="cover"
+      />
+
+      {/* Card */}
+      <View style={[cardStyles.card, cardStyles.cardSelected, { marginTop: screenWidth * 0.02 }]}>
+        <Text style={[cardStyles.title, { fontSize: fontTitle }]} numberOfLines={2}>
+          {listing.address}
+        </Text>
+        <View style={cardStyles.detailsRow}>
+          <View style={cardStyles.detailItem}>
+            <Image
+              source={cabinIconAsset}
+              style={[cardStyles.detailIcon, { width: iconSize, height: iconSize }]}
+              resizeMode="contain"
+            />
+            <Text style={[cardStyles.detailText, { fontSize: fontLabel }]}>Parking Spot</Text>
+          </View>
+        </View>
+        <View style={cardStyles.bottomRow}>
+          <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
+            ${Number(listing.price_per_hour).toFixed(2)}
+            <Text style={cardStyles.priceUnit}> / hr</Text>
+          </Text>
+          <Text style={[cardStyles.distance, { fontSize: fontDist }]}>
+            {listing.distance.toFixed(1)} mi away
+          </Text>
+        </View>
+      </View>
+
+      {/* Action buttons */}
+      <View style={[detailStyles.actionsRow, { marginTop: screenWidth * 0.025 }]}>
+        <TouchableOpacity
+          style={[
+            detailStyles.backBtn,
+            {
+              width: actionButtonHeight,
+              height: actionButtonHeight,
+              borderRadius: actionButtonHeight / 2,
+            },
+          ]}
+          onPress={withLightHaptic(onBack)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="chevron-back" size={22} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[detailStyles.continueBtn, { height: actionButtonHeight }]}
+          onPress={withLightHaptic(onContinue)}
+          activeOpacity={0.85}
+        >
+          <Text style={[detailStyles.continueBtnText, { fontSize: screenWidth * 0.04 }]}>
+            Continue
+          </Text>
+        </TouchableOpacity>
+      </View>
+      </View>{/* end measurement wrapper */}
+    </View>
+  );
+}
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  screenContainer: {
-    flex: 1,
-    backgroundColor: Palette.chalkgrey,
-  },
+  screenContainer: { flex: 1 },
   map: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: screenWidth,
-    height: screenHeight,
   },
   backButtonWrapper: {
     position: 'absolute',
@@ -402,121 +718,68 @@ const styles = StyleSheet.create({
     left: 0,
   },
   backButton: {
-    margin: screenWidth * 0.04,
     backgroundColor: 'rgba(220,219,216,0.85)',
     borderRadius: 999,
-    padding: screenWidth * 0.02,
   },
   panel: {
     position: 'absolute',
     bottom: 0,
-    left: H_PAD * 0.25,
-    right: H_PAD * 0.25,
-    height: PANEL_HEIGHT,
-    backgroundColor: 'rgba(220, 219, 216, 0.75)',
-    borderTopLeftRadius: screenWidth * 0.1,
-    borderTopRightRadius: screenWidth * 0.1,
+    backgroundColor: 'rgba(220, 219, 216, 0.92)',
     overflow: 'hidden',
-    paddingHorizontal: H_PAD,
-    paddingTop: V_PAD,
+  },
+  handleArea: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  handlePill: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.25)',
   },
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: screenWidth * 0.005,
-    marginBottom: screenWidth * 0.015,
-  },
-  panelLogo: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
+    gap: 4,
   },
   panelHeaderText: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: FONT_HEADER,
     color: '#000000',
   },
   locationQuery: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_QUERY,
     color: '#000000',
-    marginBottom: screenWidth * 0.05,
   },
-  listContent: {
-    paddingBottom: V_PAD,
-  },
-  cardSeparator: {
-    height: screenWidth * 0.025,
-  },
-  loader: {
-    marginTop: screenHeight * 0.08,
+  listContainer: {
+    flex: 1,
   },
   emptyText: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_LABEL,
     color: 'rgba(0,0,0,0.55)',
     textAlign: 'center',
-    marginTop: screenHeight * 0.08,
   },
-  priceOverview: {
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  durationCardText:{
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  durationIncrementerBody:{
-    flex: 1,
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 8,
-    marginBottom: 8,
-    marginRight: 32,
-    marginLeft: 32,
-  },
-  durationCardIncrementerText: {
-    fontSize: 48,
-    fontWeight: "bold",
-  },
-  totalText: {
-    fontSize: 16,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  totalSumText: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  messageBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    paddingVertical: screenWidth * 0.03,
-    paddingHorizontal: screenWidth * 0.04,
-    marginTop: 12,
-    gap: 8,
-  },
-  messageBtnText: {
-    color: '#fff',
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: screenWidth * 0.038,
+  detailOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 0,
+    paddingTop: 0,
   },
 });
 
-// ─── Card Styles ──────────────────────────────────────────────────────────────
 const cardStyles = StyleSheet.create({
   card: {
-    backgroundColor: 'rgba(3, 3, 3, 0.14)',
+    backgroundColor: 'rgba(3, 3, 3, 0.08)',
     borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 10,
+    borderColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 12,
     overflow: 'hidden',
-    paddingHorizontal: screenWidth * 0.04,
-    paddingVertical: screenWidth * 0.03,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   cardSelected: {
     borderColor: '#007AFF',
@@ -524,44 +787,799 @@ const cardStyles = StyleSheet.create({
   },
   title: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: FONT_TITLE,
     color: '#000000',
-    marginBottom: screenWidth * 0.015,
+    marginBottom: 6,
   },
   detailsRow: {
     flexDirection: 'column',
-    gap: screenWidth * 0.015,
-    marginBottom: screenWidth * 0.015,
+    gap: 6,
+    marginBottom: 8,
   },
   detailItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: screenWidth * 0.015,
+    gap: 6,
   },
-  detailIcon: {
-    width: ICON_SIZE,
-    height: ICON_SIZE,
-  },
+  detailIcon: {},
   detailText: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_LABEL,
     color: '#000000',
   },
-  photo: {
-    width: '100%',
-    height: screenWidth * 0.35,
-    borderRadius: 8,
-    marginBottom: screenWidth * 0.025,
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
   },
   price: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_LABEL,
+    fontFamily: CustomFonts.BevellierMedium,
     color: '#000000',
+  },
+  priceUnit: {
+    fontFamily: CustomFonts.BevellierMedium,
+    color: 'rgba(0,0,0,0.7)',
   },
   distance: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_DIST,
+    color: 'rgba(0,0,0,0.55)',
+  },
+});
+
+const detailStyles = StyleSheet.create({
+  wrap: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  image: {
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    marginBottom: 4,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  continueBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+    borderRadius: 12,
+  },
+  continueBtnText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    color: '#fff',
+  },
+});
+
+// ─── Booking View (Figma 389-196 / 389-224) ─────────────────────────────────
+// Hourly Current (default) and Hourly Schedule modes. Weekly placeholder.
+
+type SizesShape = {
+  H_PAD: number;
+  V_PAD: number;
+  LOGO_SIZE: number;
+  ICON_SIZE: number;
+  FONT_TITLE: number;
+  FONT_LABEL: number;
+  FONT_HEADER: number;
+  FONT_QUERY: number;
+  FONT_DIST: number;
+  FONT_PRICE: number;
+  ESTIMATED_ITEM_HEIGHT: number;
+  DETAIL_HEADER_HEIGHT: number;
+};
+
+const HARD_CAP_HOURS = 96; // 4 days
+
+function format12Hour(h: number): string {
+  const local = ((h % 24) + 24) % 24;
+  const period = local >= 12 ? 'PM' : 'AM';
+  const display = local % 12 === 0 ? 12 : local % 12;
+  return `${display} ${period}`;
+}
+
+function format12HourRich(h: number): { primary: string; secondary: string } {
+  const local = ((h % 24) + 24) % 24;
+  const period = local >= 12 ? 'PM' : 'AM';
+  const display = local % 12 === 0 ? 12 : local % 12;
+  return { primary: String(display), secondary: period };
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function formatTimeWithMinutes(date: Date): string {
+  const h = date.getHours();
+  const m = date.getMinutes();
+  const period = h >= 12 ? 'PM' : 'AM';
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:${pad2(m)} ${period}`;
+}
+
+function shortDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function shortDateWithDay(d: Date): string {
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function BookingView({
+  listing,
+  mode,
+  currentUserId,
+  screenWidth,
+  screenHeight,
+  sizes,
+  onBack,
+  onPaymentDone,
+}: {
+  listing: Listing;
+  mode: 'hourly' | 'weekly';
+  currentUserId: string | null;
+  screenWidth: number;
+  screenHeight: number;
+  sizes: SizesShape;
+  onBack: () => void;
+  onPaymentDone: () => void;
+}) {
+  const router = useRouter();
+
+  // Mount-time anchor — minutes captured once, never drifts with wall clock.
+  const mountTime = useMemo(() => new Date(), []);
+
+  // ─── Booking-mode state (Current is default per Figma) ───────────────────
+  const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
+
+  // ─── Hourly Current state ───────────────────────────────────────────────
+  const [currentHours, setCurrentHours] = useState(1);
+
+  // ─── Hourly Schedule state ──────────────────────────────────────────────
+  const initialStartHour = mountTime.getHours();
+  const [startHour, setStartHour] = useState(initialStartHour);
+  // End hour is "extended" — can exceed 23 for day rollover.
+  const [endHour, setEndHour] = useState(initialStartHour + 2);
+  const [scheduleStart, setScheduleStart] = useState<Date>(() => {
+    const d = new Date(mountTime);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [scheduleEndDate, setScheduleEndDate] = useState<Date | null>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+  // True while the user is interacting with any of the picker wheels — gates
+  // the parent page ScrollView so the page doesn't slide while the user
+  // scrolls a number wheel.
+  const [pickerActive, setPickerActive] = useState(false);
+  const lockPicker = useCallback(() => setPickerActive(true), []);
+  const unlockPicker = useCallback(() => setPickerActive(false), []);
+
+  // Clamp Schedule end > start; respect 4-day cap.
+  useEffect(() => {
+    if (endHour <= startHour) {
+      setEndHour(startHour + 1);
+    } else if (endHour - startHour > HARD_CAP_HOURS) {
+      setEndHour(startHour + HARD_CAP_HOURS);
+    }
+  }, [startHour, endHour]);
+
+  // ─── Tax lookup ─────────────────────────────────────────────────────────
+  const [tax, setTax] = useState<TaxResult | null>(null);
+  const [taxLoading, setTaxLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setTaxLoading(true);
+    getTaxRateForCoords(listing.latitude, listing.longitude)
+      .then((res) => {
+        if (!cancelled) {
+          setTax(res);
+          setTaxLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTaxLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listing.latitude, listing.longitude]);
+
+  // ─── Mode-switch animation ──────────────────────────────────────────────
+  const isCurrentSV = useSharedValue(1); // 1 = current (default), 0 = schedule
+  useEffect(() => {
+    isCurrentSV.value = withTiming(bookingMode === 'current' ? 1 : 0, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [bookingMode]);
+
+  const calendarBtnAnimStyle = useAnimatedStyle(() => ({
+    opacity: 1 - isCurrentSV.value,
+    transform: [{ scale: 0.9 + (1 - isCurrentSV.value) * 0.1 }],
+  }));
+  const segmentedAnimStyle = useAnimatedStyle(() => {
+    // Segmented control fills row in schedule mode, slightly narrower & centered in current.
+    return {
+      flex: 1,
+      // No translation needed — using flex layout. The icon's space collapses via opacity+width.
+    };
+  });
+  const currentScrollerAnimStyle = useAnimatedStyle(() => ({
+    opacity: isCurrentSV.value,
+  }));
+  const scheduleScrollerAnimStyle = useAnimatedStyle(() => ({
+    opacity: 1 - isCurrentSV.value,
+  }));
+  const calendarBtnContainerAnimStyle = useAnimatedStyle(() => ({
+    width: (1 - isCurrentSV.value) * (sizes.H_PAD + 44 + 12), // 44 btn + 12 gap
+    opacity: 1 - isCurrentSV.value,
+    overflow: 'hidden',
+  }));
+
+  // ─── Derived booking math ───────────────────────────────────────────────
+  const { startDateTime, endDateTime, hoursBooked } = useMemo(() => {
+    if (bookingMode === 'current') {
+      const start = mountTime;
+      const end = new Date(start.getTime() + currentHours * 3600 * 1000);
+      return { startDateTime: start, endDateTime: end, hoursBooked: currentHours };
+    }
+    // schedule
+    const start = new Date(scheduleStart);
+    start.setHours(startHour, mountTime.getMinutes(), 0, 0);
+    const end = new Date(start.getTime() + (endHour - startHour) * 3600 * 1000);
+    return { startDateTime: start, endDateTime: end, hoursBooked: endHour - startHour };
+  }, [bookingMode, currentHours, mountTime, scheduleStart, startHour, endHour]);
+
+  const subtotal = listing.price_per_hour * hoursBooked;
+  const taxRate = tax?.rate ?? 0;
+  const taxAmount = subtotal * taxRate;
+  const total = subtotal + taxAmount;
+
+  // ─── Summary line ───────────────────────────────────────────────────────
+  const sameDay =
+    startDateTime.toDateString() === endDateTime.toDateString();
+  const summaryLine = sameDay
+    ? `${shortDate(startDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`
+    : `${shortDateWithDay(startDateTime)} → ${shortDateWithDay(endDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`;
+
+  // ─── Post-payment routing ──────────────────────────────────────────────
+  const handlePaymentSuccess = async () => {
+    if (!currentUserId) {
+      Alert.alert('Reservation booked', 'Could not open chat (not signed in).');
+      onPaymentDone();
+      return;
+    }
+    if (currentUserId === listing.owner_id) {
+      Alert.alert(
+        'Reservation booked',
+        'You booked your own listing — no chat to open.',
+      );
+      onPaymentDone();
+      return;
+    }
+    try {
+      const { conversationId, ownerName } = await findOrCreateConversation(
+        currentUserId,
+        listing.owner_id,
+      );
+      // Auto-generated booking confirmation message.
+      const body = `Booking confirmed: ${listing.address} · ${hoursBooked}h · $${total.toFixed(
+        2,
+      )}. Hi! I just booked your spot.`;
+      try {
+        await insertBookingConfirmationMessage(conversationId, currentUserId, body);
+      } catch (e) {
+        console.warn('[booking] auto-message insert failed', e);
+      }
+      router.push({
+        pathname: './Chat',
+        params: { conversationId, otherUserName: ownerName },
+      } as any);
+    } catch (e: any) {
+      Alert.alert(
+        'Payment succeeded',
+        `Couldn't open chat (${e?.message ?? 'unknown error'}). Your booking went through.`,
+      );
+      onPaymentDone();
+    }
+  };
+
+  // ─── Weekly mode placeholder ────────────────────────────────────────────
+  if (mode === 'weekly') {
+    return (
+      <View style={[bookingStyles.screen, { backgroundColor: Palette.chalkgrey }]}>
+        <SafeAreaView style={bookingStyles.safeArea} edges={['top']}>
+          <View
+            style={[
+              bookingStyles.brandHeader,
+              { paddingHorizontal: sizes.H_PAD, marginTop: 4 },
+            ]}
+          >
+            <Image
+              source={spotonLogoAsset}
+              style={{ width: sizes.LOGO_SIZE, height: sizes.LOGO_SIZE }}
+              resizeMode="contain"
+            />
+            <Text style={[bookingStyles.brandText, { fontSize: sizes.FONT_HEADER }]}>
+              SpotOn Payment
+            </Text>
+          </View>
+          <View style={bookingStyles.weeklyPlaceholder}>
+            <Text style={bookingStyles.weeklyPlaceholderText}>
+              Weekly view — coming soon
+            </Text>
+          </View>
+          <View
+            style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}
+          >
+            <TouchableOpacity
+              onPress={withLightHaptic(onBack)}
+              style={bookingStyles.backCircle}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="chevron-back" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  // ─── Render: Hourly (Current + Schedule) ────────────────────────────────
+  return (
+    <View style={[bookingStyles.screen, { backgroundColor: Palette.chalkgrey }]}>
+      {/* Top safe area only — bottom bar manages its own offset so it lines
+          up with the detail-view's Back/Continue row (which is also ~16px
+          from the screen bottom, ignoring the home-indicator safe area). */}
+      <SafeAreaView style={bookingStyles.safeArea} edges={['top']}>
+        {/* Upper content lives in a ScrollView so the Pay/Back row at the
+            bottom stays visible even on smaller phones where the picker +
+            total push everything past the viewport.
+            Uses RN's native ScrollView (not RNGH's) so its UIScrollView
+            hierarchy plays well with the inner FlatList pickers on iOS, and
+            nestedScrollEnabled handles Android. RNGH's ScrollView intercepts
+            gestures at the JS layer even when scrollEnabled=false, which was
+            preventing the picker wheels from receiving touches after the page
+            had been scrolled. */}
+        <RNScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 12 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={!pickerActive}
+        >
+        {/* Header — SpotOn logo + "SpotOn Payment" (matches search-panel header style) */}
+        <View
+          style={[
+            bookingStyles.brandHeader,
+            { paddingHorizontal: sizes.H_PAD, marginTop: 4 },
+          ]}
+        >
+          <Image
+            source={spotonLogoAsset}
+            style={{ width: sizes.LOGO_SIZE, height: sizes.LOGO_SIZE }}
+            resizeMode="contain"
+          />
+          <Text style={[bookingStyles.brandText, { fontSize: sizes.FONT_HEADER }]}>
+            SpotOn Payment
+          </Text>
+        </View>
+
+        {/* Listing card pinned at top — same visual as detail view's card */}
+        <View style={[bookingStyles.cardWrap, { paddingHorizontal: sizes.H_PAD }]}>
+          <View style={[cardStyles.card, cardStyles.cardSelected]}>
+            <Text
+              style={[cardStyles.title, { fontSize: sizes.FONT_TITLE }]}
+              numberOfLines={2}
+            >
+              {listing.address}
+            </Text>
+            <View style={cardStyles.detailsRow}>
+              <View style={cardStyles.detailItem}>
+                <Image
+                  source={cabinIconAsset}
+                  style={[
+                    cardStyles.detailIcon,
+                    { width: sizes.ICON_SIZE, height: sizes.ICON_SIZE },
+                  ]}
+                  resizeMode="contain"
+                />
+                <Text
+                  style={[cardStyles.detailText, { fontSize: sizes.FONT_LABEL }]}
+                >
+                  Parking Spot
+                </Text>
+              </View>
+            </View>
+            <View style={cardStyles.bottomRow}>
+              <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
+                ${Number(listing.price_per_hour).toFixed(2)}
+                <Text style={cardStyles.priceUnit}> / hr</Text>
+              </Text>
+              <Text
+                style={[cardStyles.distance, { fontSize: sizes.FONT_DIST }]}
+              >
+                {listing.distance.toFixed(1)} mi away
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Mode controls row: [Current | Schedule] + animated calendar icon */}
+        <View
+          style={[
+            bookingStyles.modeRow,
+            { paddingHorizontal: sizes.H_PAD, marginTop: screenWidth * 0.04 },
+          ]}
+        >
+          <Animated.View style={[segmentedAnimStyle]}>
+            <FilterToggle
+              options={['Current', 'Schedule']}
+              value={bookingMode === 'current' ? 0 : 1}
+              onChange={(i) => setBookingMode(i === 0 ? 'current' : 'schedule')}
+            />
+          </Animated.View>
+          <Animated.View style={calendarBtnContainerAnimStyle}>
+            <Animated.View
+              style={[
+                bookingStyles.calendarBtnInner,
+                calendarBtnAnimStyle,
+                { marginLeft: 12 },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={withLightHaptic(() => setShowCalendar(true))}
+                disabled={bookingMode === 'current'}
+                style={bookingStyles.calendarBtn}
+                activeOpacity={0.8}
+              >
+                <Image
+                  source={calendarImg}
+                  style={bookingStyles.calendarIcon}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            </Animated.View>
+          </Animated.View>
+        </View>
+
+        {/* Number scroller area — cross-fade between Current and Schedule.
+            ▼ Adjust `height` here if you want the picker bigger/smaller. ▼ */}
+        <View
+          style={[
+            bookingStyles.scrollerArea,
+            {
+              paddingHorizontal: sizes.H_PAD,
+              marginTop: screenWidth * 0.04,
+              // Fixed height so it's predictable across phones; the page
+              // ScrollView absorbs any overflow on small screens.
+              height: 360,
+            },
+          ]}
+        >
+          {/* Current mode: 1 centered scroller (hours booked) */}
+          <Animated.View
+            style={[bookingStyles.scrollerLayer, currentScrollerAnimStyle]}
+            pointerEvents={bookingMode === 'current' ? 'auto' : 'none'}
+          >
+            <Text style={bookingStyles.scrollerLabel}>Hours</Text>
+            <HourScroller
+              value={currentHours}
+              onChange={setCurrentHours}
+              min={1}
+              max={HARD_CAP_HOURS}
+              fontSize={Math.min(48, screenWidth * 0.12)}
+              visibleCount={5}
+              onInteractionStart={lockPicker}
+              onInteractionEnd={unlockPicker}
+            />
+          </Animated.View>
+
+          {/* Schedule mode: 2 scrollers side-by-side (start | end) */}
+          <Animated.View
+            style={[
+              bookingStyles.scrollerLayer,
+              { flexDirection: 'row', justifyContent: 'space-around' },
+              scheduleScrollerAnimStyle,
+            ]}
+            pointerEvents={bookingMode === 'schedule' ? 'auto' : 'none'}
+          >
+            <View style={bookingStyles.scrollerCol}>
+              <Text style={bookingStyles.scrollerLabel}>Start</Text>
+              <HourScroller
+                value={startHour}
+                onChange={(v) => {
+                  const clamped = Math.max(0, Math.min(23, v));
+                  setStartHour(clamped);
+                  if (endHour <= clamped) setEndHour(clamped + 1);
+                  if (endHour - clamped > HARD_CAP_HOURS) {
+                    setEndHour(clamped + HARD_CAP_HOURS);
+                  }
+                }}
+                min={0}
+                max={23}
+                formatRich={format12HourRich}
+                fontSize={Math.min(40, screenWidth * 0.1)}
+                visibleCount={5}
+                onInteractionStart={lockPicker}
+                onInteractionEnd={unlockPicker}
+              />
+            </View>
+            <View style={bookingStyles.scrollerCol}>
+              <Text style={bookingStyles.scrollerLabel}>End</Text>
+              <HourScroller
+                value={endHour}
+                onChange={(v) => {
+                  const max = startHour + HARD_CAP_HOURS;
+                  setEndHour(Math.max(startHour + 1, Math.min(max, v)));
+                }}
+                min={startHour + 1}
+                max={startHour + HARD_CAP_HOURS}
+                formatRich={format12HourRich}
+                fontSize={Math.min(40, screenWidth * 0.1)}
+                visibleCount={5}
+                onInteractionStart={lockPicker}
+                onInteractionEnd={unlockPicker}
+              />
+            </View>
+          </Animated.View>
+        </View>
+
+        {/* Summary line */}
+        <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.summaryText} numberOfLines={2}>
+            {summaryLine}
+          </Text>
+        </View>
+
+        {/* Total block */}
+        <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.totalLabel}>Total</Text>
+          <View style={bookingStyles.totalLine}>
+            <Text style={bookingStyles.totalSubtotal}>
+              ${listing.price_per_hour.toFixed(2)} × {hoursBooked}h
+            </Text>
+            <Text style={bookingStyles.totalSubtotalAmount}>
+              ${subtotal.toFixed(2)}
+            </Text>
+          </View>
+          <View style={bookingStyles.totalLine}>
+            <Text style={bookingStyles.totalTaxLabel}>
+              {taxLoading
+                ? 'Calculating tax…'
+                : `Tax (${tax?.jurisdiction ?? 'Default'})`}
+            </Text>
+            {!taxLoading && (
+              <Text style={bookingStyles.totalTaxAmount}>
+                ${taxAmount.toFixed(2)}
+              </Text>
+            )}
+          </View>
+          <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
+            <Text style={bookingStyles.totalFinalLabel}>Total</Text>
+            <Text style={bookingStyles.totalFinalAmount}>
+              {taxLoading ? `$${subtotal.toFixed(2)}+` : `$${total.toFixed(2)}`}
+            </Text>
+          </View>
+        </View>
+
+        </RNScrollView>
+
+        {/* Bottom row pinned outside RNScrollView — always visible. */}
+        <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
+          <TouchableOpacity
+            onPress={withLightHaptic(onBack)}
+            style={bookingStyles.backCircle}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="chevron-back" size={22} color="#fff" />
+          </TouchableOpacity>
+          <View style={bookingStyles.payWrap}>
+            <PaymentCard
+              listingId={listing.id}
+              price={total}
+              hours={hoursBooked}
+              onPaymentSuccess={handlePaymentSuccess}
+            />
+          </View>
+        </View>
+
+        {/* Single-date picker overlay (Schedule mode) */}
+        <DateRangePicker
+          visible={showCalendar}
+          initialStart={scheduleStart}
+          singleSelect
+          helperText="Pick the day for your reservation."
+          confirmLabel="Confirm date"
+          popupOpacity={0.85}
+          sideMarginPercent={2}
+          onClose={() => setShowCalendar(false)}
+          onConfirm={(start) => {
+            setScheduleStart(start);
+            setScheduleEndDate(null);
+            setShowCalendar(false);
+          }}
+        />
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const bookingStyles = StyleSheet.create({
+  screen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  safeArea: { flex: 1 },
+  brandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  brandText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    color: '#000',
+  },
+  backCircle: {
+    width: 48,
+    height: 48,
+    // marginTop/Bottom mirror PaymentCard.container margins so the back
+    // button's visible frame lines up with the Stripe button's frame
+    // exactly (same top, same bottom, same height).
+    marginTop: 4,
+    marginBottom: 8,
+    borderRadius: 999,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    alignSelf: 'center',
+    justifyContent: 'center',
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'stretch', // both children stretch to the row's height
+    gap: 12,
+    height: 60,
+    // 16px from the screen edge — matches the detail-view (page 2) buttons.
+    marginBottom: 16,
+  },
+  payWrap: {
+    flex: 1,
+  },
+  cardWrap: {
+    paddingTop: 4,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  calendarBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarIcon: {
+    width: 26,
+    height: 26,
+  },
+  scrollerArea: {
+    position: 'relative',
+    // Hard clip so wheel-edge items (which fade + tilt heavily) can't bleed
+    // into the toggle above or the listing card below if the picker happens
+    // to render slightly taller than its container on a small screen.
+    overflow: 'hidden',
+  },
+  scrollerLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollerCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  scrollerLabel: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
     color: 'rgba(0,0,0,0.5)',
-    marginTop: screenWidth * 0.008,
+    marginBottom: 6,
+  },
+  summaryRow: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  summaryText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 15,
+    color: '#000',
+    textAlign: 'center',
+  },
+  totalBlock: {
+    marginTop: 28,
+    // Extra space below the total before the bottom Back/Pay row.
+    marginBottom: 28,
+  },
+  totalLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 16,
+    color: '#000',
+    marginBottom: 8,
+  },
+  totalLine: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  totalSubtotal: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 14,
+    color: 'rgba(0,0,0,0.7)',
+  },
+  totalSubtotalAmount: {
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: 14,
+    color: 'rgba(0,0,0,0.7)',
+  },
+  totalTaxLabel: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: 'rgba(0,0,0,0.55)',
+  },
+  totalTaxAmount: {
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: 13,
+    color: 'rgba(0,0,0,0.55)',
+  },
+  totalFinalRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.12)',
+  },
+  totalFinalLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 18,
+    color: '#000',
+  },
+  totalFinalAmount: {
+    // ▼ TUNE THIS to make the final total bigger or smaller. ▼
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: 36,
+    color: '#000',
+  },
+  weeklyPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weeklyPlaceholderText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 16,
+    color: 'rgba(0,0,0,0.6)',
   },
 });

@@ -38,6 +38,7 @@ import MapView, { Marker, MapPressEvent } from 'react-native-maps';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Auth & Supabase ─────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
@@ -85,10 +86,12 @@ export default function CreateListing() {
 
   /** Drop a pin wherever the user taps on the map */
   const handleMapPress = (e: MapPressEvent) => {
+    triggerLightHaptic();
     setPin(e.nativeEvent.coordinate);
   };
 
   const handleSubmit = async () => {
+    triggerLightHaptic();
     // ── Basic validation ──────────────────────────────────────────────────
     const trimmedAddress = address.trim();
     if (!trimmedAddress) {
@@ -152,7 +155,7 @@ export default function CreateListing() {
           <View style={styles.header}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => router.back()}
+              onPress={withLightHaptic(() => router.back())}
               activeOpacity={0.7}
             >
               <Ionicons name="arrow-back" size={BACK_SIZE} color="#000" />
@@ -196,7 +199,10 @@ export default function CreateListing() {
                 <Marker
                   coordinate={pin}
                   draggable
-                  onDragEnd={(e) => setPin(e.nativeEvent.coordinate)}
+                  onDragEnd={(e) => {
+                    triggerLightHaptic();
+                    setPin(e.nativeEvent.coordinate);
+                  }}
                   title="Your Spot"
                 />
               )}

@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { supabase } from '../utils/supabase';
 import { CustomFonts } from '@/src/constants/theme';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -84,6 +85,7 @@ export default function ChatScreen() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !currentUserId || !conversationId) return;
+    triggerLightHaptic();
     const content = newMessage.trim();
     setNewMessage('');
 
@@ -115,7 +117,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={withLightHaptic(() => router.back())} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>

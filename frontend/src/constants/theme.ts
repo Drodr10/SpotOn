@@ -39,6 +39,8 @@ export const Colors = {
 export const CustomFonts = {
   SwitzerLight: 'SwitzerLight',
   SwitzerSemibold: 'SwitzerSemibold',
+  // Bevellier — used by the search screen redesign (Figma 387-82).
+  BevellierMedium: 'BevellierMedium',
 } as const;
 
 export const Fonts = Platform.select({
