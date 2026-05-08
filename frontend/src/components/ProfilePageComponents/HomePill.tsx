@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import homeIcon from '@/assets/images/homeicon.png';
@@ -33,7 +34,7 @@ export default function HomePill() {
   return (
     <View style={styles.pill}>
       {/* Circular avatar */}
-      <TouchableOpacity onPress={() => router.push('./Homescreen')}>
+      <TouchableOpacity onPress={withLightHaptic(() => router.push('./Homescreen'))}>
         <Image source={homeIcon} style={styles.icon} />
       </TouchableOpacity>
       {/* Username label */}

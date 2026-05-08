@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import profileIconAsset from '@/assets/images/temprofileicon.png';
@@ -39,7 +40,7 @@ export default function ProfilePill({ username }: ProfilePillProps) {
   return (
     <View style={styles.pill}>
       {/* Circular avatar */}
-      <TouchableOpacity onPress={() => router.push('./Profile')}>
+      <TouchableOpacity onPress={withLightHaptic(() => router.push('./Profile'))}>
         <Image source={profileIconAsset} style={styles.avatar} />
         </TouchableOpacity>
       {/* Username label */}
