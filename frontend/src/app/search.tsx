@@ -54,6 +54,7 @@ import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset from '@/assets/images/cabin.png';
 import placeholderImageAsset from '@/assets/images/mapimageplaceholder.png';
 import calendarImg from '@/assets/images/calendar.png';
+import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
 
 // ─── Booking utilities ───────────────────────────────────────────────────────
 import { getTaxRateForCoords, type TaxResult } from '@/src/utils/tax';
@@ -878,6 +879,9 @@ type SizesShape = {
 };
 
 const HARD_CAP_HOURS = 96; // 4 days
+const HARD_CAP_WEEKS = 52;    // 1-year cap
+const HOURS_PER_WEEK = 168;   // 24 × 7
+const WEEKS_PER_MONTH = 4;    // billing month = 4 weeks
 
 function format12Hour(h: number): string {
   const local = ((h % 24) + 24) % 24;
@@ -971,6 +975,28 @@ function BookingView({
     }
   }, [startHour, endHour]);
 
+  // ─── Weekly state ────────────────────────────────────────────────────────
+  const [currentWeeks, setCurrentWeeks] = useState(1);
+  // Start off-screen right; springs in on first month, eases back out off-screen.
+  // Image width ≈ screenWidth * 0.225 (LOGO_SIZE * aspectRatio 2.5).
+  // ▼ TUNE exit distance: increase to push the tag further right when hiding ▼
+  const MONTHLY_TAG_EXIT_X = screenWidth * 0.5;
+  const monthlyTagTranslateX = useSharedValue(MONTHLY_TAG_EXIT_X);
+  useEffect(() => {
+    if (currentWeeks >= WEEKS_PER_MONTH) {
+      // ▼ TUNE spring: damping controls overshoot (higher = less bounce), stiffness controls speed ▼
+      monthlyTagTranslateX.value = withSpring(0, { damping: 33, stiffness: 200 });
+    } else {
+      monthlyTagTranslateX.value = withTiming(MONTHLY_TAG_EXIT_X, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
+    }
+  }, [currentWeeks]);
+  const monthlyTagAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: monthlyTagTranslateX.value }],
+  }));
+
   // ─── Tax lookup ─────────────────────────────────────────────────────────
   const [tax, setTax] = useState<TaxResult | null>(null);
   const [taxLoading, setTaxLoading] = useState(true);
@@ -1050,6 +1076,21 @@ function BookingView({
     ? `${shortDate(startDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`
     : `${shortDateWithDay(startDateTime)} → ${shortDateWithDay(endDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`;
 
+  // ─── Weekly derived values ───────────────────────────────────────────────
+  const weeklyRate     = listing.price_per_hour * HOURS_PER_WEEK;
+  const monthlyRate    = weeklyRate * WEEKS_PER_MONTH;
+  const weeklyMonths   = Math.floor(currentWeeks / WEEKS_PER_MONTH);
+  const weeklyRem      = currentWeeks % WEEKS_PER_MONTH;
+  const weeklySubtotal = weeklyMonths * monthlyRate + weeklyRem * weeklyRate;
+  const weeklyTaxAmt   = weeklySubtotal * taxRate;
+  const weeklyTotal    = weeklySubtotal + weeklyTaxAmt;
+  const weeklyEnd      = useMemo(
+    () => new Date(mountTime.getTime() + currentWeeks * 7 * 24 * 3_600_000),
+    [mountTime, currentWeeks],
+  );
+  const weeklySummary  = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
+  const weeklyHours    = currentWeeks * HOURS_PER_WEEK;
+
   // ─── Post-payment routing ──────────────────────────────────────────────
   const handlePaymentSuccess = async () => {
     if (!currentUserId) {
@@ -1092,34 +1133,197 @@ function BookingView({
     }
   };
 
-  // ─── Weekly mode placeholder ────────────────────────────────────────────
+  // ─── Weekly post-payment routing ────────────────────────────────────────
+  const handleWeeklyPaymentSuccess = async () => {
+    if (!currentUserId) {
+      Alert.alert('Reservation booked', 'Could not open chat (not signed in).');
+      onPaymentDone();
+      return;
+    }
+    if (currentUserId === listing.owner_id) {
+      Alert.alert('Reservation booked', 'You booked your own listing — no chat to open.');
+      onPaymentDone();
+      return;
+    }
+    try {
+      const { conversationId, ownerName } = await findOrCreateConversation(
+        currentUserId,
+        listing.owner_id,
+      );
+      const body = `Booking confirmed: ${listing.address} · ${currentWeeks}w · $${weeklyTotal.toFixed(2)}. Hi! I just booked your spot.`;
+      try {
+        await insertBookingConfirmationMessage(conversationId, currentUserId, body);
+      } catch (e) {
+        console.warn('[booking] auto-message insert failed', e);
+      }
+      router.push({
+        pathname: './Chat',
+        params: { conversationId, otherUserName: ownerName },
+      } as any);
+    } catch (e: any) {
+      Alert.alert(
+        'Payment succeeded',
+        `Couldn't open chat (${e?.message ?? 'unknown error'}). Your booking went through.`,
+      );
+      onPaymentDone();
+    }
+  };
+
+  // ─── Weekly mode ─────────────────────────────────────────────────────────
   if (mode === 'weekly') {
     return (
       <View style={[bookingStyles.screen, { backgroundColor: Palette.chalkgrey }]}>
         <SafeAreaView style={bookingStyles.safeArea} edges={['top']}>
-          <View
-            style={[
-              bookingStyles.brandHeader,
-              { paddingHorizontal: sizes.H_PAD, marginTop: 4 },
-            ]}
+          <RNScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 12 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={!pickerActive}
           >
-            <Image
-              source={spotonLogoAsset}
-              style={{ width: sizes.LOGO_SIZE, height: sizes.LOGO_SIZE }}
-              resizeMode="contain"
-            />
-            <Text style={[bookingStyles.brandText, { fontSize: sizes.FONT_HEADER }]}>
-              SpotOn Payment
-            </Text>
-          </View>
-          <View style={bookingStyles.weeklyPlaceholder}>
-            <Text style={bookingStyles.weeklyPlaceholderText}>
-              Weekly view — coming soon
-            </Text>
-          </View>
-          <View
-            style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}
-          >
+            {/* Header */}
+            <View style={[bookingStyles.brandHeader, { paddingHorizontal: sizes.H_PAD, marginTop: 4 }]}>
+              <Image
+                source={spotonLogoAsset}
+                style={{ width: sizes.LOGO_SIZE, height: sizes.LOGO_SIZE }}
+                resizeMode="contain"
+              />
+              <Text style={[bookingStyles.brandText, { fontSize: sizes.FONT_HEADER }]}>
+                SpotOn Payment
+              </Text>
+              <Animated.View
+                style={[{ marginLeft: 'auto' }, monthlyTagAnimStyle]}
+                pointerEvents="none"
+              >
+                <Image
+                  source={monthlyTagAsset}
+                  style={{ height: sizes.LOGO_SIZE, aspectRatio: 2.5 }}
+                  resizeMode="contain"
+                />
+              </Animated.View>
+            </View>
+
+            {/* Listing card */}
+            <View style={[bookingStyles.cardWrap, { paddingHorizontal: sizes.H_PAD }]}>
+              <View style={[cardStyles.card, cardStyles.cardSelected]}>
+                <Text style={[cardStyles.title, { fontSize: sizes.FONT_TITLE }]} numberOfLines={2}>
+                  {listing.address}
+                </Text>
+                <View style={cardStyles.detailsRow}>
+                  <View style={cardStyles.detailItem}>
+                    <Image
+                      source={cabinIconAsset}
+                      style={[cardStyles.detailIcon, { width: sizes.ICON_SIZE, height: sizes.ICON_SIZE }]}
+                      resizeMode="contain"
+                    />
+                    <Text style={[cardStyles.detailText, { fontSize: sizes.FONT_LABEL }]}>
+                      Parking Spot
+                    </Text>
+                  </View>
+                </View>
+                <View style={cardStyles.bottomRow}>
+                  <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
+                    ${Number(listing.price_per_hour).toFixed(2)}
+                    <Text style={cardStyles.priceUnit}> / hr</Text>
+                  </Text>
+                  <Text style={[cardStyles.distance, { fontSize: sizes.FONT_DIST }]}>
+                    {listing.distance.toFixed(1)} mi away
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Week scroller */}
+            <View
+              style={[
+                bookingStyles.scrollerArea,
+                {
+                  paddingHorizontal: sizes.H_PAD,
+                  marginTop: screenWidth * 0.06,
+                  height: 360,
+                },
+              ]}
+            >
+              <View style={bookingStyles.scrollerLayer}>
+                <Text style={bookingStyles.scrollerLabel}>Weeks</Text>
+                <HourScroller
+                  value={currentWeeks}
+                  onChange={setCurrentWeeks}
+                  min={1}
+                  max={HARD_CAP_WEEKS}
+                  fontSize={Math.min(48, screenWidth * 0.12)}
+                  visibleCount={5}
+                  onInteractionStart={lockPicker}
+                  onInteractionEnd={unlockPicker}
+                />
+              </View>
+            </View>
+
+            {/* Summary line */}
+            <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
+            </View>
+
+            {/* Total block */}
+            <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.totalLabel}>Total</Text>
+
+              {weeklyMonths > 0 ? (
+                <>
+                  {/* Monthly row with tag badge */}
+                  <View style={bookingStyles.totalLine}>
+                    <Text style={bookingStyles.totalSubtotal}>
+                      ${monthlyRate.toFixed(2)} × {weeklyMonths} month{weeklyMonths > 1 ? 's' : ''}
+                    </Text>
+                    <Text style={bookingStyles.totalSubtotalAmount}>
+                      ${(weeklyMonths * monthlyRate).toFixed(2)}
+                    </Text>
+                  </View>
+                  {/* Remaining weeks row (hidden when evenly divisible) */}
+                  {weeklyRem > 0 && (
+                    <View style={bookingStyles.totalLine}>
+                      <Text style={bookingStyles.totalSubtotal}>
+                        ${weeklyRate.toFixed(2)} × {weeklyRem} week{weeklyRem > 1 ? 's' : ''}
+                      </Text>
+                      <Text style={bookingStyles.totalSubtotalAmount}>
+                        ${(weeklyRem * weeklyRate).toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={bookingStyles.totalLine}>
+                  <Text style={bookingStyles.totalSubtotal}>
+                    ${weeklyRate.toFixed(2)} × {currentWeeks} week{currentWeeks > 1 ? 's' : ''}
+                  </Text>
+                  <Text style={bookingStyles.totalSubtotalAmount}>
+                    ${weeklySubtotal.toFixed(2)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Tax row */}
+              <View style={bookingStyles.totalLine}>
+                <Text style={bookingStyles.totalTaxLabel}>
+                  {taxLoading ? 'Calculating tax…' : `Tax (${tax?.jurisdiction ?? 'Default'})`}
+                </Text>
+                {!taxLoading && (
+                  <Text style={bookingStyles.totalTaxAmount}>${weeklyTaxAmt.toFixed(2)}</Text>
+                )}
+              </View>
+
+              {/* Final total */}
+              <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
+                <Text style={bookingStyles.totalFinalLabel}>Total</Text>
+                <Text style={bookingStyles.totalFinalAmount}>
+                  {taxLoading ? `$${weeklySubtotal.toFixed(2)}+` : `$${weeklyTotal.toFixed(2)}`}
+                </Text>
+              </View>
+            </View>
+          </RNScrollView>
+
+          {/* Bottom bar */}
+          <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
             <TouchableOpacity
               onPress={withLightHaptic(onBack)}
               style={bookingStyles.backCircle}
@@ -1127,6 +1331,14 @@ function BookingView({
             >
               <Ionicons name="chevron-back" size={22} color="#fff" />
             </TouchableOpacity>
+            <View style={bookingStyles.payWrap}>
+              <PaymentCard
+                listingId={listing.id}
+                price={weeklyTotal}
+                hours={weeklyHours}
+                onPaymentSuccess={handleWeeklyPaymentSuccess}
+              />
+            </View>
           </View>
         </SafeAreaView>
       </View>
@@ -1571,15 +1783,5 @@ const bookingStyles = StyleSheet.create({
     fontFamily: CustomFonts.BevellierMedium,
     fontSize: 36,
     color: '#000',
-  },
-  weeklyPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  weeklyPlaceholderText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 16,
-    color: 'rgba(0,0,0,0.6)',
   },
 });
