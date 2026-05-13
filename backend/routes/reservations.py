@@ -5,6 +5,49 @@ from utils.pricing import calculate_final_price, PricingError
 reservations_bp = Blueprint('reservations', __name__)
 
 
+@reservations_bp.route('/reservations/preview', methods=['GET'])
+def preview_price():
+    """
+    Preview the final price for a listing without creating a reservation.
+    Query parameters: listing_id, start_time (ISO 8601), end_time (ISO 8601)
+    Returns: { subtotal, platform_fee, host_payout, total, tier, units, rate }
+    """
+    listing_id = request.args.get('listing_id')
+    start_time = request.args.get('start_time')
+    end_time = request.args.get('end_time')
+
+    if not all([listing_id, start_time, end_time]):
+        return jsonify({"error": "Missing query parameters: listing_id, start_time, end_time"}), 400
+
+    # Fetch listing rates
+    try:
+        listing_resp = supabase.table("listings").select(
+            "hourly_rate, daily_rate, weekly_rate, monthly_rate"
+        ).eq("id", listing_id).single().execute()
+        listing_row = listing_resp.data
+        if not listing_row:
+            return jsonify({"error": "Listing not found"}), 404
+    except Exception:
+        return jsonify({"error": "Listing not found"}), 404
+
+    # Compute pricing
+    try:
+        price_breakdown = calculate_final_price(listing_row, start_time, end_time)
+        return jsonify({
+            "subtotal": str(price_breakdown["subtotal"]),
+            "platform_fee": str(price_breakdown["platform_fee"]),
+            "host_payout": str(price_breakdown["host_payout"]),
+            "total": str(price_breakdown["total"]),
+            "tier": price_breakdown["tier"],
+            "units": str(price_breakdown["units"]),
+            "rate": str(price_breakdown["rate"])
+        }), 200
+    except PricingError as pe:
+        return jsonify({"error": str(pe)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Pricing error: {str(e)}"}), 500
+
+
 @reservations_bp.route('/reservations/<user_id>', methods=['GET'])
 def get_reservations(user_id):
     response = supabase.table("reservations").select("*").eq("renter_id", user_id).execute()
