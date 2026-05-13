@@ -4,7 +4,10 @@
  * Scene 1: Welcome / Intro
  * Scene 2: Pick Location (map)
  * Scene 3: Camera pop-up (overlay on scene 2)
- * Scene 4: Price Picker
+ * Scene 4: Price Picker — 3 sub-states (pricingStep):
+ *          'select' + periodType 0 → Hourly picker
+ *          'select' + periodType 1 → Weekly picker
+ *          'breakdown'             → Weekly fee/discount breakdown
  * Scene 5: Calendar pop-up (overlay on scene 4)
  */
 
@@ -48,6 +51,7 @@ import { supabase } from '../utils/supabase';
 
 // ─── Components ───────────────────────────────────────────────────────────────
 import DateRangePicker from '@/src/components/DateRangePicker';
+import FilterToggle from '@/src/components/FilterToggle';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
@@ -57,10 +61,12 @@ import addLocationImg from '@/assets/images/add_location.png';
 import cameraanalogImg from '@/assets/images/cameraanalog.png';
 import calendarImg from '@/assets/images/calendar.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
+import addlistingimageAsset from '@/assets/images/addlistingimage.png';
 
 // ─── Sizing ───────────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
 const H_PAD = W * 0.06;
+const PRICE_IMAGE_SIZE = Math.min(W * 0.82, H * 0.34);
 
 // Default region — Gainesville, FL
 const GAINESVILLE: Region = {
@@ -83,6 +89,9 @@ export default function CreateListing2() {
   const [address, setAddress] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [pricePerHour, setPricePerHour] = useState(3.0);
+  const [pricePerWeek, setPricePerWeek] = useState(50);
+  const [periodType, setPeriodType] = useState<0 | 1>(0); // 0 = Hourly, 1 = Weekly
+  const [pricingStep, setPricingStep] = useState<'select' | 'breakdown'>('select');
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
 
@@ -124,7 +133,12 @@ export default function CreateListing2() {
   }, [showCalendarPopup]);
 
   // ── Price PanResponder ─────────────────────────────────────────────────────
+  // Two separate refs so toggling Hourly↔Weekly preserves each value.
+  // periodTypeRef mirrors state so the PanResponder (built once via useRef)
+  // reads the current mode without stale-closure bugs.
   const priceRef = useRef(3.0);
+  const priceWeekRef = useRef(50);
+  const periodTypeRef = useRef<0 | 1>(0);
   const lastY = useRef<number | null>(null);
 
   const pricePanResponder = useRef(
@@ -140,9 +154,16 @@ export default function CreateListing2() {
         const steps = Math.floor(Math.abs(dy) / 10);
         if (steps === 0) return;
         lastY.current = e.nativeEvent.pageY;
-        const delta = steps * 0.25 * (dy > 0 ? 1 : -1);
-        priceRef.current = Math.max(0, Math.round((priceRef.current + delta) * 4) / 4);
-        setPricePerHour(priceRef.current);
+        const dir = dy > 0 ? 1 : -1;
+        if (periodTypeRef.current === 0) {
+          const delta = steps * 0.25 * dir;
+          priceRef.current = Math.max(0, Math.round((priceRef.current + delta) * 4) / 4);
+          setPricePerHour(priceRef.current);
+        } else {
+          const delta = steps * 1 * dir;
+          priceWeekRef.current = Math.max(0, Math.round(priceWeekRef.current + delta));
+          setPricePerWeek(priceWeekRef.current);
+        }
       },
       onPanResponderRelease: () => {
         lastY.current = null;
@@ -238,12 +259,14 @@ export default function CreateListing2() {
         return;
       }
 
+      // TODO: replace with real period_type + per-unit price columns once schema is migrated.
+      // Frontend captures pricePerHour, pricePerWeek, periodType in state; backend currently only persists price_per_hour.
       const { error } = await supabase.from('listings').insert({
         owner_id: userId,
         address: address,
         latitude: latitude,
         longitude: longitude,
-        price_per_hour: pricePerHour,
+        price_per_hour: 2,
         is_active: true,
         photo_url: photoUrl,
       });
@@ -284,10 +307,25 @@ export default function CreateListing2() {
   };
 
   const goToScene5 = () => {
-    if (pricePerHour <= 0) {
-      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+    if (periodType === 0) {
+      if (pricePerHour <= 0) {
+        Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+        return;
+      }
+      setShowCalendarPopup(true);
+      setScene(5);
       return;
     }
+    // Weekly path
+    if (pricingStep === 'select') {
+      if (pricePerWeek <= 0) {
+        Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+        return;
+      }
+      setPricingStep('breakdown');
+      return;
+    }
+    // Weekly breakdown → calendar
     setShowCalendarPopup(true);
     setScene(5);
   };
@@ -435,36 +473,133 @@ export default function CreateListing2() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 4 — Price Picker
+  // Scene 4 — Price Picker (3 sub-states: Hourly select, Weekly select, Weekly breakdown)
   // ─────────────────────────────────────────────────────────────────────────────
-  const renderScene4 = () => (
-    <SafeAreaView style={styles.safeArea}>
-      {renderSharedHeader("Finally let's set your price and dates.")}
-      <View style={styles.centerContent}>
-        <View style={styles.priceContainer} {...pricePanResponder.panHandlers}>
-          <Text style={styles.priceText}>
-            ${pricePerHour.toFixed(2)}
-          </Text>
-          <Text style={styles.perHourText}>/hour</Text>
+  const renderScene4 = () => {
+    if (pricingStep === 'breakdown') return renderScene4Breakdown();
+    return renderScene4Select();
+  };
+
+  // States A (Hourly) + B (Weekly Page 1) — same layout, FilterToggle controls which
+  const renderScene4Select = () => {
+    const isHourly = periodType === 0;
+    const displayPrice = isHourly ? pricePerHour : pricePerWeek;
+    const unitLabel = isHourly ? '/hour' : '/week';
+    const feeAmount = displayPrice * 0.15;
+    const profit = displayPrice - feeAmount;
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        {renderSharedHeader("Finally let's set your price and dates.")}
+        <View style={styles.selectContent}>
+          <View style={styles.productImageWrap}>
+            <Image source={addlistingimageAsset} style={styles.productImage} resizeMode="contain" />
+          </View>
+          <View style={styles.selectControls}>
+            <View style={styles.toggleRow}>
+              <FilterToggle
+                options={['Hourly', 'Weekly']}
+                value={periodType}
+                onChange={(n) => {
+                  const next = (n as 0 | 1);
+                  periodTypeRef.current = next;
+                  setPeriodType(next);
+                }}
+              />
+            </View>
+            <View style={styles.priceContainer} {...pricePanResponder.panHandlers}>
+              <Text style={styles.priceText}>${displayPrice.toFixed(2)}</Text>
+              <Text style={styles.perHourText}>{unitLabel}</Text>
+            </View>
+            <Text style={styles.swipeHint}>Swipe up / down to adjust</Text>
+            {isHourly && (
+              <Text style={styles.feeNotice}>
+                Please note SpotOn will take ${feeAmount.toFixed(2)} (15%), so your profit will be ${profit.toFixed(2)} /hour.
+              </Text>
+            )}
+          </View>
         </View>
-        <Text style={styles.swipeHint}>Swipe up / down to adjust</Text>
-      </View>
-      {renderBottomButtons(() => setScene(2), goToScene5)}
-    </SafeAreaView>
-  );
+        {renderBottomButtons(() => setScene(2), goToScene5)}
+      </SafeAreaView>
+    );
+  };
+
+  // State C — Weekly Breakdown (pricing-details container)
+  const renderScene4Breakdown = () => {
+    const fmt = (n: number) => `$${n.toFixed(2)}`;
+
+    const weeklyGross = pricePerWeek;
+    const weeklyFee = weeklyGross * 0.15;
+    const weeklyNet = weeklyGross - weeklyFee;
+
+    const monthlyBase = pricePerWeek * 4;
+    const monthlyDiscount = monthlyBase * 0.20;
+    const monthlyAfterDiscount = monthlyBase - monthlyDiscount;
+    const monthlyFee = monthlyAfterDiscount * 0.15;
+    const monthlyNet = monthlyAfterDiscount - monthlyFee;
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        {renderSharedHeader("Finally let's set your price and dates.")}
+        <View style={styles.breakdownWrapper}>
+          <View style={styles.breakdownContainer}>
+            <Image source={spotonLogoAsset} style={styles.breakdownLogo} resizeMode="contain" />
+
+            {/* Weekly */}
+            <Text style={styles.breakdownSectionTitle}>Weekly</Text>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Gross</Text>
+              <Text style={styles.breakdownValue}>{fmt(weeklyGross)}</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>SpotOn fee (15%)</Text>
+              <Text style={styles.breakdownValue}>- {fmt(weeklyFee)}</Text>
+            </View>
+            <View style={styles.breakdownDivider} />
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownTotalLabel}>You earn</Text>
+              <Text style={styles.breakdownTotalValue}>{fmt(weeklyNet)}</Text>
+            </View>
+
+            <View style={{ height: W * 0.04 }} />
+
+            {/* Monthly */}
+            <Text style={styles.breakdownSectionTitle}>Monthly (4 weeks)</Text>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Gross</Text>
+              <Text style={styles.breakdownValue}>{fmt(monthlyBase)}</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Monthly discount (20%)</Text>
+              <Text style={styles.breakdownValue}>- {fmt(monthlyDiscount)}</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Subtotal</Text>
+              <Text style={styles.breakdownValue}>{fmt(monthlyAfterDiscount)}</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>SpotOn fee (15%)</Text>
+              <Text style={styles.breakdownValue}>- {fmt(monthlyFee)}</Text>
+            </View>
+            <View style={styles.breakdownDivider} />
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownTotalLabel}>You earn</Text>
+              <Text style={styles.breakdownTotalValue}>{fmt(monthlyNet)}</Text>
+            </View>
+          </View>
+        </View>
+        {renderBottomButtons(() => setPricingStep('select'), goToScene5)}
+      </SafeAreaView>
+    );
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Scene 5 — Calendar Pop-up (overlay on scene 4) — uses shared DateRangePicker
   // ─────────────────────────────────────────────────────────────────────────────
   const renderScene5 = () => (
     <SafeAreaView style={styles.safeArea}>
-      {renderSharedHeader("Finally let's set your price and dates.")}
-      {/* Dimmed price background */}
-      <View style={[styles.centerContent, { opacity: 0.35 }]}>
-        <View style={styles.priceContainer}>
-          <Text style={styles.priceText}>${pricePerHour.toFixed(2)}</Text>
-          <Text style={styles.perHourText}>/hour</Text>
-        </View>
+      {/* Dimmed underlying scene 4 view (hourly select OR weekly breakdown card) */}
+      <View style={styles.scene5Dim} pointerEvents="none">
+        {pricingStep === 'breakdown' ? renderScene4Breakdown() : renderScene4Select()}
       </View>
 
       <DateRangePicker
@@ -658,26 +793,27 @@ const styles = StyleSheet.create({
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingVertical: W * 0.12,
+    paddingVertical: W * 0.04,
     paddingHorizontal: W * 0.1,
   },
   priceText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 56,
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: W * 0.16,
     color: '#000',
+    lineHeight: W * 0.18,
   },
   perHourText: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 14,
+    fontSize: W * 0.038,
     color: '#333',
-    marginBottom: 10,
+    marginBottom: W * 0.03,
     marginLeft: 4,
   },
   swipeHint: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 13,
+    fontSize: W * 0.033,
     color: 'rgba(0,0,0,0.5)',
-    marginTop: -W * 0.04,
+    marginTop: W * 0.005,
   },
 
   // ── Calendar ───────────────────────────────────────────────────────────────
@@ -740,5 +876,107 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: W * 0.02,
     marginBottom: W * 0.02,
+  },
+
+  // ── Scene 4 — Pricing (new design) ─────────────────────────────────────────
+  selectContent: {
+    flex: 1,
+    paddingHorizontal: H_PAD,
+  },
+  productImageWrap: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: W * 0.02,
+    overflow: 'hidden',
+  },
+  productImage: {
+    width: PRICE_IMAGE_SIZE,
+    height: PRICE_IMAGE_SIZE,
+  },
+  selectControls: {
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: W * 0.02,
+    paddingBottom: W * 0.02,
+  },
+  toggleRow: {
+    width: '100%',
+    marginBottom: W * 0.02,
+  },
+  feeNotice: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: W * 0.032,
+    color: '#444',
+    textAlign: 'center',
+    marginTop: W * 0.025,
+    paddingHorizontal: W * 0.02,
+    lineHeight: W * 0.045,
+  },
+  breakdownWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: H_PAD,
+    paddingTop: W * 0.02,
+  },
+  breakdownContainer: {
+    width: '100%',
+    paddingVertical: W * 0.06,
+    paddingHorizontal: W * 0.06,
+    borderRadius: W * 0.05,
+    backgroundColor: '#000',
+  },
+  breakdownLogo: {
+    position: 'absolute',
+    top: W * 0.04,
+    right: W * 0.04,
+    width: W * 0.12,
+    height: W * 0.12,
+    opacity: 0.9,
+    tintColor: '#fff',
+  },
+  breakdownSectionTitle: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: W * 0.045,
+    color: '#fff',
+    marginBottom: W * 0.02,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: W * 0.012,
+  },
+  breakdownLabel: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: W * 0.037,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  breakdownValue: {
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: W * 0.04,
+    color: '#fff',
+  },
+  breakdownDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginVertical: W * 0.02,
+  },
+  breakdownTotalLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: W * 0.045,
+    color: '#fff',
+  },
+  breakdownTotalValue: {
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: W * 0.05,
+    color: '#fff',
+  },
+  scene5Dim: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.35,
   },
 });
