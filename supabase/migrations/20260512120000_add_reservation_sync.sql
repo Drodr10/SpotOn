@@ -27,8 +27,18 @@ RETURNS TABLE(
     photo_url TEXT,
     created_at TIMESTAMPTZ
 ) AS $$
-SELECT l.* FROM listings l
-WHERE l.is_active = true
+SELECT 
+    l.id,
+    l.owner_id,
+    l.address,
+    l.latitude,
+    l.longitude,
+    l.price_per_hour,
+    l.is_active,
+    l.photo_url,
+    l.created_at
+FROM listings l
+WHERE l.is_active = TRUE
 AND l.id NOT IN (
     SELECT DISTINCT listing_id FROM reservations
     WHERE status != 'cancelled'
@@ -68,9 +78,10 @@ BEGIN
     -- Return success
     RETURN QUERY SELECT v_reservation_id, v_conversation_id, NULL::TEXT;
     
-EXCEPTION WHEN exclusion_violation THEN
-    RETURN QUERY SELECT NULL::UUID, NULL::UUID, 'Reservation overlaps with existing booking'::TEXT;
-EXCEPTION WHEN OTHERS THEN
-    RETURN QUERY SELECT NULL::UUID, NULL::UUID, ('Database error: ' || SQLERRM)::TEXT;
+    EXCEPTION 
+        WHEN exclusion_violation THEN
+            RETURN QUERY SELECT NULL::UUID, NULL::UUID, 'Reservation overlaps with existing booking'::TEXT;
+        WHEN OTHERS THEN
+            RETURN QUERY SELECT NULL::UUID, NULL::UUID, ('Database error: ' || SQLERRM)::TEXT;
 END;
 $$ LANGUAGE plpgsql;
