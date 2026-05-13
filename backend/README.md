@@ -33,8 +33,12 @@ Base URL: `http://localhost:5000/api`
 
 ### `GET /listings`
 
-- **Description**: Returns all active parking spots.
-- **Response**: `200 OK` with an array of listing objects.
+- **Description**: Returns all active parking spots. Optionally filters by availability for a requested time range.
+- **Query Parameters** (optional):
+  - `start_time` — ISO 8601 timestamp (e.g., `2026-05-15T14:00:00Z`). When provided with `end_time`, filters to listings without overlapping reservations.
+  - `end_time` — ISO 8601 timestamp (e.g., `2026-05-15T16:00:00Z`).
+- **Response**: `200 OK` with an array of listing objects (filtered by time range if provided).
+- **Example**: `GET /listings?start_time=2026-05-15T14:00:00Z&end_time=2026-05-15T16:00:00Z`
 
 ### `POST /listings`
 
@@ -47,13 +51,19 @@ Base URL: `http://localhost:5000/api`
 
 ### `POST /reservations`
 
-- **Description**: Creates a booking for a spot.
+- **Description**: Creates a booking for a spot and automatically initiates a conversation with the listing owner. Uses a Postgres exclusion constraint to prevent overlapping reservations at the database level.
 - **Body**: `{ listing_id, renter_id, start_time, end_time, total_price }`
+- **Response**: 
+  - `201 Created`: `{ reservation_id, conversation_id, message }`
+  - `400 Bad Request`: Missing required fields
+  - `404 Not Found`: Listing not found
+  - `409 Conflict`: Reservation overlaps with an existing booking (exclusion constraint triggered)
+  - `500 Internal Server Error`: Database error
 
 ### `GET /reservations/<user_id>`
 
-- **Description**: Returns all past reservations made by a specific user
-- **Response**:  `200 OK` with reservation data
+- **Description**: Returns all reservations made by a specific user (past and upcoming).
+- **Response**: `200 OK` with reservation data array
 ---
 
 ## Messaging
