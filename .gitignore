@@ -44,6 +44,7 @@ app-example
 
 # Python
 .venv
+venv/
 .env
 
 __pycache__
@@ -56,3 +57,7 @@ __pycache__
 .claude/worktrees/
 
 STRIPE_INSTRUCTIONS.md
+
+# AI agents
+.agents/
+_bmad*/
