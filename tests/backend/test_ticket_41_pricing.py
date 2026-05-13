@@ -29,8 +29,8 @@ def test_boundary_8_9_vs_9_0():
     res1 = calculate_final_price(listing, iso(start), iso(t_8_9))
     res2 = calculate_final_price(listing, iso(start), iso(t_9_0))
 
-    assert Decimal('89.00') == res1['subtotal']
-    # At 9.0 hours, best-price picks daily (85) instead of hourly (90)
+    # Cap pricing: daily rate (85) should be chosen for both 8.9h and 9.0h
+    assert Decimal('85.00') == res1['subtotal']
     assert Decimal('85.00') == res2['subtotal']
 
 

@@ -59,7 +59,9 @@ def book_spot():
             "p_owner_id": owner_id,
             "p_start_time": start_time,
             "p_end_time": end_time,
-            "p_total_price": str(total_price)
+            "p_total_price": str(total_price),
+            "p_platform_fee": str(platform_fee),
+            "p_host_payout": str(host_payout)
         }).execute()
 
         response_data = result.data[0] if result.data else {}

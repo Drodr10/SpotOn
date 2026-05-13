@@ -71,27 +71,20 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
             raise PricingError('Hourly bookings not supported for this listing')
 
     # Build candidate subtotals (prorated for multi-unit durations).
-    # Only consider tiers up to and including the required tier to keep threshold semantics in sync with DB trigger.
-    tier_order = ['hourly', 'daily', 'weekly', 'monthly']
-    required_index = tier_order.index(required_tier)
-
+    # Always evaluate all provided rates so we can apply "cap pricing" (choose best price among available tiers).
     candidates = []  # tuples (tier, subtotal, rate, units)
-    # hourly always allowed
-    if hourly_rate is not None and required_index >= 0:
+    if hourly_rate is not None:
         candidates.append(('hourly', (hourly_rate * dur_hours), hourly_rate, dur_hours))
 
-    # daily allowed only if required tier is daily or above
-    if daily_rate is not None and required_index >= tier_order.index('daily'):
+    if daily_rate is not None:
         daily_units = dur_days if dur_days >= Decimal(1) else Decimal(1)
         candidates.append(('daily', (daily_rate * daily_units), daily_rate, daily_units))
 
-    # weekly allowed only if required tier is weekly or above
-    if weekly_rate is not None and required_index >= tier_order.index('weekly'):
+    if weekly_rate is not None:
         weekly_units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
         candidates.append(('weekly', (weekly_rate * weekly_units), weekly_rate, weekly_units))
 
-    # monthly allowed only if required tier is monthly
-    if monthly_rate is not None and required_index >= tier_order.index('monthly'):
+    if monthly_rate is not None:
         monthly_units = dur_months if dur_months >= Decimal(1) else Decimal(1)
         candidates.append(('monthly', (monthly_rate * monthly_units), monthly_rate, monthly_units))
 
