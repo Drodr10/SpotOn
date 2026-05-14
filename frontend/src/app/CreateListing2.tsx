@@ -61,6 +61,7 @@ import addLocationImg from '@/assets/images/add_location.png';
 import cameraanalogImg from '@/assets/images/cameraanalog.png';
 import calendarImg from '@/assets/images/calendar.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
+import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
 import addlistingimageAsset from '@/assets/images/addlistingimage.png';
 
 // ─── Sizing ───────────────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ export default function CreateListing2() {
   const [pricePerWeek, setPricePerWeek] = useState(50);
   const [periodType, setPeriodType] = useState<0 | 1>(0); // 0 = Hourly, 1 = Weekly
   const [pricingStep, setPricingStep] = useState<'select' | 'breakdown'>('select');
+  const [weeklyTitleHeight, setWeeklyTitleHeight] = useState(0);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
 
@@ -526,6 +528,7 @@ export default function CreateListing2() {
   // State C — Weekly Breakdown (pricing-details container)
   const renderScene4Breakdown = () => {
     const fmt = (n: number) => `$${n.toFixed(2)}`;
+    const weeklyLogoSize = weeklyTitleHeight > 0 ? weeklyTitleHeight : W * 0.055;
 
     const weeklyGross = pricePerWeek;
     const weeklyFee = weeklyGross * 0.15;
@@ -542,10 +545,27 @@ export default function CreateListing2() {
         {renderSharedHeader("Finally let's set your price and dates.")}
         <View style={styles.breakdownWrapper}>
           <View style={styles.breakdownContainer}>
-            <Image source={spotonLogoAsset} style={styles.breakdownLogo} resizeMode="contain" />
+            <Image
+              source={spotonLogoCircleAsset}
+              style={[
+                styles.breakdownLogo,
+                { width: weeklyLogoSize, height: weeklyLogoSize },
+              ]}
+              resizeMode="contain"
+            />
 
             {/* Weekly */}
-            <Text style={styles.breakdownSectionTitle}>Weekly</Text>
+            <Text
+              style={styles.breakdownSectionTitle}
+              onLayout={(e) => {
+                const nextHeight = e.nativeEvent.layout.height;
+                if (nextHeight !== weeklyTitleHeight) {
+                  setWeeklyTitleHeight(nextHeight);
+                }
+              }}
+            >
+              Weekly
+            </Text>
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel}>Gross</Text>
               <Text style={styles.breakdownValue}>{fmt(weeklyGross)}</Text>
@@ -932,11 +952,8 @@ const styles = StyleSheet.create({
   breakdownLogo: {
     position: 'absolute',
     top: W * 0.04,
-    right: W * 0.04,
-    width: W * 0.12,
-    height: W * 0.12,
+    right: W * 0.06,
     opacity: 0.9,
-    tintColor: '#fff',
   },
   breakdownSectionTitle: {
     fontFamily: CustomFonts.SwitzerSemibold,
