@@ -12,6 +12,7 @@ import {
 import penIcon from '@/assets/images/penicon.png';
 import starIcon from '@/assets/images/staricon.png';
 import checkIcon from '@/assets/images/checkmarkicon.png'
+import { withLightHaptic } from '@/src/utils/haptics';
 
 const { width: screenWidth } = Dimensions.get('window');
 const H_PAD          = screenWidth * 0.05;   
@@ -62,7 +63,7 @@ export default function EditableProfileCard({ name, setName, rating }: CardProps
         </View>
 
         <View>
-          <TouchableOpacity onPress={editUsername}>
+          <TouchableOpacity onPress={withLightHaptic(editUsername)}>
             <Image style={styles.editImage} source={editing ? checkIcon : penIcon}/>
           </TouchableOpacity>
           <Image />

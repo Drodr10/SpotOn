@@ -24,6 +24,7 @@ import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { CustomFonts } from '@/src/constants/theme';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '../utils/supabase';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import profileIconAsset from '@/assets/images/temprofileicon.png';
@@ -116,6 +117,7 @@ export default function QuickSearch() {
   const handleSubmit = () => {
     const trimmed = searchText.trim();
     if (!trimmed) return;
+    triggerLightHaptic();
     const coord = pressedCoord ?? region;
     router.push({
       pathname: '/search',
@@ -131,6 +133,7 @@ export default function QuickSearch() {
   };
 
   const handleMapLongPress = async (e: any) => {
+    triggerLightHaptic();
     const { latitude, longitude } = e.nativeEvent.coordinate;
 
     // Flash effect
@@ -189,7 +192,7 @@ export default function QuickSearch() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.profilePill}
-            onPress={() => router.push('/Homescreen')}
+            onPress={withLightHaptic(() => router.push('/Homescreen'))}
           >
             <Image source={profileIconAsset} style={styles.avatar} />
             <Text style={styles.profileName}>{firstName || 'User'}</Text>
@@ -214,7 +217,7 @@ export default function QuickSearch() {
           {/* Row 2: Search input */}
           <TouchableOpacity
             activeOpacity={1}
-            onPress={() => inputRef.current?.focus()}
+            onPress={withLightHaptic(() => inputRef.current?.focus())}
           >
             <View style={styles.searchInner}>
               <Ionicons name="search" size={SEARCH_ICON} color="rgba(0,0,0,0.6)" />

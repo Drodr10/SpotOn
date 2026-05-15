@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { supabase } from '../utils/supabase';
 import { CustomFonts } from '@/src/constants/theme';
+import { withLightHaptic } from '@/src/utils/haptics';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -76,12 +77,12 @@ export default function MessagesScreen() {
   const renderItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity
       style={styles.convRow}
-      onPress={() =>
+      onPress={withLightHaptic(() =>
         router.push({
           pathname: './Chat',
           params: { conversationId: item.id, otherUserName: item.otherUserName },
         } as any)
-      }
+      )}
       activeOpacity={0.7}
     >
       <View style={styles.avatar}>
@@ -100,7 +101,7 @@ export default function MessagesScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={withLightHaptic(() => router.back())} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Messages</Text>

@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -40,7 +41,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
     <TouchableOpacity
       style={styles.container}
       activeOpacity={0.7}
-      onPress={() => router.push('/QuickSearch')}
+      onPress={withLightHaptic(() => router.push('/QuickSearch'))}
     >
       <Ionicons name="search" size={ICON_SIZE} color="rgba(0,0,0,0.75)" />
       <Text style={styles.placeholder}>Where to?</Text>

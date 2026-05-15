@@ -46,6 +46,10 @@ import { CustomFonts } from '@/src/constants/theme';
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
 
+// ─── Components ───────────────────────────────────────────────────────────────
+import DateRangePicker from '@/src/components/DateRangePicker';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+
 // ─── Assets ───────────────────────────────────────────────────────────────────
 import carparkingImg from '@/assets/images/carparking.png';
 import accessibilityImg from '@/assets/images/accessibility.png';
@@ -149,6 +153,7 @@ export default function CreateListing2() {
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleMapLongPress = async (e: any) => {
+    triggerLightHaptic();
     const { latitude: lat, longitude: lng } = e.nativeEvent.coordinate;
     setLatitude(lat);
     setLongitude(lng);
@@ -295,51 +300,11 @@ export default function CreateListing2() {
   };
 
   const goBackFromScene5 = () => {
-    closePopup(calendarPopupAnim, () => {
-      setShowCalendarPopup(false);
-      setScene(4);
-    });
-  };
-
-  // ── Date Picker state (inline calendar) ────────────────────────────────────
-  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
-  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
-  const [pickingStart, setPickingStart] = useState(true);
-
-  const MONTHS = [
-    'January','February','March','April','May','June',
-    'July','August','September','October','November','December'
-  ];
-  const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-
-  const getDaysInMonth = (year: number, month: number) =>
-    new Date(year, month + 1, 0).getDate();
-  const getFirstDayOfMonth = (year: number, month: number) =>
-    new Date(year, month, 1).getDay();
-
-  const handleDayPress = (day: number) => {
-    const selected = new Date(calendarYear, calendarMonth, day);
-    if (pickingStart) {
-      setStartDate(selected);
-      setEndDate(null);
-      setPickingStart(false);
-    } else {
-      if (startDate && selected < startDate) {
-        setEndDate(startDate);
-        setStartDate(selected);
-      } else {
-        setEndDate(selected);
-      }
-      setPickingStart(true);
-    }
-  };
-
-  const isDaySelected = (day: number) => {
-    const d = new Date(calendarYear, calendarMonth, day);
-    if (startDate && d.toDateString() === startDate.toDateString()) return 'start';
-    if (endDate && d.toDateString() === endDate.toDateString()) return 'end';
-    if (startDate && endDate && d > startDate && d < endDate) return 'range';
-    return null;
+    // DateRangePicker handles its own slide-out animation when `visible` flips to false.
+    setShowCalendarPopup(false);
+    // Wait for the picker's slide-out (≈300ms) before swapping scenes so the
+    // dimmed price background doesn't pop back to full opacity prematurely.
+    setTimeout(() => setScene(4), 300);
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -365,10 +330,10 @@ export default function CreateListing2() {
     continueLabel = 'Continue'
   ) => (
     <View style={styles.bottomRow}>
-      <TouchableOpacity style={styles.backCircle} onPress={onBack} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(onBack)} activeOpacity={0.8}>
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.continueBtn} onPress={onContinue} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.continueBtn} onPress={withLightHaptic(onContinue)} activeOpacity={0.8}>
         <Text style={styles.continueBtnText}>{continueLabel}</Text>
       </TouchableOpacity>
     </View>
@@ -411,7 +376,7 @@ export default function CreateListing2() {
         {/* Current Location button — bottom-left inside map area */}
         <TouchableOpacity
           style={styles.currentLocBtn}
-          onPress={handleCurrentLocation}
+          onPress={withLightHaptic(handleCurrentLocation)}
           activeOpacity={0.8}
         >
           <Image source={addLocationImg} style={styles.addLocationIcon} resizeMode="contain" />
@@ -447,7 +412,7 @@ export default function CreateListing2() {
         </MapView>
       </View>
       <View style={styles.bottomRow}>
-        <TouchableOpacity style={styles.backCircle} onPress={goBackFromScene3} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(goBackFromScene3)} activeOpacity={0.8}>
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -462,7 +427,7 @@ export default function CreateListing2() {
             Let's add a photo of your spot. Press the camera to take the photo.
           </Text>
         </View>
-        <TouchableOpacity onPress={handleTakePhoto} activeOpacity={0.85} style={styles.popupImageBtn}>
+        <TouchableOpacity onPress={withLightHaptic(handleTakePhoto)} activeOpacity={0.85} style={styles.popupImageBtn}>
           <Image source={cameraanalogImg} style={styles.popupLargeImg} resizeMode="contain" />
         </TouchableOpacity>
       </Animated.View>
@@ -489,144 +454,35 @@ export default function CreateListing2() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 5 — Calendar Pop-up (overlay on scene 4)
+  // Scene 5 — Calendar Pop-up (overlay on scene 4) — uses shared DateRangePicker
   // ─────────────────────────────────────────────────────────────────────────────
-  const renderScene5 = () => {
-    const daysInMonth = getDaysInMonth(calendarYear, calendarMonth);
-    const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
-    const cells: (number | null)[] = [
-      ...Array(firstDay).fill(null),
-      ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-    ];
-
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        {renderSharedHeader("Finally let's set your price and dates.")}
-        {/* Dimmed price background */}
-        <View style={[styles.centerContent, { opacity: 0.35 }]}>
-          <View style={styles.priceContainer}>
-            <Text style={styles.priceText}>${pricePerHour.toFixed(2)}</Text>
-            <Text style={styles.perHourText}>/hour</Text>
-          </View>
+  const renderScene5 = () => (
+    <SafeAreaView style={styles.safeArea}>
+      {renderSharedHeader("Finally let's set your price and dates.")}
+      {/* Dimmed price background */}
+      <View style={[styles.centerContent, { opacity: 0.35 }]}>
+        <View style={styles.priceContainer}>
+          <Text style={styles.priceText}>${pricePerHour.toFixed(2)}</Text>
+          <Text style={styles.perHourText}>/hour</Text>
         </View>
+      </View>
 
-        {/* Calendar Pop-up */}
-        <Animated.View
-          style={[styles.popup, { transform: [{ translateY: calendarPopupAnim }] }]}
-        >
-          <View style={styles.popupHelperRow}>
-            <Image source={accessibilityImg} style={[styles.accessibilityIcon, { tintColor: '#fff' }]} />
-            <Text style={styles.popupHelperText}>Finally, let's add the date.</Text>
-          </View>
-
-          {/* Inline calendar */}
-          <View style={styles.calendarContainer}>
-            {/* Month nav */}
-            <View style={styles.calendarNavRow}>
-              <TouchableOpacity
-                onPress={() => {
-                  if (calendarMonth === 0) {
-                    setCalendarMonth(11);
-                    setCalendarYear(calendarYear - 1);
-                  } else {
-                    setCalendarMonth(calendarMonth - 1);
-                  }
-                }}
-              >
-                <Ionicons name="chevron-back" size={20} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.calendarMonthText}>
-                {MONTHS[calendarMonth]} {calendarYear}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  if (calendarMonth === 11) {
-                    setCalendarMonth(0);
-                    setCalendarYear(calendarYear + 1);
-                  } else {
-                    setCalendarMonth(calendarMonth + 1);
-                  }
-                }}
-              >
-                <Ionicons name="chevron-forward" size={20} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Day labels */}
-            <View style={styles.calendarDaysRow}>
-              {DAYS.map((d) => (
-                <Text key={d} style={styles.calendarDayLabel}>{d}</Text>
-              ))}
-            </View>
-
-            {/* Date cells */}
-            <View style={styles.calendarGrid}>
-              {cells.map((day, idx) => {
-                if (day === null) {
-                  return <View key={`empty-${idx}`} style={styles.calendarCell} />;
-                }
-                const sel = isDaySelected(day);
-                return (
-                  <TouchableOpacity
-                    key={`day-${day}`}
-                    style={[
-                      styles.calendarCell,
-                      sel === 'start' || sel === 'end'
-                        ? styles.calendarCellSelected
-                        : sel === 'range'
-                        ? styles.calendarCellRange
-                        : null,
-                    ]}
-                    onPress={() => handleDayPress(day)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.calendarDayText,
-                        (sel === 'start' || sel === 'end') && styles.calendarDayTextSelected,
-                      ]}
-                    >
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Date range hint */}
-            <Text style={styles.calendarRangeHint}>
-              {startDate
-                ? endDate
-                  ? `${startDate.toLocaleDateString()} → ${endDate.toLocaleDateString()}`
-                  : `Start: ${startDate.toLocaleDateString()} — tap end date`
-                : 'Tap a start date'}
-            </Text>
-          </View>
-
-          {/* Pop-up bottom buttons */}
-          <View style={styles.bottomRow}>
-            <TouchableOpacity
-              style={styles.backCircle}
-              onPress={goBackFromScene5}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="chevron-back" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.continueBtn, submitting && { opacity: 0.6 }]}
-              onPress={handleSubmit}
-              disabled={submitting}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.continueBtnText}>
-                {submitting ? 'Creating...' : 'Looking good!'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </SafeAreaView>
-    );
-  };
+      <DateRangePicker
+        visible={showCalendarPopup}
+        initialStart={startDate}
+        initialEnd={endDate}
+        helperText="Finally, let's add the date."
+        confirmLabel={submitting ? 'Creating...' : 'Looking good!'}
+        confirmDisabled={submitting}
+        onClose={goBackFromScene5}
+        onConfirm={(start, end) => {
+          setStartDate(start);
+          setEndDate(end);
+          handleSubmit();
+        }}
+      />
+    </SafeAreaView>
+  );
 
   // ─── Render ───────────────────────────────────────────────────────────────
   switch (scene) {

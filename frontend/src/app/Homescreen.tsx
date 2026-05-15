@@ -49,6 +49,7 @@ import logoAsset from '@/assets/images/spotonlogo.png';
 import { supabase } from '../utils/supabase';
 import { JwtPayload } from '@supabase/supabase-js';
 import { api } from "../utils/api"
+import { withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
@@ -158,7 +159,7 @@ export default function Homescreen() {
               {/* Messages button */}
               <TouchableOpacity
                 style={styles.messagesBtn}
-                onPress={() => router.push('./Messages' as any)}
+                onPress={withLightHaptic(() => router.push('./Messages' as any))}
               >
                 <Ionicons name="chatbubbles-outline" size={LOGO_SIZE * 0.72} color="#000" />
               </TouchableOpacity>

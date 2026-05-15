@@ -17,6 +17,7 @@ import { router } from 'expo-router';
 import enterArrowAsset  from '@/assets/images/enter arrow.png';
 
 import { supabase } from '../utils/supabase';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 type AuthStyles = {
   loginGroup: object,
@@ -43,6 +44,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   const handleLogin = async () => {
+    triggerLightHaptic();
     if (email === '' || password === '') {
       setErrorMessage('Please fill in all fields.');
       return;
@@ -63,6 +65,7 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
   };
 
   const handleSignup = async () => { 
+    triggerLightHaptic();
     if (email === '' || password === '' || fullName === '') {
       setErrorMessage('Please fill in all fields.');
       return;
@@ -107,10 +110,10 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
         {/* Button that toggles signup/login form */}
         <TouchableOpacity
           style={styles.toggleButton}
-          onPress={() => {
+          onPress={withLightHaptic(() => {
             handleTypeChange(true);
             setErrorMessage('');
-          }}
+          })}
         >
           <Text style={styles.buttonText}>New user? Sign up.</Text>
         </TouchableOpacity>
@@ -170,10 +173,10 @@ export default function Auth ( { styles, isNewUser, handleTypeChange }: AuthProp
 
         <TouchableOpacity
           style={styles.toggleButton}
-          onPress={() => {
+          onPress={withLightHaptic(() => {
             handleTypeChange(false);
             setErrorMessage('');
-          }}
+          })}
         >
           <Text style={styles.buttonText}>Returning user? Log in.</Text>
         </TouchableOpacity>

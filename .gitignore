@@ -44,6 +44,7 @@ app-example
 
 # Python
 .venv
+venv/
 .env
 
 __pycache__
@@ -51,3 +52,12 @@ __pycache__
 
 # Supabase
 /supabase/.temp/
+
+# Claude Code worktrees
+.claude/worktrees/
+
+STRIPE_INSTRUCTIONS.md
+
+# AI agents
+.agents/
+_bmad*/
