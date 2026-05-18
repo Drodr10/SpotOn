@@ -21,6 +21,9 @@ import { supabase } from '@/src/utils/supabase';
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
 
+// ─── Utils ───────────────────────────────────────────────────────────────────
+import { getPrimaryRate } from '@/src/utils/listingPrice';
+
 const { width: screenWidth } = Dimensions.get('window');
 const TILE_GAP = screenWidth * 0.03;
 const TILE_WIDTH = (screenWidth - screenWidth * 0.1 - TILE_GAP) / 2; // 2 columns
@@ -28,7 +31,11 @@ const TILE_WIDTH = (screenWidth - screenWidth * 0.1 - TILE_GAP) / 2; // 2 column
 interface Listing {
   id: string;
   address: string;
-  price_per_hour: number;
+  price_per_hour: number | null;
+  hourly_rate: number | null;
+  daily_rate: number | null;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -43,7 +50,7 @@ export default function SuggestionsList({ refreshKey }: SuggestionsListProps) {
   const fetchListings = async () => {
     const { data, error } = await supabase
       .from('listings')
-      .select('id, address, price_per_hour')
+      .select('id, address, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate')
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
@@ -98,7 +105,9 @@ export default function SuggestionsList({ refreshKey }: SuggestionsListProps) {
         <View key={item.id} style={styles.tile}>
           <Ionicons name="location-sharp" size={24} color="#4A90D9" style={styles.tileIcon} />
           <Text style={styles.tileAddress} numberOfLines={2}>{item.address}</Text>
-          <Text style={styles.tilePrice}>${item.price_per_hour}/hr</Text>
+          <Text style={styles.tilePrice}>
+            {(() => { const r = getPrimaryRate(item); return r ? `$${r.value}/${r.unit}` : '—'; })()}
+          </Text>
         </View>
       ))}
     </View>

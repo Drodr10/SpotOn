@@ -1,12 +1,9 @@
 /**
- * DateRangePicker — slide-up date-range picker with month nav + day grid.
+ * DateRangePicker — floating card date-range picker with month nav + day grid.
  *
- * Extracted from `CreateListing2.tsx` Scene 5. Behavior preserved exactly:
- * pickingStart toggles between start/end on each tap; if user picks an end
- * date earlier than the current start, the dates swap.
- *
- * Dark theme (rgba black popup, white text) matches the original. If a
- * different look is needed for another caller, add a `theme` prop later.
+ * Visually styled to match the Daily / Monthly / Totals rate cards in
+ * CreateListing2: solid-black floating card, spring animation, full border
+ * radius, side margins, and translucent white action buttons.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,14 +15,21 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import accessibilityImg from '@/assets/images/accessibility.png';
+import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
 
-const { width: W, height: H } = Dimensions.get('window');
+const { width: W } = Dimensions.get('window');
 const H_PAD = W * 0.06;
+const CARD_H_PAD = W * 0.05; // inner horizontal padding of the card
+const CARD_RADIUS = 25;
+const SLIDE_OUT_DISTANCE = 600; // far enough to slide fully off screen
+
+const calendarCellWidth = (W - H_PAD * 2 - CARD_H_PAD * 2) / 7;
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -50,13 +54,12 @@ export interface DateRangePickerProps {
   confirmDisabled?: boolean;
   /**
    * When true, only a single date can be selected — every tap replaces the
-   * current pick and `endDate` is always null. Defaults to false (range mode)
-   * so CreateListing2 keeps its existing behavior.
+   * current pick and `endDate` is always null. Defaults to false (range mode).
    */
   singleSelect?: boolean;
-  /** Popup background opacity from 0 to 1. */
+  /** @deprecated No longer applied — card style uses fixed solid-black fill. */
   popupOpacity?: number;
-  /** Side gap as a percent of screen width. Example: 5 = 5% on each side. */
+  /** @deprecated No longer applied — card side margins are fixed. */
   sideMarginPercent?: number;
   onClose: () => void;
   onConfirm: (start: Date, end: Date | null) => void;
@@ -66,18 +69,15 @@ export default function DateRangePicker({
   visible,
   initialStart = null,
   initialEnd = null,
-  helperText = "Tap a start date, then tap an end date.",
+  helperText = 'Tap a start date, then tap an end date.',
   confirmLabel = 'Confirm',
   confirmDisabled = false,
   singleSelect = false,
-  popupOpacity = 0.75,
-  sideMarginPercent = 0,
   onClose,
   onConfirm,
 }: DateRangePickerProps) {
-  const slideAnim = useRef(new Animated.Value(H)).current;
-  const sideMargin = W * (sideMarginPercent / 100);
-  const calendarCellWidth = (W - sideMargin * 2 - H_PAD * 2) / 7;
+  const insets = useSafeAreaInsets();
+  const slideAnim = useRef(new Animated.Value(SLIDE_OUT_DISTANCE)).current;
 
   const [calendarYear, setCalendarYear] = useState(
     initialStart ? initialStart.getFullYear() : new Date().getFullYear(),
@@ -89,11 +89,13 @@ export default function DateRangePicker({
   const [startDate, setStartDate] = useState<Date | null>(initialStart);
   const [endDate, setEndDate] = useState<Date | null>(initialEnd);
 
-  // Slide-in/out animation
+  // Spring animation — matches the Daily / Monthly / Totals card behaviour
   useEffect(() => {
-    Animated.timing(slideAnim, {
-      toValue: visible ? 0 : H,
-      duration: visible ? 400 : 300,
+    Animated.spring(slideAnim, {
+      toValue: visible ? 0 : SLIDE_OUT_DISTANCE,
+      damping: 14,
+      stiffness: 130,
+      mass: 1,
       useNativeDriver: true,
     }).start();
   }, [visible, slideAnim]);
@@ -120,7 +122,6 @@ export default function DateRangePicker({
   const handleDayPress = (day: number) => {
     const selected = new Date(calendarYear, calendarMonth, day);
     if (singleSelect) {
-      // Single-pick mode — every tap replaces the selection.
       setStartDate(selected);
       setEndDate(null);
       return;
@@ -167,93 +168,110 @@ export default function DateRangePicker({
       : `Start: ${startDate.toLocaleDateString()} — tap end date`
     : 'Tap a start date';
 
+  const LOGO_SIZE = W * 0.075;
+
   return (
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
       style={[
-        styles.popup,
+        styles.card,
         {
-          left: sideMargin,
-          right: sideMargin,
-          backgroundColor: `rgba(0,0,0,${popupOpacity})`,
+          bottom: W * 0.05 + insets.bottom,
           transform: [{ translateY: slideAnim }],
         },
       ]}
     >
+      {/* SpotOn logo — top-right corner, matches rate popup cards */}
+      <Image
+        source={spotonLogoCircleAsset}
+        style={[styles.logo, { width: LOGO_SIZE, height: LOGO_SIZE }]}
+        resizeMode="contain"
+      />
+
+      {/* Helper row */}
       <View style={styles.helperRow}>
         <Image source={accessibilityImg} style={styles.helperIcon} />
         <Text style={styles.helperText}>{helperText}</Text>
       </View>
 
-      <View style={styles.calendarContainer}>
-        {/* Month nav */}
-        <View style={styles.navRow}>
-          <TouchableOpacity onPress={withLightHaptic(() => stepMonth(-1))}>
-            <Ionicons name="chevron-back" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.monthText}>
-            {MONTHS[calendarMonth]} {calendarYear}
-          </Text>
-          <TouchableOpacity onPress={withLightHaptic(() => stepMonth(1))}>
-            <Ionicons name="chevron-forward" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Day labels */}
-        <View style={styles.daysRow}>
-          {DAY_LABELS.map((d) => (
-            <Text key={d} style={[styles.dayLabel, { width: calendarCellWidth }]}>
-              {d}
-            </Text>
-          ))}
-        </View>
-
-        {/* Date cells */}
-        <View style={styles.grid}>
-          {cells.map((day, idx) => {
-            if (day === null) {
-              return (
-                <View
-                  key={`empty-${idx}`}
-                  style={[styles.cell, { width: calendarCellWidth }]}
-                />
-              );
-            }
-            const sel = isDaySelected(day);
-            return (
-              <TouchableOpacity
-                key={`day-${day}`}
-                style={[
-                  styles.cell,
-                  { width: calendarCellWidth },
-                  sel === 'start' || sel === 'end'
-                    ? styles.cellSelected
-                    : sel === 'range'
-                    ? styles.cellRange
-                    : null,
-                ]}
-                onPress={() => {
-                  triggerLightHaptic();
-                  handleDayPress(day);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[
-                    styles.dayText,
-                    (sel === 'start' || sel === 'end') && styles.dayTextSelected,
-                  ]}
-                >
-                  {day}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <Text style={styles.rangeHint}>{rangeHint}</Text>
+      {/* Month navigation */}
+      <View style={styles.navRow}>
+        <TouchableOpacity
+          onPress={withLightHaptic(() => stepMonth(-1))}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-back" size={20} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.monthText}>
+          {MONTHS[calendarMonth]} {calendarYear}
+        </Text>
+        <TouchableOpacity
+          onPress={withLightHaptic(() => stepMonth(1))}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-forward" size={20} color="#fff" />
+        </TouchableOpacity>
       </View>
 
+      {/* Day-of-week labels */}
+      <View style={styles.daysRow}>
+        {DAY_LABELS.map((d) => (
+          <Text key={d} style={[styles.dayLabel, { width: calendarCellWidth }]}>
+            {d}
+          </Text>
+        ))}
+      </View>
+
+      {/* Date cells */}
+      <View style={styles.grid}>
+        {cells.map((day, idx) => {
+          if (day === null) {
+            return (
+              <View
+                key={`empty-${idx}`}
+                style={[styles.cell, { width: calendarCellWidth }]}
+              />
+            );
+          }
+          const sel = isDaySelected(day);
+          return (
+            <TouchableOpacity
+              key={`day-${day}`}
+              style={[
+                styles.cell,
+                { width: calendarCellWidth },
+                sel === 'start' || sel === 'end'
+                  ? styles.cellSelected
+                  : sel === 'range'
+                  ? styles.cellRange
+                  : null,
+              ]}
+              onPress={() => {
+                triggerLightHaptic();
+                handleDayPress(day);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.dayText,
+                  (sel === 'start' || sel === 'end') && styles.dayTextSelected,
+                ]}
+              >
+                {day}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Range / selection hint */}
+      <Text style={styles.rangeHint}>{rangeHint}</Text>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Action row */}
       <View style={styles.bottomRow}>
         <TouchableOpacity
           style={styles.backCircle}
@@ -263,7 +281,7 @@ export default function DateRangePicker({
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.confirmBtn, confirmDisabled && { opacity: 0.6 }]}
+          style={[styles.confirmBtn, confirmDisabled && { opacity: 0.5 }]}
           onPress={() => {
             if (confirmDisabled) return;
             triggerLightHaptic();
@@ -280,26 +298,44 @@ export default function DateRangePicker({
 }
 
 const styles = StyleSheet.create({
-  popup: {
+  // ── Floating card — mirrors ratePopup in CreateListing2 ───────────────────
+  card: {
     position: 'absolute',
-    bottom: 0,
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingTop: W * 0.05,
-    paddingBottom: W * 0.06,
-    paddingHorizontal: H_PAD,
-    minHeight: H * 0.52,
-    justifyContent: 'space-between',
+    left: H_PAD,
+    right: H_PAD,
+    backgroundColor: '#000',
+    borderRadius: CARD_RADIUS,
+    paddingTop: W * 0.055,
+    paddingBottom: W * 0.045,
+    paddingHorizontal: CARD_H_PAD,
+    zIndex: 20,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
   },
+
+  // ── SpotOn logo ────────────────────────────────────────────────────────────
+  logo: {
+    position: 'absolute',
+    top: W * 0.045,
+    right: CARD_H_PAD,
+    opacity: 0.9,
+    zIndex: 1,
+  },
+
+  // ── Helper row ─────────────────────────────────────────────────────────────
   helperRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: W * 0.02,
     marginBottom: W * 0.04,
+    paddingRight: W * 0.12, // leave room for the logo
   },
   helperIcon: {
-    width: 18,
-    height: 18,
+    width: 16,
+    height: 16,
     marginTop: 2,
     tintColor: '#fff',
   },
@@ -310,7 +346,8 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  calendarContainer: { flex: 1 },
+
+  // ── Month navigation ───────────────────────────────────────────────────────
   navRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -322,28 +359,30 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#fff',
   },
+
+  // ── Day labels ─────────────────────────────────────────────────────────────
   daysRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: W * 0.02,
+    marginBottom: W * 0.015,
   },
   dayLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.6)',
-    width: (W - H_PAD * 2) / 7,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
   },
+
+  // ── Calendar grid ──────────────────────────────────────────────────────────
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: {
-    width: (W - H_PAD * 2) / 7,
-    height: 36,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
+    borderRadius: 17,
   },
   cellSelected: { backgroundColor: '#fff' },
-  cellRange: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  cellRange: { backgroundColor: 'rgba(255,255,255,0.2)' },
   dayText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: 13,
@@ -353,40 +392,49 @@ const styles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerSemibold,
     color: '#000',
   },
+
+  // ── Range hint ─────────────────────────────────────────────────────────────
   rangeHint: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
-    marginTop: W * 0.02,
-    marginBottom: W * 0.02,
+    marginTop: W * 0.025,
+    marginBottom: W * 0.025,
   },
+
+  // ── Divider ────────────────────────────────────────────────────────────────
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginBottom: W * 0.035,
+  },
+
+  // ── Action buttons — match ratePopupContinue ───────────────────────────────
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: W * 0.03,
-    paddingTop: W * 0.03,
   },
   backCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 100,
-    backgroundColor: '#000',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmBtn: {
     flex: 1,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#000',
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmBtnText: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 16,
+    fontSize: 15,
     color: '#fff',
   },
 });

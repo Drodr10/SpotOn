@@ -13,6 +13,9 @@ import { FlatList, View, StyleSheet, Dimensions } from 'react-native';
 // ─── Components ──────────────────────────────────────────────────────────────
 import PreviousSpotCard, { PreviousSpotCardProps } from '../PreviousSpotCard';
 
+// ─── Utils ───────────────────────────────────────────────────────────────────
+import { getPrimaryRate } from '@/src/utils/listingPrice';
+
 // ─── Assets ──────────────────────────────────────────────────────────────────
 import mapPlaceholder from '@/assets/images/mapimageplaceholder.png';
 
@@ -52,8 +55,12 @@ type SpotsListProp = {
     id: string;
     owner_id: string;
     address: string;
-    price_per_hour: number;
+    price_per_hour: number | null;
     photo_url: string;
+    hourly_rate?: number | null;
+    daily_rate?: number | null;
+    weekly_rate?: number | null;
+    monthly_rate?: number | null;
   },
   end_time: Date;
 }
@@ -78,7 +85,7 @@ export default function PreviousSpotsList({ spots }: PreviousSpotsListProps) {
       renderItem={({ item }) => (
         <PreviousSpotCard
           name={item.listingData.address}
-          price={item.listingData.price_per_hour.toString()}
+          price={(() => { const r = getPrimaryRate(item.listingData); return r ? r.value.toString() : '0'; })()}
           date={item.end_time.toString()}
           duration={item.end_time.toString()}
           mapImage={mapPlaceholder}
