@@ -87,6 +87,40 @@ const GAINESVILLE: Region = {
   longitudeDelta: 0.04,
 };
 
+// ─── Rate payload builder ─────────────────────────────────────────────────────
+function buildRatePayload(state: {
+  periodType: 0 | 1;
+  pricePerHour: number;
+  pricePerDay: number | null;
+  pricePerWeek: number;
+  pricePerMonth: number | null;
+  dailyRateAccepted: boolean;
+  monthlyRateAccepted: boolean;
+}): {
+  hourly_rate: number | null;
+  daily_rate: number | null;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
+  price_per_hour: number;
+} {
+  if (state.periodType === 0) {
+    return {
+      hourly_rate: state.pricePerHour,
+      daily_rate: state.dailyRateAccepted ? state.pricePerDay : null,
+      weekly_rate: null,
+      monthly_rate: null,
+      price_per_hour: state.pricePerHour,
+    };
+  }
+  return {
+    hourly_rate: null,
+    daily_rate: null,
+    weekly_rate: state.pricePerWeek,
+    monthly_rate: state.monthlyRateAccepted ? state.pricePerMonth : null,
+    price_per_hour: state.pricePerWeek / 168,
+  };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CreateListing2() {
   const router = useRouter();
@@ -320,6 +354,23 @@ export default function CreateListing2() {
   };
 
   const handleSubmit = async () => {
+    if (periodType === 0 && pricePerHour <= 0) {
+      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+      return;
+    }
+    if (periodType === 0 && dailyRateAccepted && (pricePerDay === null || pricePerDay <= 0)) {
+      Alert.alert('Invalid daily rate', 'Please set a daily rate greater than $0.00.');
+      return;
+    }
+    if (periodType === 1 && pricePerWeek <= 0) {
+      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+      return;
+    }
+    if (periodType === 1 && monthlyRateAccepted && (pricePerMonth === null || pricePerMonth <= 0)) {
+      Alert.alert('Invalid monthly rate', 'Please set a monthly rate greater than $0.00.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       let photoUrl = photoUri ?? '';
@@ -347,14 +398,22 @@ export default function CreateListing2() {
         return;
       }
 
-      // TODO: replace with real period_type + per-unit price columns once schema is migrated.
-      // Frontend captures pricePerHour, pricePerWeek, periodType in state; backend currently only persists price_per_hour.
+      const ratePayload = buildRatePayload({
+        periodType,
+        pricePerHour,
+        pricePerDay,
+        pricePerWeek,
+        pricePerMonth,
+        dailyRateAccepted,
+        monthlyRateAccepted,
+      });
+
       const { error } = await supabase.from('listings').insert({
         owner_id: userId,
         address: address,
         latitude: latitude,
         longitude: longitude,
-        price_per_hour: 2,
+        ...ratePayload,
         is_active: true,
         photo_url: photoUrl,
       });

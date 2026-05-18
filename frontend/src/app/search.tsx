@@ -57,13 +57,14 @@ import calendarImg from '@/assets/images/calendar.png';
 import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
 
 // ─── Booking utilities ───────────────────────────────────────────────────────
-import { getTaxRateForCoords, type TaxResult } from '@/src/utils/tax';
 import {
   findOrCreateConversation,
   insertBookingConfirmationMessage,
 } from '@/src/utils/conversations';
 import DateRangePicker from '@/src/components/DateRangePicker';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { usePricingPreview } from '@/src/hooks/usePricingPreview';
+import { getPrimaryRate } from '@/src/utils/listingPrice';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Listing {
@@ -72,7 +73,11 @@ interface Listing {
   address: string;
   latitude: number;
   longitude: number;
-  price_per_hour: number;
+  price_per_hour: number | null;
+  hourly_rate: number | null;
+  daily_rate: number | null;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
   is_active: boolean;
   photo_url: string | null;
   created_at: string;
@@ -139,10 +144,15 @@ function NearbyLocationCard({
         </View>
 
         <View style={cardStyles.bottomRow}>
-          <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
-            ${Number(item.price_per_hour).toFixed(2)}
-            <Text style={cardStyles.priceUnit}> / hr</Text>
-          </Text>
+          {(() => {
+            const r = getPrimaryRate(item);
+            return (
+              <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
+                {r ? `$${r.value.toFixed(2)}` : '—'}
+                <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
+              </Text>
+            );
+          })()}
           <Text style={[cardStyles.distance, { fontSize: fontDist }]}>
             {item.distance.toFixed(1)} mi away
           </Text>
@@ -664,10 +674,15 @@ function ListingDetailView({
           </View>
         </View>
         <View style={cardStyles.bottomRow}>
-          <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
-            ${Number(listing.price_per_hour).toFixed(2)}
-            <Text style={cardStyles.priceUnit}> / hr</Text>
-          </Text>
+          {(() => {
+            const r = getPrimaryRate(listing);
+            return (
+              <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
+                {r ? `$${r.value.toFixed(2)}` : '—'}
+                <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
+              </Text>
+            );
+          })()}
           <Text style={[cardStyles.distance, { fontSize: fontDist }]}>
             {listing.distance.toFixed(1)} mi away
           </Text>
@@ -863,6 +878,16 @@ const detailStyles = StyleSheet.create({
 // ─── Booking View (Figma 389-196 / 389-224) ─────────────────────────────────
 // Hourly Current (default) and Hourly Schedule modes. Weekly placeholder.
 
+function tierUnitLabel(tier: string): string {
+  switch (tier) {
+    case 'hourly': return 'h';
+    case 'daily': return 'd';
+    case 'weekly': return 'w';
+    case 'monthly': return 'mo';
+    default: return '';
+  }
+}
+
 type SizesShape = {
   H_PAD: number;
   V_PAD: number;
@@ -997,27 +1022,6 @@ function BookingView({
     transform: [{ translateX: monthlyTagTranslateX.value }],
   }));
 
-  // ─── Tax lookup ─────────────────────────────────────────────────────────
-  const [tax, setTax] = useState<TaxResult | null>(null);
-  const [taxLoading, setTaxLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    setTaxLoading(true);
-    getTaxRateForCoords(listing.latitude, listing.longitude)
-      .then((res) => {
-        if (!cancelled) {
-          setTax(res);
-          setTaxLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTaxLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [listing.latitude, listing.longitude]);
-
   // ─── Mode-switch animation ──────────────────────────────────────────────
   const isCurrentSV = useSharedValue(1); // 1 = current (default), 0 = schedule
   useEffect(() => {
@@ -1064,11 +1068,6 @@ function BookingView({
     return { startDateTime: start, endDateTime: end, hoursBooked: endHour - startHour };
   }, [bookingMode, currentHours, mountTime, scheduleStart, startHour, endHour]);
 
-  const subtotal = listing.price_per_hour * hoursBooked;
-  const taxRate = tax?.rate ?? 0;
-  const taxAmount = subtotal * taxRate;
-  const total = subtotal + taxAmount;
-
   // ─── Summary line ───────────────────────────────────────────────────────
   const sameDay =
     startDateTime.toDateString() === endDateTime.toDateString();
@@ -1077,19 +1076,21 @@ function BookingView({
     : `${shortDateWithDay(startDateTime)} → ${shortDateWithDay(endDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`;
 
   // ─── Weekly derived values ───────────────────────────────────────────────
-  const weeklyRate     = listing.price_per_hour * HOURS_PER_WEEK;
-  const monthlyRate    = weeklyRate * WEEKS_PER_MONTH;
-  const weeklyMonths   = Math.floor(currentWeeks / WEEKS_PER_MONTH);
-  const weeklyRem      = currentWeeks % WEEKS_PER_MONTH;
-  const weeklySubtotal = weeklyMonths * monthlyRate + weeklyRem * weeklyRate;
-  const weeklyTaxAmt   = weeklySubtotal * taxRate;
-  const weeklyTotal    = weeklySubtotal + weeklyTaxAmt;
-  const weeklyEnd      = useMemo(
+  const weeklyEnd = useMemo(
     () => new Date(mountTime.getTime() + currentWeeks * 7 * 24 * 3_600_000),
     [mountTime, currentWeeks],
   );
-  const weeklySummary  = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
-  const weeklyHours    = currentWeeks * HOURS_PER_WEEK;
+  const weeklySummary = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
+  const weeklyHours   = currentWeeks * HOURS_PER_WEEK;
+
+  // ─── Pricing preview (replaces client-side tax + totals math) ───────────
+  const previewStart = mode === 'hourly' ? startDateTime : mountTime;
+  const previewEnd   = mode === 'hourly' ? endDateTime   : weeklyEnd;
+  const { pricing, loading: pricingLoading, error: pricingError } = usePricingPreview(
+    listing.id,
+    previewStart,
+    previewEnd,
+  );
 
   // ─── Post-payment routing ──────────────────────────────────────────────
   const handlePaymentSuccess = async () => {
@@ -1112,9 +1113,7 @@ function BookingView({
         listing.owner_id,
       );
       // Auto-generated booking confirmation message.
-      const body = `Booking confirmed: ${listing.address} · ${hoursBooked}h · $${total.toFixed(
-        2,
-      )}. Hi! I just booked your spot.`;
+      const body = `Booking confirmed: ${listing.address} · ${hoursBooked}h · $${(pricing?.total ?? 0).toFixed(2)}. Hi! I just booked your spot.`;
       try {
         await insertBookingConfirmationMessage(conversationId, currentUserId, body);
       } catch (e) {
@@ -1150,7 +1149,7 @@ function BookingView({
         currentUserId,
         listing.owner_id,
       );
-      const body = `Booking confirmed: ${listing.address} · ${currentWeeks}w · $${weeklyTotal.toFixed(2)}. Hi! I just booked your spot.`;
+      const body = `Booking confirmed: ${listing.address} · ${currentWeeks}w · $${(pricing?.total ?? 0).toFixed(2)}. Hi! I just booked your spot.`;
       try {
         await insertBookingConfirmationMessage(conversationId, currentUserId, body);
       } catch (e) {
@@ -1222,10 +1221,15 @@ function BookingView({
                   </View>
                 </View>
                 <View style={cardStyles.bottomRow}>
-                  <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
-                    ${Number(listing.price_per_hour).toFixed(2)}
-                    <Text style={cardStyles.priceUnit}> / hr</Text>
-                  </Text>
+                  {(() => {
+                    const r = getPrimaryRate(listing);
+                    return (
+                      <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
+                        {r ? `$${r.value.toFixed(2)}` : '—'}
+                        <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
+                      </Text>
+                    );
+                  })()}
                   <Text style={[cardStyles.distance, { fontSize: sizes.FONT_DIST }]}>
                     {listing.distance.toFixed(1)} mi away
                   </Text>
@@ -1268,47 +1272,33 @@ function BookingView({
             <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
               <Text style={bookingStyles.totalLabel}>Total</Text>
 
-              {weeklyMonths > 0 ? (
-                <>
-                  {/* Monthly row with tag badge */}
-                  <View style={bookingStyles.totalLine}>
-                    <Text style={bookingStyles.totalSubtotal}>
-                      ${monthlyRate.toFixed(2)} × {weeklyMonths} month{weeklyMonths > 1 ? 's' : ''}
-                    </Text>
-                    <Text style={bookingStyles.totalSubtotalAmount}>
-                      ${(weeklyMonths * monthlyRate).toFixed(2)}
-                    </Text>
-                  </View>
-                  {/* Remaining weeks row (hidden when evenly divisible) */}
-                  {weeklyRem > 0 && (
-                    <View style={bookingStyles.totalLine}>
-                      <Text style={bookingStyles.totalSubtotal}>
-                        ${weeklyRate.toFixed(2)} × {weeklyRem} week{weeklyRem > 1 ? 's' : ''}
-                      </Text>
-                      <Text style={bookingStyles.totalSubtotalAmount}>
-                        ${(weeklyRem * weeklyRate).toFixed(2)}
-                      </Text>
-                    </View>
-                  )}
-                </>
+              {pricing?.tier === 'monthly' ? (
+                <View style={bookingStyles.totalLine}>
+                  <Text style={bookingStyles.totalSubtotal}>
+                    {pricing ? `$${pricing.rate.toFixed(2)} × ${pricing.units} month${pricing.units > 1 ? 's' : ''}` : '—'}
+                  </Text>
+                  <Text style={bookingStyles.totalSubtotalAmount}>
+                    {pricing ? `$${pricing.subtotal.toFixed(2)}` : ''}
+                  </Text>
+                </View>
               ) : (
                 <View style={bookingStyles.totalLine}>
                   <Text style={bookingStyles.totalSubtotal}>
-                    ${weeklyRate.toFixed(2)} × {currentWeeks} week{currentWeeks > 1 ? 's' : ''}
+                    {pricing ? `$${pricing.rate.toFixed(2)} × ${pricing.units} week${pricing.units > 1 ? 's' : ''}` : '—'}
                   </Text>
                   <Text style={bookingStyles.totalSubtotalAmount}>
-                    ${weeklySubtotal.toFixed(2)}
+                    {pricing ? `$${pricing.subtotal.toFixed(2)}` : ''}
                   </Text>
                 </View>
               )}
 
-              {/* Tax row */}
+              {/* Platform fee row */}
               <View style={bookingStyles.totalLine}>
                 <Text style={bookingStyles.totalTaxLabel}>
-                  {taxLoading ? 'Calculating tax…' : `Tax (${tax?.jurisdiction ?? 'Default'})`}
+                  {pricingLoading ? 'Calculating…' : pricingError ? pricingError : 'Platform fee'}
                 </Text>
-                {!taxLoading && (
-                  <Text style={bookingStyles.totalTaxAmount}>${weeklyTaxAmt.toFixed(2)}</Text>
+                {!pricingLoading && !pricingError && pricing && (
+                  <Text style={bookingStyles.totalTaxAmount}>${pricing.platform_fee.toFixed(2)}</Text>
                 )}
               </View>
 
@@ -1316,7 +1306,7 @@ function BookingView({
               <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
                 <Text style={bookingStyles.totalFinalLabel}>Total</Text>
                 <Text style={bookingStyles.totalFinalAmount}>
-                  {taxLoading ? `$${weeklySubtotal.toFixed(2)}+` : `$${weeklyTotal.toFixed(2)}`}
+                  {pricingLoading ? '—' : pricingError ? '—' : `$${pricing!.total.toFixed(2)}`}
                 </Text>
               </View>
             </View>
@@ -1334,8 +1324,9 @@ function BookingView({
             <View style={bookingStyles.payWrap}>
               <PaymentCard
                 listingId={listing.id}
-                price={weeklyTotal}
+                price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                disabled={!pricing || !!pricingError}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
             </View>
@@ -1412,10 +1403,15 @@ function BookingView({
               </View>
             </View>
             <View style={cardStyles.bottomRow}>
-              <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
-                ${Number(listing.price_per_hour).toFixed(2)}
-                <Text style={cardStyles.priceUnit}> / hr</Text>
-              </Text>
+              {(() => {
+                const r = getPrimaryRate(listing);
+                return (
+                  <Text style={[cardStyles.price, { fontSize: sizes.FONT_PRICE }]}>
+                    {r ? `$${r.value.toFixed(2)}` : '—'}
+                    <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
+                  </Text>
+                );
+              })()}
               <Text
                 style={[cardStyles.distance, { fontSize: sizes.FONT_DIST }]}
               >
@@ -1557,28 +1553,32 @@ function BookingView({
           <Text style={bookingStyles.totalLabel}>Total</Text>
           <View style={bookingStyles.totalLine}>
             <Text style={bookingStyles.totalSubtotal}>
-              ${listing.price_per_hour.toFixed(2)} × {hoursBooked}h
+              {pricing
+                ? `$${pricing.rate.toFixed(2)} × ${pricing.units}${tierUnitLabel(pricing.tier)}`
+                : '—'}
             </Text>
             <Text style={bookingStyles.totalSubtotalAmount}>
-              ${subtotal.toFixed(2)}
+              {pricing ? `$${pricing.subtotal.toFixed(2)}` : ''}
             </Text>
           </View>
           <View style={bookingStyles.totalLine}>
             <Text style={bookingStyles.totalTaxLabel}>
-              {taxLoading
-                ? 'Calculating tax…'
-                : `Tax (${tax?.jurisdiction ?? 'Default'})`}
+              {pricingLoading
+                ? 'Calculating…'
+                : pricingError
+                ? pricingError
+                : 'Platform fee'}
             </Text>
-            {!taxLoading && (
+            {!pricingLoading && !pricingError && pricing && (
               <Text style={bookingStyles.totalTaxAmount}>
-                ${taxAmount.toFixed(2)}
+                ${pricing.platform_fee.toFixed(2)}
               </Text>
             )}
           </View>
           <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
             <Text style={bookingStyles.totalFinalLabel}>Total</Text>
             <Text style={bookingStyles.totalFinalAmount}>
-              {taxLoading ? `$${subtotal.toFixed(2)}+` : `$${total.toFixed(2)}`}
+              {pricingLoading ? '—' : pricingError ? '—' : `$${pricing!.total.toFixed(2)}`}
             </Text>
           </View>
         </View>
@@ -1597,8 +1597,9 @@ function BookingView({
           <View style={bookingStyles.payWrap}>
             <PaymentCard
               listingId={listing.id}
-              price={total}
+              price={pricing?.total ?? 0}
               hours={hoursBooked}
+              disabled={!pricing || !!pricingError}
               onPaymentSuccess={handlePaymentSuccess}
             />
           </View>

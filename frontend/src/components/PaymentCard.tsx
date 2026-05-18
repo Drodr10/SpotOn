@@ -23,6 +23,7 @@ type PaymentProps = {
     listingId: string;
     price: number;
     hours: number;
+    disabled?: boolean;
     /**
      * Optional success hook. When provided, REPLACES the default navigation
      * to the home screen — the caller is responsible for navigating. The
@@ -32,12 +33,13 @@ type PaymentProps = {
     onPaymentSuccess?: (info: { listingId: string; price: number; hours: number }) => void;
 }
 
-export default function PaymentCard ({ listingId, price, hours, onPaymentSuccess } : PaymentProps) {
+export default function PaymentCard ({ listingId, price, hours, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
     const [claims, setClaims] = useState<JwtPayload>();
     
     const initializePaymentSheet = async () => {
+        if (externalDisabled) return;
         setLoading(true);
         const {
             paymentIntent,
@@ -114,9 +116,9 @@ export default function PaymentCard ({ listingId, price, hours, onPaymentSuccess
     return (
         <View style={styles.container}>
             <TouchableOpacity
-                disabled={loading}
+                disabled={loading || !!externalDisabled}
                 onPress={openPaymentSheet}
-                style={[styles.button, loading && styles.buttonDisabled]}
+                style={[styles.button, (loading || externalDisabled) && styles.buttonDisabled]}
             >
                 <Text style={styles.text}>{ loading ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
             </TouchableOpacity>
