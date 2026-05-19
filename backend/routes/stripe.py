@@ -14,8 +14,12 @@ def payment_sheet():
 
 @stripe_bp.route('/stripe/create-connect-account', methods=['POST'])
 def create_connect_account():
-    return createConnectAccount(request.get_json())
+    return createConnectAccount(parse_request_body())
+
+@stripe_bp.route('/stripe/create-account-link', methods=['POST'])
+def create_account_link():
+    return createAccountLink(parse_request_body())
 
 @stripe_bp.route('/stripe/create-product', methods=['POST'])
 def create_product():
-    return createProduct(request.get_json())
+    return createProduct(parse_request_body())
