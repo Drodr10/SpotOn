@@ -7,8 +7,8 @@ from services.supabase_client import supabase
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY")
-secretKey = os.getenv("STRIPE_SECRET_KEY")
+publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY") or "pk_test_51SBybVEd6RvlqVZd7GGLyTnIc8R11hFe8sA5r5E53jCPP31QA9Fh54xl897Sl85eBYr4FlfoBt0gxRCdeaABDT1R00MUFwSlaR"
+secretKey = os.getenv("STRIPE_SECRET_KEY") or "sk_test_51SBybVEd6RvlqVZdlQyDURAX4ApVNe6Cnwi5m06fL62p0xIPcaKj5cpY4Y4RIRqxs7EYJa7zbB8rMPExi7Kl77iy00HmoPWBtN"
 
 def generatePaymentSheet(price):
     stripe.api_key = secretKey
