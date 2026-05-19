@@ -72,8 +72,8 @@ def createConnectAccount(data):
         # 4. Create a one-time account link for onboarding
         account_link = stripe.AccountLink.create(
             account=stripe_account_id,
-            refresh_url="spoton://onboarding-failed",
-            return_url="spoton://onboarding-success",
+            refresh_url="https://example.com/onboarding-failed",
+            return_url="https://example.com/onboarding-success",
             type="account_onboarding",
         )
 

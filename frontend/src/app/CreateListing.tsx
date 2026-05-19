@@ -43,6 +43,10 @@ import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 // ─── Auth & Supabase ─────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
 
+// ─── Stripe & Browser ────────────────────────────────────────────────────────
+import { stripe } from '../utils/stripe';
+import * as WebBrowser from 'expo-web-browser';
+
 // ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -76,12 +80,57 @@ export default function CreateListing() {
   const [submitting, setSubmitting] = useState(false);
   const [ownerId, setOwnerId] = useState<string | null>(null);
 
+  // Check for Stripe account on mount
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        setOwnerId(data.session.user.id);
+    const checkStripeAccount = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+
+      if (!user) {
+        Alert.alert("Not Logged In", "Please log in to create a listing.", [
+          { text: "OK", onPress: () => router.back() }
+        ]);
+        return;
       }
-    });
+      setOwnerId(user.id);
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('stripe_account_id, email')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !profile) {
+        Alert.alert("Error", "Could not retrieve your profile to verify Stripe status.", [
+          { text: "OK", onPress: () => router.back() }
+        ]);
+        return;
+      }
+
+      if (!profile.stripe_account_id) {
+        Alert.alert(
+          "Connect Stripe Account",
+          "To receive payouts, you need to connect a Stripe account. We'll redirect you to Stripe to set one up.",
+          [
+            { text: "Cancel", onPress: () => router.back(), style: "cancel" },
+            {
+              text: "Continue to Stripe",
+              onPress: async () => {
+                const onboardingUrl = await stripe.handleCreateConnectAccount(profile.email, user.id);
+                if (onboardingUrl) {
+                  await WebBrowser.openBrowserAsync(onboardingUrl);
+                } else {
+                  Alert.alert("Error", "Could not create Stripe onboarding link. Please try again later.");
+                }
+                router.back(); // Go back to previous screen after starting onboarding
+              }
+            }
+          ]
+        );
+      }
+    };
+
+    checkStripeAccount();
   }, []);
 
   /** Drop a pin wherever the user taps on the map */
@@ -118,16 +167,52 @@ export default function CreateListing() {
     // ── Submit to Supabase ────────────────────────────────────────────────
     setSubmitting(true);
     try {
-      const { error } = await supabase.from('listings').insert({
-        owner_id: ownerId,
-        address: trimmedAddress,
-        price_per_hour: price,
-        latitude: pin.latitude,
-        longitude: pin.longitude,
-      });
+      // 1. Get owner's Stripe account ID
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('stripe_account_id')
+        .eq('id', ownerId)
+        .single();
 
-      if (error) throw new Error(error.message);
+      if (profileError || !profile?.stripe_account_id) {
+        throw new Error('Stripe account not found. Please complete onboarding first.');
+      }
 
+      // 2. Insert listing and get its ID
+      const { data: newListing, error: insertError } = await supabase
+        .from('listings')
+        .insert({
+          owner_id: ownerId,
+          address: trimmedAddress,
+          price_per_hour: price, // Legacy field
+          hourly_rate: price,    // New field
+          latitude: pin.latitude,
+          longitude: pin.longitude,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      if (!newListing) throw new Error('Failed to create listing record.');
+
+      // 3. Create Stripe Product
+      const stripeProductResponse = await stripe.createStripeProduct(
+        trimmedAddress,
+        `Parking spot at ${trimmedAddress}`,
+        price,
+        profile.stripe_account_id,
+        newListing.id
+      );
+
+      if (!stripeProductResponse) {
+        // Attempt to clean up the created listing if Stripe product creation fails
+        await supabase.from('listings').delete().eq('id', newListing.id);
+        throw new Error(
+          'Failed to create Stripe product. The listing has been rolled back. Please try again.'
+        );
+      }
+      
       Alert.alert('Success', 'Your parking spot has been listed!', [
         { text: 'OK', onPress: () => router.back() },
       ]);

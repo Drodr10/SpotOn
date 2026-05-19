@@ -51,6 +51,10 @@ import { CustomFonts } from '@/src/constants/theme';
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
 
+// ─── Stripe & Browser ────────────────────────────────────────────────────────
+import { stripe } from '../utils/stripe';
+import * as WebBrowser from 'expo-web-browser';
+
 // ─── Components ───────────────────────────────────────────────────────────────
 import DateRangePicker from '@/src/components/DateRangePicker';
 import FilterToggle from '@/src/components/FilterToggle';
@@ -170,6 +174,58 @@ export default function CreateListing2() {
   const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const totalsPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
+
+  // Check for Stripe account on mount
+  useEffect(() => {
+    const checkStripeAccount = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+
+      if (!user) {
+        Alert.alert("Not Logged In", "Please log in to create a listing.", [
+          { text: "OK", onPress: () => router.back() }
+        ]);
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('stripe_account_id, email')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !profile) {
+        Alert.alert("Error", "Could not retrieve your profile to verify Stripe status.", [
+          { text: "OK", onPress: () => router.back() }
+        ]);
+        return;
+      }
+
+      if (!profile.stripe_account_id) {
+        Alert.alert(
+          "Connect Stripe Account",
+          "To receive payouts for your listings, you need to connect a Stripe account. We'll redirect you to Stripe to set one up.",
+          [
+            { text: "Cancel", onPress: () => router.back(), style: "cancel" },
+            {
+              text: "Continue to Stripe",
+              onPress: async () => {
+                const onboardingUrl = await stripe.handleCreateConnectAccount(profile.email, user.id);
+                if (onboardingUrl) {
+                  await WebBrowser.openBrowserAsync(onboardingUrl);
+                } else {
+                  Alert.alert("Error", "Could not create Stripe onboarding link. Please try again later.");
+                }
+                router.back(); // Go back after starting onboarding; user will return to app manually.
+              }
+            }
+          ]
+        );
+      }
+    };
+
+    checkStripeAccount();
+  }, [router]);
 
   const openPopup = (anim: Animated.Value) => {
     Animated.timing(anim, {
@@ -373,9 +429,24 @@ export default function CreateListing2() {
 
     setSubmitting(true);
     try {
-      let photoUrl = photoUri ?? '';
+      // 1. Get user and their Stripe account ID
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('You must be logged in to create a listing.');
+      }
 
-      // Try to upload to Supabase Storage
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('stripe_account_id')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError || !profile?.stripe_account_id) {
+        throw new Error('Could not find a connected Stripe account. Please complete onboarding first.');
+      }
+
+      // 2. Upload photo if it exists
+      let publicPhotoUrl = photoUri ?? '';
       if (photoUri) {
         const fileName = `listing_${Date.now()}.jpg`;
         const response = await fetch(photoUri);
@@ -383,43 +454,50 @@ export default function CreateListing2() {
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('listing-photos')
           .upload(fileName, blob, { contentType: 'image/jpeg' });
+
+        if (uploadError) throw uploadError;
+
         if (!uploadError && uploadData) {
           const { data: publicData } = supabase.storage
             .from('listing-photos')
             .getPublicUrl(uploadData.path);
-          photoUrl = publicData.publicUrl;
+          publicPhotoUrl = publicData.publicUrl;
         }
       }
 
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) {
-        Alert.alert('Not logged in', 'Please log in before creating a listing.');
-        return;
+      // 3. Create the listing in Supabase and get its ID
+      const ratePayload = buildRatePayload({
+        periodType, pricePerHour, pricePerDay, pricePerWeek, pricePerMonth, dailyRateAccepted, monthlyRateAccepted,
+      });
+
+      const { data: newListing, error: insertError } = await supabase
+        .from('listings')
+        .insert({
+          owner_id: user.id,
+          address: address,
+          latitude: latitude,
+          longitude: longitude,
+          ...ratePayload,
+          is_active: true,
+          photo_url: publicPhotoUrl,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      if (!newListing) throw new Error('Failed to create listing record.');
+
+      // 4. Create the Stripe Product for the new listing
+      const stripeProductResponse = await stripe.createStripeProduct(
+        address, `Parking spot at ${address}`, ratePayload.price_per_hour, profile.stripe_account_id, newListing.id
+      );
+
+      if (!stripeProductResponse) {
+        await supabase.from('listings').delete().eq('id', newListing.id);
+        throw new Error('Failed to create Stripe product. The listing has been rolled back. Please try again.');
       }
 
-      const ratePayload = buildRatePayload({
-        periodType,
-        pricePerHour,
-        pricePerDay,
-        pricePerWeek,
-        pricePerMonth,
-        dailyRateAccepted,
-        monthlyRateAccepted,
-      });
-
-      const { error } = await supabase.from('listings').insert({
-        owner_id: userId,
-        address: address,
-        latitude: latitude,
-        longitude: longitude,
-        ...ratePayload,
-        is_active: true,
-        photo_url: photoUrl,
-      });
-
-      if (error) throw new Error(error.message);
-
+      // 5. Success
       Alert.alert('Success!', 'Your listing has been created!', [
         {
           text: 'OK',
