@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx tsc *)",
-      "mcp__e2416a92-1fb2-4b73-9b62-ee5b36492092__use_figma",
-      "mcp__e2416a92-1fb2-4b73-9b62-ee5b36492092__get_design_context"
-    ]
-  }
-}
