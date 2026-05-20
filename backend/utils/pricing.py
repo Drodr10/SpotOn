@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 getcontext().prec = 28
 
@@ -33,7 +33,59 @@ def _to_decimal(value):
     return Decimal(str(value))
 
 
-def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str, Decimal]:
+def _compute_hourly_with_day_cap(
+    hourly_rate: Decimal,
+    daily_rate: Optional[Decimal],
+    total_hours: Decimal,
+):
+    """
+    Returns (subtotal, line_items, tier, rate, units).
+
+    Each 24-hour block is charged at min(24 * hourly_rate, daily_rate).
+    The partial final block follows the same rule.
+    line_items is None when only a single tier is used (pure hourly or pure daily).
+    """
+    full_days = int(total_hours // Decimal(24))
+    remaining_hours = total_hours - Decimal(full_days) * Decimal(24)
+
+    charged_daily_days = Decimal(0)
+    charged_hourly_hours = Decimal(0)
+
+    if full_days > 0:
+        if daily_rate is not None and hourly_rate * Decimal(24) >= daily_rate:
+            charged_daily_days += Decimal(full_days)
+        else:
+            charged_hourly_hours += Decimal(full_days) * Decimal(24)
+
+    if remaining_hours > 0:
+        if daily_rate is not None and hourly_rate * remaining_hours >= daily_rate:
+            charged_daily_days += Decimal(1)
+        else:
+            charged_hourly_hours += remaining_hours
+
+    items = []
+    subtotal = Decimal(0)
+
+    if charged_daily_days > 0:
+        day_sub = daily_rate * charged_daily_days
+        items.append({'tier': 'daily', 'rate': daily_rate, 'units': charged_daily_days, 'subtotal': day_sub})
+        subtotal += day_sub
+
+    if charged_hourly_hours > 0:
+        hour_sub = hourly_rate * charged_hourly_hours
+        items.append({'tier': 'hourly', 'rate': hourly_rate, 'units': charged_hourly_hours, 'subtotal': hour_sub})
+        subtotal += hour_sub
+
+    if not items:
+        # Degenerate case: 0-hour duration (guarded upstream, but be safe)
+        items.append({'tier': 'hourly', 'rate': hourly_rate, 'units': total_hours, 'subtotal': Decimal(0)})
+
+    primary = items[0]
+    line_items = items if len(items) > 1 else None
+    return subtotal, line_items, primary['tier'], primary['rate'], primary['units']
+
+
+def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str, Any]:
     start = _parse_iso8601(start_ts)
     end = _parse_iso8601(end_ts)
     if end <= start:
@@ -45,75 +97,64 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
     dur_weeks = dur_days / Decimal(7)
     dur_months = dur_weeks / Decimal(4)
 
-    # Load rates
     hourly_rate = _to_decimal(listing.get('hourly_rate'))
     daily_rate = _to_decimal(listing.get('daily_rate'))
     weekly_rate = _to_decimal(listing.get('weekly_rate'))
     monthly_rate = _to_decimal(listing.get('monthly_rate'))
 
-    # Determine required tier by thresholds (must exist on listing)
-    eps = Decimal('0.000001')
-    if dur_weeks + eps >= Decimal(4):
-        required_tier = 'monthly'
-        if monthly_rate is None:
-            raise PricingError('Monthly bookings not supported for this listing')
-    elif dur_days + eps >= Decimal(7):
-        required_tier = 'weekly'
-        if weekly_rate is None:
-            raise PricingError('Weekly bookings not supported for this listing')
-    elif dur_hours + eps >= Decimal(9):
-        required_tier = 'daily'
-        if daily_rate is None:
-            raise PricingError('Daily bookings not supported for this listing')
+    line_items = None
+    subtotal = None
+
+    # ── Weekly / monthly listings ──────────────────────────────────────────────
+    if weekly_rate is not None or monthly_rate is not None:
+        eps = Decimal('0.000001')
+        if monthly_rate is not None and dur_weeks + eps >= Decimal(4):
+            tier = 'monthly'
+            units = dur_months if dur_months >= Decimal(1) else Decimal(1)
+            rate_used = monthly_rate
+        elif weekly_rate is not None:
+            tier = 'weekly'
+            units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
+            rate_used = weekly_rate
+        elif daily_rate is not None:
+            tier = 'daily'
+            units = dur_days if dur_days >= Decimal(1) else Decimal(1)
+            rate_used = daily_rate
+        elif hourly_rate is not None:
+            subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
+        else:
+            raise PricingError('No rates available for this listing')
+
+        if subtotal is None:
+            subtotal = rate_used * units
+
+    # ── Hourly listings: use hourly rate as base, cap per day when daily_rate set ─
     else:
-        required_tier = 'hourly'
         if hourly_rate is None:
-            raise PricingError('Hourly bookings not supported for this listing')
+            raise PricingError('No hourly rate available for this listing')
+        subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
 
-    # Build candidate subtotals (prorated for multi-unit durations).
-    # Always evaluate all provided rates so we can apply "cap pricing" (choose best price among available tiers).
-    candidates = []  # tuples (tier, subtotal, rate, units)
-    if hourly_rate is not None:
-        candidates.append(('hourly', (hourly_rate * dur_hours), hourly_rate, dur_hours))
-
-    if daily_rate is not None:
-        daily_units = dur_days if dur_days >= Decimal(1) else Decimal(1)
-        candidates.append(('daily', (daily_rate * daily_units), daily_rate, daily_units))
-
-    if weekly_rate is not None:
-        weekly_units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
-        candidates.append(('weekly', (weekly_rate * weekly_units), weekly_rate, weekly_units))
-
-    if monthly_rate is not None:
-        monthly_units = dur_months if dur_months >= Decimal(1) else Decimal(1)
-        candidates.append(('monthly', (monthly_rate * monthly_units), monthly_rate, monthly_units))
-
-    if not candidates:
-        raise PricingError('No rates available for this listing')
-
-    # Choose best (minimum) subtotal to avoid price jumps — but ensure required tier exists (checked above)
-    best = min(candidates, key=lambda c: c[1])
-    final_tier, subtotal, rate_used, units = best
-
-    # Platform fee rates: short-term (hourly/daily) => 15%; long-term (weekly/monthly) => 7%
-    if final_tier in ('hourly', 'daily'):
+    # ── Fee ────────────────────────────────────────────────────────────────────
+    if tier in ('hourly', 'daily'):
         fee_rate = Decimal('0.15')
     else:
         fee_rate = Decimal('0.07')
 
-    # Round subtotal to cents
     quant = Decimal('0.01')
     subtotal = subtotal.quantize(quant, rounding=ROUND_HALF_UP)
     platform_fee = (subtotal * fee_rate).quantize(quant, rounding=ROUND_HALF_UP)
     total = (subtotal + platform_fee).quantize(quant, rounding=ROUND_HALF_UP)
-    host_payout = (subtotal).quantize(quant, rounding=ROUND_HALF_UP)
+    host_payout = subtotal.quantize(quant, rounding=ROUND_HALF_UP)
 
-    return {
+    result: Dict[str, Any] = {
         'subtotal': subtotal,
         'platform_fee': platform_fee,
         'total': total,
         'host_payout': host_payout,
-        'tier': final_tier,
+        'tier': tier,
         'units': units,
-        'rate': rate_used
+        'rate': rate_used,
     }
+    if line_items is not None:
+        result['line_items'] = line_items
+    return result

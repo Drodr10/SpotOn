@@ -1,40 +1,23 @@
-/**
- * SearchBar — Figma: "search bar"
- *
- * Tapping navigates to QuickSearch where the user does map-based search.
- *
- * Props:
- *   onSearch? — kept for backwards compatibility, no longer used.
- */
-
-// ─── React & React Native ────────────────────────────────────────────────────
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
-
-// ─── Navigation ──────────────────────────────────────────────────────────────
+import { Text, TouchableOpacity, StyleSheet, Dimensions, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 
-// ─── Icons ───────────────────────────────────────────────────────────────────
-import { Ionicons } from '@expo/vector-icons';
-
-// ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
+import exploreIconAsset from '@/assets/images/explore_icon.png';
 
-// ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
-const H_PAD    = screenWidth * 0.04;
-const V_PAD    = screenWidth * 0.03;
-const FONT_SIZE = screenWidth * 0.04;
-const ICON_SIZE = screenWidth * 0.055;
-const GAP       = screenWidth * 0.025;
+const H_PAD = screenWidth * 0.045;
+const V_PAD = screenWidth * 0.03;
+const FONT_SIZE = screenWidth * 0.05;
+const ICON_SIZE = screenWidth * 0.08;
+const GAP = screenWidth * 0.025;
+const SIDE_MARGIN = screenWidth * 0.035;
 
-// ─── Props ───────────────────────────────────────────────────────────────────
 interface SearchBarProps {
   onSearch?: (query: string) => void;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
-export default function SearchBar({ onSearch }: SearchBarProps) {
+export default function SearchBar({ onSearch: _onSearch }: SearchBarProps) {
   const router = useRouter();
 
   return (
@@ -43,29 +26,33 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
       activeOpacity={0.7}
       onPress={withLightHaptic(() => router.push('/QuickSearch'))}
     >
-      <Ionicons name="search" size={ICON_SIZE} color="rgba(0,0,0,0.75)" />
+      <Image source={exploreIconAsset} style={styles.icon} resizeMode="contain" />
       <Text style={styles.placeholder}>Where to?</Text>
     </TouchableOpacity>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
+    borderWidth: 3,
     borderColor: 'rgba(0,0,0,0.75)',
     borderRadius: 999,
     paddingHorizontal: H_PAD,
     paddingVertical: V_PAD,
     gap: GAP,
     backgroundColor: 'transparent',
+    marginHorizontal: SIDE_MARGIN,
+  },
+  icon: {
+    width: ICON_SIZE,
+    height: ICON_SIZE,
   },
   placeholder: {
     flex: 1,
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: FONT_SIZE,
-    color: 'rgba(0,0,0,0.5)',
+    color: 'rgb(0, 0, 0)',
   },
 });

@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../utils/supabase';
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
+import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -148,7 +149,7 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.04,
     color: 'rgba(0,0,0,0.5)',
   },
-  list: { paddingTop: screenWidth * 0.02 },
+  list: { paddingTop: screenWidth * 0.02, paddingBottom: MENU_BAR_HEIGHT + 32 },
   convRow: {
     flexDirection: 'row',
     alignItems: 'center',

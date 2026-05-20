@@ -33,15 +33,26 @@ def preview_price():
     # Compute pricing
     try:
         price_breakdown = calculate_final_price(listing_row, start_time, end_time)
-        return jsonify({
+        response_body = {
             "subtotal": str(price_breakdown["subtotal"]),
             "platform_fee": str(price_breakdown["platform_fee"]),
             "host_payout": str(price_breakdown["host_payout"]),
             "total": str(price_breakdown["total"]),
             "tier": price_breakdown["tier"],
             "units": str(price_breakdown["units"]),
-            "rate": str(price_breakdown["rate"])
-        }), 200
+            "rate": str(price_breakdown["rate"]),
+        }
+        if "line_items" in price_breakdown:
+            response_body["line_items"] = [
+                {
+                    "tier": li["tier"],
+                    "rate": str(li["rate"]),
+                    "units": str(li["units"]),
+                    "subtotal": str(li["subtotal"]),
+                }
+                for li in price_breakdown["line_items"]
+            ]
+        return jsonify(response_body), 200
     except PricingError as pe:
         return jsonify({"error": str(pe)}), 400
     except Exception as e:

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(npx tsc *)",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(claude doctor *)",
+      "PowerShell(claude doctor *)",
+      "mcp__claude_ai_Figma__get_design_context"
+    ]
+  }
+}
