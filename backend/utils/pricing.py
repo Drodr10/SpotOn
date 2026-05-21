@@ -85,6 +85,12 @@ def _compute_hourly_with_day_cap(
     return subtotal, line_items, primary['tier'], primary['rate'], primary['units']
 
 
+def _compute_daily_only(daily_rate: Decimal, dur_days: Decimal):
+    units = dur_days if dur_days >= Decimal(1) else Decimal(1)
+    subtotal = daily_rate * units
+    return subtotal, None, 'daily', daily_rate, units
+
+
 def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str, Any]:
     start = _parse_iso8601(start_ts)
     end = _parse_iso8601(end_ts)
@@ -98,6 +104,8 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
     dur_months = dur_weeks / Decimal(4)
 
     hourly_rate = _to_decimal(listing.get('hourly_rate'))
+    if hourly_rate is None:
+        hourly_rate = _to_decimal(listing.get('price_per_hour'))
     daily_rate = _to_decimal(listing.get('daily_rate'))
     weekly_rate = _to_decimal(listing.get('weekly_rate'))
     monthly_rate = _to_decimal(listing.get('monthly_rate'))
@@ -108,7 +116,7 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
     # ── Weekly / monthly listings ──────────────────────────────────────────────
     if weekly_rate is not None or monthly_rate is not None:
         eps = Decimal('0.000001')
-        if monthly_rate is not None and dur_weeks + eps >= Decimal(4):
+        if monthly_rate is not None and (dur_weeks + eps >= Decimal(4) or weekly_rate is None):
             tier = 'monthly'
             units = dur_months if dur_months >= Decimal(1) else Decimal(1)
             rate_used = monthly_rate
@@ -130,9 +138,12 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
 
     # ── Hourly listings: use hourly rate as base, cap per day when daily_rate set ─
     else:
-        if hourly_rate is None:
+        if hourly_rate is None and daily_rate is not None:
+            subtotal, line_items, tier, rate_used, units = _compute_daily_only(daily_rate, dur_days)
+        elif hourly_rate is None:
             raise PricingError('No hourly rate available for this listing')
-        subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
+        else:
+            subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
 
     # ── Fee ────────────────────────────────────────────────────────────────────
     if tier in ('hourly', 'daily'):

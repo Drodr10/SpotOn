@@ -1,65 +1,57 @@
-import { FlatList, View, StyleSheet, Dimensions } from 'react-native';
-
-import PreviousSpotCard from '../PreviousSpotCard';
-import { getPrimaryRate } from '@/src/utils/listingPrice';
-import { triggerLightHaptic } from '@/src/utils/haptics';
+import React from 'react';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import ReservationCard from '../ReservationCard';
+import { CustomFonts } from '@/src/constants/theme';
+import type { ActiveReservation } from '@/src/utils/api';
 
 const { width: screenWidth } = Dimensions.get('window');
-const CARD_GAP = screenWidth * 0.03;
-const LIST_H_PAD = screenWidth * 0.04;
-
-type SpotsListProp = {
-  listingData: {
-    id: string;
-    owner_id: string;
-    address: string;
-    price_per_hour: number | null;
-    photo_url: string;
-    hourly_rate?: number | null;
-    daily_rate?: number | null;
-    weekly_rate?: number | null;
-    monthly_rate?: number | null;
-  };
-  end_time: Date;
-};
+const CARD_GAP   = screenWidth * 0.04;
+const EMPTY_FONT = screenWidth * 0.034;
 
 type PreviousSpotsListProps = {
-  spots: SpotsListProp[] | null;
+  spots: ActiveReservation[] | null;
 };
 
 export default function PreviousSpotsList({ spots }: PreviousSpotsListProps) {
-  if (!spots) return null;
+  if (!spots || spots.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Place a reservation for it to appear here</Text>
+      </View>
+    );
+  }
 
   return (
-    <FlatList
-      data={spots}
-      keyExtractor={(item, index) => `${item.listingData.id}-${index}`}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      onScrollBeginDrag={triggerLightHaptic}
-      contentContainerStyle={styles.listContent}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
-      renderItem={({ item }) => (
-        <PreviousSpotCard
-          name={item.listingData.address}
-          price={(() => {
-            const r = getPrimaryRate(item.listingData);
-            return r ? r.value.toString() : '0';
-          })()}
-          date={item.end_time.toString()}
-          duration={item.end_time.toString()}
-          mapImage={{ uri: item.listingData.photo_url }}
-        />
-      )}
-    />
+    <View style={styles.list}>
+      {spots.map((spot, index) => (
+        <View key={spot.id} style={index > 0 ? styles.gap : undefined}>
+          <ReservationCard
+            address={spot.listingData.address}
+            endTime={spot.end_time}
+            totalPrice={spot.total_price}
+            photoUrl={spot.listingData.photo_url}
+            unavailable={spot.listingUnavailable}
+          />
+        </View>
+      ))}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  listContent: {
-    paddingHorizontal: LIST_H_PAD,
+  list: {
+    alignItems: 'center',
   },
-  separator: {
-    width: CARD_GAP,
+  gap: {
+    marginTop: CARD_GAP,
+  },
+  emptyContainer: {
+    alignItems:    'center',
+    paddingVertical: screenWidth * 0.04,
+  },
+  emptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize:   EMPTY_FONT,
+    color:      '#888888',
   },
 });

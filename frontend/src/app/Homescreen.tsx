@@ -24,7 +24,7 @@ import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpo
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 import { CustomFonts } from '@/src/constants/theme';
 import { supabase } from '../utils/supabase';
-import { api } from '../utils/api';
+import { api, type ActiveReservation } from '../utils/api';
 
 import gradientBackgroundAsset from '@/assets/images/gradient_background_v1.png';
 
@@ -41,23 +41,12 @@ type ProfileData = {
   created_at: string;
 };
 
-type SpotsListProp = {
-  listingData: {
-    id: string;
-    owner_id: string;
-    address: string;
-    price_per_hour: number;
-    photo_url: string;
-  };
-  end_time: Date;
-};
-
 export default function Homescreen() {
   const [userId, setUserId]         = useState<string | null>(null);
   const [, setProfileData]          = useState<ProfileData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [pastReservationData, setPastReservationData] = useState<SpotsListProp[] | null>(null);
+  const [currentReservationData, setCurrentReservationData] = useState<ActiveReservation[] | null>(null);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -92,10 +81,10 @@ export default function Homescreen() {
 
   useEffect(() => {
     if (!userId) return;
-    const fetchPastReservations = async () => {
-      setPastReservationData(await api.getReservations(userId));
+    const fetchCurrentReservations = async () => {
+      setCurrentReservationData(await api.getActiveReservations(userId));
     };
-    fetchPastReservations();
+    fetchCurrentReservations();
   }, [userId, refreshKey]);
 
   return (
@@ -136,11 +125,11 @@ export default function Homescreen() {
             </View>
 
             <View style={[styles.section, styles.sectionLabelRow]}>
-              <Text style={styles.sectionLabel}>Your Previous Spots</Text>
+              <Text style={styles.sectionLabel}>Your Current Reservations</Text>
             </View>
 
             <View style={styles.previousSpotsContainer}>
-              <PreviousSpotsList spots={pastReservationData} />
+              <PreviousSpotsList spots={currentReservationData} />
             </View>
           </ScrollView>
         </View>
@@ -160,7 +149,7 @@ const styles = StyleSheet.create({
     left: 0,
     width: screenWidth,
     height: screenHeight,
-    transform: [{ rotate: '0deg' }],
+    transform: [{ rotate: '180deg' }],
   },
   safeContent: {
     flex: 1,

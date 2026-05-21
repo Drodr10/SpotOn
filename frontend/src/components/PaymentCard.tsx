@@ -23,6 +23,8 @@ type PaymentProps = {
     listingId: string;
     price: number;
     hours: number;
+    startTime?: Date;
+    endTime?: Date;
     disabled?: boolean;
     /**
      * Optional success hook. When provided, REPLACES the default navigation
@@ -33,10 +35,12 @@ type PaymentProps = {
     onPaymentSuccess?: (info: { listingId: string; price: number; hours: number }) => void;
 }
 
-export default function PaymentCard ({ listingId, price, hours, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
+export default function PaymentCard ({ listingId, price, hours, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
     const [claims, setClaims] = useState<JwtPayload>();
+    const startMs = startTime?.getTime();
+    const endMs = endTime?.getTime();
     
     const initializePaymentSheet = async () => {
         if (externalDisabled) return;
@@ -75,15 +79,29 @@ export default function PaymentCard ({ listingId, price, hours, disabled: extern
             if (error.code !== 'Canceled') {
                 Alert.alert(`Error: ${error.code}`, error.message);
             }
+            return;
+        }
+
+        if (!claims?.sub) {
+            Alert.alert('Reservation Error', 'No active user session. Please sign in again.');
+            return;
+        }
+
+        const reservationStart = startMs ?? Date.now();
+        const reservationEnd = endMs ?? reservationStart + 3600 * hours * 1000;
+        try {
+            await api.reserveSpot(listingId, price, claims.sub, reservationStart, reservationEnd);
+        } catch (e: any) {
+            console.error('[PaymentCard] reservation insert failed', e);
+            Alert.alert('Reservation Error', e?.message ?? 'Could not save your reservation. Please contact support.');
+            return;
+        }
+
+        Alert.alert('Payment Successful');
+        if (onPaymentSuccess) {
+            onPaymentSuccess({ listingId, price, hours });
         } else {
-            Alert.alert("Payment Successful");
-            await api.reserveSpot(listingId, price, claims!.sub, Date.now(), Date.now() + 3600 * hours * 1000);
-            if (onPaymentSuccess) {
-                // Caller takes over post-payment navigation (e.g. routing to chat).
-                onPaymentSuccess({ listingId, price, hours });
-            } else {
-                router.push('./Homescreen');
-            }
+            router.push('./Homescreen');
         }
     }
 
@@ -92,7 +110,7 @@ export default function PaymentCard ({ listingId, price, hours, disabled: extern
             initializePaymentSheet();
         }, 500);
         return () => clearTimeout(timeout);
-    }, [price, hours]);
+    }, [price, hours, startMs, endMs]);
     
     useEffect(() => {
         supabase.auth.getClaims().then(async (resp) => {

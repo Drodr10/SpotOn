@@ -98,6 +98,10 @@ function getDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function getBookingModeForListing(listing: Listing): 'hourly' | 'weekly' {
+  return listing.weekly_rate != null || listing.monthly_rate != null ? 'weekly' : 'hourly';
+}
+
 // ─── NearbyLocationCard (image removed per Figma 387-82) ─────────────────────
 function NearbyLocationCard({
   item,
@@ -321,7 +325,10 @@ export default function SearchScreen() {
   useEffect(() => {
     if (!openListingId || loading || listings.length === 0) return;
     const target = listings.find((l) => l.id === openListingId);
-    if (target) handleCardPress(target);
+    if (target) {
+      setFilterIndex(getBookingModeForListing(target) === 'weekly' ? 1 : 0);
+      handleCardPress(target);
+    }
   }, [openListingId, listings, loading]);
 
   // ─── Detail view animation orchestration ────────────────────────────────
@@ -639,9 +646,9 @@ export default function SearchScreen() {
 
         {/* ── Booking View (Hourly Current / Schedule, Figma 389-196 / 389-224) ── */}
         {viewState === 'booking' && selectedListing && (
-          <BookingView
-            listing={selectedListing}
-            mode={filterIndex === 0 ? 'hourly' : 'weekly'}
+            <BookingView
+              listing={selectedListing}
+            mode={getBookingModeForListing(selectedListing)}
             currentUserId={currentUserId}
             screenWidth={screenWidth}
             screenHeight={screenHeight}
@@ -1192,7 +1199,7 @@ function BookingView({
       }
       router.push({
         pathname: './Chat',
-        params: { conversationId, otherUserName: ownerName },
+        params: { conversationId, otherUserName: ownerName, returnToHome: '1' },
       } as any);
     } catch (e: any) {
       Alert.alert(
@@ -1228,7 +1235,7 @@ function BookingView({
       }
       router.push({
         pathname: './Chat',
-        params: { conversationId, otherUserName: ownerName },
+        params: { conversationId, otherUserName: ownerName, returnToHome: '1' },
       } as any);
     } catch (e: any) {
       Alert.alert(
@@ -1397,6 +1404,8 @@ function BookingView({
                 listingId={listing.id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                startTime={mountTime}
+                endTime={weeklyEnd}
                 disabled={!pricing || !!pricingError}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
@@ -1693,6 +1702,8 @@ function BookingView({
               listingId={listing.id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
+              startTime={startDateTime}
+              endTime={endDateTime}
               disabled={!pricing || !!pricingError}
               onPaymentSuccess={handlePaymentSuccess}
             />
