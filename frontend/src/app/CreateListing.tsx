@@ -122,6 +122,7 @@ export default function CreateListing() {
         owner_id: ownerId,
         address: trimmedAddress,
         price_per_hour: price,
+        hourly_rate: price,
         latitude: pin.latitude,
         longitude: pin.longitude,
       });

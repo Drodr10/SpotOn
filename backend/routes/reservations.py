@@ -19,10 +19,11 @@ def preview_price():
     if not all([listing_id, start_time, end_time]):
         return jsonify({"error": "Missing query parameters: listing_id, start_time, end_time"}), 400
 
-    # Fetch listing rates
+    # Fetch listing rates. Include legacy price_per_hour so the pricing engine's
+    # fallback works for older listings created before hourly_rate existed.
     try:
         listing_resp = supabase.table("listings").select(
-            "hourly_rate, daily_rate, weekly_rate, monthly_rate"
+            "hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
         ).eq("id", listing_id).single().execute()
         listing_row = listing_resp.data
         if not listing_row:
@@ -81,10 +82,11 @@ def book_spot():
     if not all([listing_id, renter_id, start_time, end_time]):
         return jsonify({"error": "Missing required fields"}), 400
 
-    # Fetch listing owner and rates
+    # Fetch listing owner and rates. price_per_hour is included for the
+    # pricing engine's legacy fallback.
     try:
         listing_resp = supabase.table("listings").select(
-            "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate"
+            "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
         ).eq("id", listing_id).single().execute()
         listing_row = listing_resp.data
         if not listing_row:

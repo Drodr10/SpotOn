@@ -1063,7 +1063,7 @@ function BookingView({
   const MONTHLY_TAG_EXIT_X = screenWidth * 0.5;
   const monthlyTagTranslateX = useSharedValue(MONTHLY_TAG_EXIT_X);
   useEffect(() => {
-    if (currentWeeks >= WEEKS_PER_MONTH) {
+    if (listing.monthly_rate != null && currentWeeks >= WEEKS_PER_MONTH) {
       // ▼ TUNE spring: damping controls overshoot (higher = less bounce), stiffness controls speed ▼
       monthlyTagTranslateX.value = withSpring(0, { damping: 33, stiffness: 200 });
     } else {
@@ -1072,7 +1072,7 @@ function BookingView({
         easing: Easing.in(Easing.cubic),
       });
     }
-  }, [currentWeeks]);
+  }, [currentWeeks, listing.monthly_rate]);
   const monthlyTagAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: monthlyTagTranslateX.value }],
   }));
@@ -1156,7 +1156,13 @@ function BookingView({
 
   // ─── DailyTag animation trigger ─────────────────────────────────────────
   useEffect(() => {
-    if (mode !== 'hourly') return;
+    if (mode !== 'hourly' || listing.daily_rate == null) {
+      dailyTagTranslateX.value = withTiming(DAILY_TAG_EXIT_X, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
+      return;
+    }
     const hasDaily =
       pricing?.tier === 'daily' ||
       pricing?.line_items?.some((li) => li.tier === 'daily') === true;
@@ -1168,7 +1174,7 @@ function BookingView({
         easing: Easing.in(Easing.cubic),
       });
     }
-  }, [pricing, mode]);
+  }, [pricing, mode, listing.daily_rate]);
 
   // ─── Post-payment routing ──────────────────────────────────────────────
   const handlePaymentSuccess = async () => {
