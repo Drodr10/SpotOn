@@ -47,6 +47,7 @@ export default function Homescreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [currentReservationData, setCurrentReservationData] = useState<ActiveReservation[] | null>(null);
+  const [ownerCurrentBookingsData, setOwnerCurrentBookingsData] = useState<ActiveReservation[] | null>(null);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -81,10 +82,11 @@ export default function Homescreen() {
 
   useEffect(() => {
     if (!userId) return;
-    const fetchCurrentReservations = async () => {
+    const fetchReservationData = async () => {
       setCurrentReservationData(await api.getActiveReservations(userId));
+      setOwnerCurrentBookingsData(await api.getOwnerActiveBookings(userId));
     };
-    fetchCurrentReservations();
+    fetchReservationData();
   }, [userId, refreshKey]);
 
   return (
@@ -130,6 +132,14 @@ export default function Homescreen() {
 
             <View style={styles.previousSpotsContainer}>
               <PreviousSpotsList spots={currentReservationData} />
+            </View>
+
+            <View style={[styles.section, styles.sectionLabelRow]}>
+              <Text style={styles.sectionLabel}>Current Bookings For Your Spots</Text>
+            </View>
+
+            <View style={styles.previousSpotsContainer}>
+              <PreviousSpotsList spots={ownerCurrentBookingsData} />
             </View>
           </ScrollView>
         </View>

@@ -958,6 +958,14 @@ type SizesShape = {
   DETAIL_HEADER_HEIGHT: number;
 };
 
+type VehicleProfile = {
+  id: string;
+  make: string;
+  model: string;
+  color: string;
+  plate_last4?: string | null;
+};
+
 const HARD_CAP_HOURS = 96; // 4 days
 const HARD_CAP_WEEKS = 52;    // 1-year cap
 const HOURS_PER_WEEK = 168;   // 24 × 7
@@ -1023,6 +1031,9 @@ function BookingView({
 
   // ─── Booking-mode state (Current is default per Figma) ───────────────────
   const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
+  const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   // ─── Hourly Current state ───────────────────────────────────────────────
   const [currentHours, setCurrentHours] = useState(1);
@@ -1045,6 +1056,45 @@ function BookingView({
   const [pickerActive, setPickerActive] = useState(false);
   const lockPicker = useCallback(() => setPickerActive(true), []);
   const unlockPicker = useCallback(() => setPickerActive(false), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVehicles = async () => {
+      if (!currentUserId) {
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        return;
+      }
+
+      setVehiclesLoading(true);
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, make, model, color, plate_last4')
+        .eq('owner_user_id', currentUserId)
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn('[booking] vehicle load failed', error);
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        setVehiclesLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as VehicleProfile[];
+      setVehicles(rows);
+      setSelectedVehicleId(rows.length > 0 ? rows[0].id : null);
+      setVehiclesLoading(false);
+    };
+
+    loadVehicles();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
 
   // Clamp Schedule end > start; respect 4-day cap.
   useEffect(() => {
@@ -1144,6 +1194,7 @@ function BookingView({
   );
   const weeklySummary = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
   const weeklyHours   = currentWeeks * HOURS_PER_WEEK;
+  const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) ?? null;
 
   // ─── Pricing preview (replaces client-side tax + totals math) ───────────
   const previewStart = mode === 'hourly' ? startDateTime : mountTime;
@@ -1348,6 +1399,45 @@ function BookingView({
             </View>
 
             {/* Summary line */}
+            <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+              {vehiclesLoading ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : vehicles.length === 0 ? (
+                <TouchableOpacity
+                  style={bookingStyles.vehicleEmptyButton}
+                  onPress={withLightHaptic(() => router.push('./Profile'))}
+                  activeOpacity={0.85}
+                >
+                  <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={bookingStyles.vehicleChipsRow}>
+                  {vehicles.map((v) => {
+                    const selected = v.id === selectedVehicleId;
+                    return (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                        onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {!!selectedVehicle && (
+                <Text style={bookingStyles.vehicleSelectedText}>
+                  Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+                </Text>
+              )}
+            </View>
+
+            {/* Summary line */}
             <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
               <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
             </View>
@@ -1410,9 +1500,10 @@ function BookingView({
                 listingId={listing.id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                vehicleId={selectedVehicleId}
                 startTime={mountTime}
                 endTime={weeklyEnd}
-                disabled={!pricing || !!pricingError}
+                disabled={!pricing || !!pricingError || !selectedVehicleId}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
             </View>
@@ -1638,6 +1729,45 @@ function BookingView({
         </View>
 
         {/* Summary line */}
+        <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+          {vehiclesLoading ? (
+            <ActivityIndicator size="small" color="#000" />
+          ) : vehicles.length === 0 ? (
+            <TouchableOpacity
+              style={bookingStyles.vehicleEmptyButton}
+              onPress={withLightHaptic(() => router.push('./Profile'))}
+              activeOpacity={0.85}
+            >
+              <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={bookingStyles.vehicleChipsRow}>
+              {vehicles.map((v) => {
+                const selected = v.id === selectedVehicleId;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                    onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          {!!selectedVehicle && (
+            <Text style={bookingStyles.vehicleSelectedText}>
+              Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+            </Text>
+          )}
+        </View>
+
+        {/* Summary line */}
         <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.summaryText} numberOfLines={2}>
             {summaryLine}
@@ -1708,9 +1838,10 @@ function BookingView({
               listingId={listing.id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
+              vehicleId={selectedVehicleId}
               startTime={startDateTime}
               endTime={endDateTime}
-              disabled={!pricing || !!pricingError}
+              disabled={!pricing || !!pricingError || !selectedVehicleId}
               onPaymentSuccess={handlePaymentSuccess}
             />
           </View>
@@ -1788,6 +1919,57 @@ const bookingStyles = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  vehicleBlock: {
+    marginTop: 8,
+  },
+  vehicleLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 14,
+    color: '#000',
+    marginBottom: 8,
+  },
+  vehicleChipsRow: {
+    gap: 8,
+  },
+  vehicleChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  vehicleChipSelected: {
+    borderColor: '#000',
+    backgroundColor: '#000',
+  },
+  vehicleChipText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleChipTextSelected: {
+    color: '#fff',
+  },
+  vehicleEmptyButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#000',
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  vehicleEmptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleSelectedText: {
+    marginTop: 8,
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 12,
+    color: 'rgba(0,0,0,0.65)',
   },
   calendarBtnInner: {
     flexDirection: 'row',

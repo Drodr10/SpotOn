@@ -13,8 +13,7 @@ import {
   SafeAreaView,
   Image,
   TouchableOpacity,
-  TextInput,
-  Button
+  TextInput
 } from 'react-native'
 
 import HomePill from '@/src/components/ProfilePageComponents/HomePill';
@@ -44,6 +43,14 @@ type ProfileData = {
   created_at: string;
 }
 
+type VehicleProfile = {
+  id: string;
+  make: string;
+  model: string;
+  color: string;
+  plate_last4?: string | null;
+}
+
 export default function ProfilePage () {
   const [claims, setClaims] = useState<JwtPayload>();
   const [user, setUser] = useState<ProfileData | null>();
@@ -55,12 +62,33 @@ export default function ProfilePage () {
 
   const [editing, setEditing] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
+  const [vehicleMake, setVehicleMake] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleColor, setVehicleColor] = useState('');
+  const [vehiclePlate, setVehiclePlate] = useState('');
+  const [vehicleSaving, setVehicleSaving] = useState(false);
 
   const inputArea = useRef<TextInput>(null);
 
   const editEmail = () => {
     triggerLightHaptic();
     setEditing(!editing);
+  };
+
+  const loadVehicles = async (ownerUserId: string) => {
+    const { data, error } = await supabase
+      .from('vehicles')
+      .select('id, make, model, color, plate_last4')
+      .eq('owner_user_id', ownerUserId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.log('Error retrieving vehicles:', error.message);
+      return;
+    }
+
+    setVehicles((data ?? []) as VehicleProfile[]);
   };
 
   useEffect(() => {
@@ -82,6 +110,7 @@ export default function ProfilePage () {
       setUser(profileData);
       setName(profileData.full_name);
       setEmail(profileData.email);
+      await loadVehicles(data.claims.sub);
     });
   }, []);
 
@@ -168,6 +197,53 @@ export default function ProfilePage () {
     }
   };
 
+  const addVehicle = async () => {
+    triggerLightHaptic();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    const ownerUserId = claims?.sub;
+    if (!ownerUserId) {
+      setErrorMessage('Could not find your account. Please sign in again.');
+      return;
+    }
+
+    const make = vehicleMake.trim();
+    const model = vehicleModel.trim();
+    const color = vehicleColor.trim();
+    const licensePlate = vehiclePlate.trim().toUpperCase();
+
+    if (!make || !model || !color || !licensePlate) {
+      setErrorMessage('All vehicle fields are required.');
+      return;
+    }
+
+    setVehicleSaving(true);
+    const { error } = await supabase
+      .from('vehicles')
+      .insert({
+        owner_user_id: ownerUserId,
+        make,
+        model,
+        color,
+        license_plate: licensePlate,
+      });
+
+    if (error) {
+      setErrorMessage(error.message);
+      setVehicleSaving(false);
+      return;
+    }
+
+    setVehicleMake('');
+    setVehicleModel('');
+    setVehicleColor('');
+    setVehiclePlate('');
+    setSuccessMessage('Vehicle added.');
+    await loadVehicles(ownerUserId);
+    setVehicleSaving(false);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.screen}>
@@ -208,6 +284,58 @@ export default function ProfilePage () {
         </View>
 
         <View style={styles.listingsSection}>
+          <Text style={styles.sectionLabel}>Vehicles</Text>
+
+          <View style={styles.vehicleForm}>
+            <TextInput
+              style={styles.vehicleInput}
+              placeholder='Make (e.g., Honda)'
+              value={vehicleMake}
+              onChangeText={setVehicleMake}
+              autoCapitalize='words'
+            />
+            <TextInput
+              style={styles.vehicleInput}
+              placeholder='Model (e.g., Civic)'
+              value={vehicleModel}
+              onChangeText={setVehicleModel}
+              autoCapitalize='words'
+            />
+            <TextInput
+              style={styles.vehicleInput}
+              placeholder='Color (e.g., Black)'
+              value={vehicleColor}
+              onChangeText={setVehicleColor}
+              autoCapitalize='words'
+            />
+            <TextInput
+              style={styles.vehicleInput}
+              placeholder='License plate'
+              value={vehiclePlate}
+              onChangeText={setVehiclePlate}
+              autoCapitalize='characters'
+            />
+            <TouchableOpacity
+              style={[styles.vehicleAddButton, vehicleSaving && styles.vehicleAddButtonDisabled]}
+              onPress={vehicleSaving ? undefined : addVehicle}
+            >
+              <Text style={styles.vehicleAddButtonText}>{vehicleSaving ? 'Adding...' : 'Add Vehicle'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {vehicles.length === 0 ? (
+            <Text style={styles.vehicleEmptyText}>No vehicles added yet.</Text>
+          ) : (
+            <View style={styles.vehicleList}>
+              {vehicles.map((vehicle) => (
+                <View key={vehicle.id} style={styles.vehicleCard}>
+                  <Text style={styles.vehicleCardTitle}>{`${vehicle.color} ${vehicle.make} ${vehicle.model}`}</Text>
+                  <Text style={styles.vehicleCardSubtitle}>{`Plate ending: ${vehicle.plate_last4 ?? 'N/A'}`}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
           <Text style={styles.sectionLabel}>Your previous listings</Text>
           <PreviousSpotsList spots={null}/>
         </View>
@@ -281,11 +409,68 @@ const styles = StyleSheet.create({
     fontSize: TEXT_SIZE - 4,
     fontFamily: 'Switzer',
     color: '#000000',
-    backgroundColor: '#',
+    backgroundColor: '#FFFFFF',
   },
   listingsSection: {
     marginTop: SECTION_GAP + 10,
     gap: 12,
+  },
+  vehicleForm: {
+    gap: 8,
+  },
+  vehicleInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'Switzer',
+    fontSize: TEXT_SIZE - 8,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
+  },
+  vehicleAddButton: {
+    marginTop: 2,
+    borderRadius: 999,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  vehicleAddButtonDisabled: {
+    backgroundColor: '#555555',
+  },
+  vehicleAddButtonText: {
+    color: '#FFFFFF',
+    fontFamily: 'Switzer',
+    fontSize: TEXT_SIZE - 8,
+  },
+  vehicleList: {
+    gap: 8,
+  },
+  vehicleCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.15)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  vehicleCardTitle: {
+    fontFamily: 'SwitzerSemibold',
+    fontSize: TEXT_SIZE - 8,
+    color: '#000000',
+  },
+  vehicleCardSubtitle: {
+    marginTop: 2,
+    fontFamily: 'Switzer',
+    fontSize: TEXT_SIZE - 11,
+    color: 'rgba(0,0,0,0.7)',
+  },
+  vehicleEmptyText: {
+    fontFamily: 'Switzer',
+    fontSize: TEXT_SIZE - 10,
+    color: 'rgba(0,0,0,0.6)',
   },
   button: {
     backgroundColor: '#000000',
