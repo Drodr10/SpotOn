@@ -7,11 +7,12 @@ from services.supabase_client import supabase
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY") or "pk_test_51SBybVEd6RvlqVZd7GGLyTnIc8R11hFe8sA5r5E53jCPP31QA9Fh54xl897Sl85eBYr4FlfoBt0gxRCdeaABDT1R00MUFwSlaR"
-secretKey = os.getenv("STRIPE_SECRET_KEY") or "sk_test_51SBybVEd6RvlqVZdlQyDURAX4ApVNe6Cnwi5m06fL62p0xIPcaKj5cpY4Y4RIRqxs7EYJa7zbB8rMPExi7Kl77iy00HmoPWBtN"
+publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY")
+secretKey = os.getenv("STRIPE_SECRET_KEY")
 
 def generatePaymentSheet(price: float, listerId: str):
     stripe.api_key = secretKey
+    
     print(f"Attempting to create payment sheet")
     customer = stripe.Customer.create()
 
@@ -28,7 +29,6 @@ def generatePaymentSheet(price: float, listerId: str):
 
     priceInCents = int(price * 100)
     applicationFeeAmount = int(priceInCents * 0.15)
-    listerPayoutAmount = priceInCents - applicationFeeAmount
 
     payment_intent = stripe.PaymentIntent.create(
         amount=priceInCents,
@@ -40,7 +40,6 @@ def generatePaymentSheet(price: float, listerId: str):
         application_fee_amount=applicationFeeAmount,
         transfer_data={
             'destination': listerStripeConnectId,
-            'amount': listerPayoutAmount,
         }
     )
     
@@ -48,3 +47,65 @@ def generatePaymentSheet(price: float, listerId: str):
                    customerSessionClientSecret=customer_session.client_secret,
                    customer=customer.id,
                    publishableKey=publishableKey)
+
+def createConnectAccount(user_id: str):
+    stripe.api_key = secretKey
+
+    try:
+        profile_data = supabase.table("profiles").select("email, stripe_account_id").eq("id", user_id).single().execute().data
+
+        if not profile_data:
+            return jsonify({ "error": "User profile not found" }), 404
+
+        if profile_data.get("stripe_account_id"):
+            print(f"Stripe account already exists for user {user_id}: {profile_data['stripe_account_id']}")
+            return jsonify({ "account_id": profile_data["stripe_account_id"] })
+
+        user_email = profileData.get("email")
+        if not user_email:
+            return jsonify({ "error": "User email not found in profile" }), 400
+
+        account = stripe.Account.create(
+            type="express",
+            country="US",
+            email=user_email,
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
+        )
+        print(f"Account created successfully for {user_email}: {account.id}")
+
+        supabase.table("profiles").update({ "stripe_account_id": account.id }).eq("id", user_id).execute()
+
+        return jsonify({ "account_id": account.id })
+
+    except Exception as err:
+        print(f"Error creating Stripe Connect account: {err}")
+        return jsonify({'error': str(err)}), 500
+
+def createAccountLink(user_id: str):
+    stripe.api_key = secretKey
+
+    try:
+        profile_data = supabase.table("profiles").select("stripe_account_id").eq("id", user_id).single().execute().data
+        account_id = profile_data.get("stripe_account_id") if profile_data else None
+
+        if not account_id:
+            return jsonify({ "error": "Stripe account ID not found for this user. Please create an account first." }), 404
+
+        return_url = "spoton://Homescreen"
+        refresh_url = "spoton://stripe-onboarding-refresh"
+
+        account_link = stripe.AccountLink.create(
+            account=account_id,
+            refresh_url=refresh_url,
+            return_url=return_url,
+            type="account_onboarding",
+        )
+        print(f"Account link generated for user {user_id}: {account_link.url}")
+        return jsonify({ "account_link_url": account_link.url})
+
+    except Exception as err:
+        print(f"Error creating account link: {err}")
+        return jsonify({ "error": str(err) }), 500
