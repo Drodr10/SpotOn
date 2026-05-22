@@ -32,9 +32,10 @@ interface Message {
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { conversationId, otherUserName } = useLocalSearchParams<{
+  const { conversationId, otherUserName, returnToHome } = useLocalSearchParams<{
     conversationId: string;
     otherUserName: string;
+    returnToHome?: string;
   }>();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -102,6 +103,14 @@ export default function ChatScreen() {
       .eq('id', conversationId);
   };
 
+  const handleBack = () => {
+    if (returnToHome === '1') {
+      router.replace('/Homescreen');
+      return;
+    }
+    router.back();
+  };
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender_id === currentUserId;
     return (
@@ -117,7 +126,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={withLightHaptic(() => router.back())} style={styles.backBtn}>
+        <TouchableOpacity onPress={withLightHaptic(handleBack)} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={screenWidth * 0.06} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>

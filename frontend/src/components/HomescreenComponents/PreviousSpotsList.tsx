@@ -1,107 +1,57 @@
-/**
- * PreviousSpotsList — Figma: "Horizontal List View of Previous Spots"
- *
- * Renders a horizontally scrolling FlatList of PreviousSpotCard items.
- * Data is driven by PREVIOUS_SPOTS_DATA.
- * TODO: Replace with real reservation history from Supabase backend.
- */
+import React from 'react';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import ReservationCard from '../ReservationCard';
+import { CustomFonts } from '@/src/constants/theme';
+import type { ActiveReservation } from '@/src/utils/api';
 
-// ─── React & React Native ────────────────────────────────────────────────────
-import { useState, useEffect} from 'react';
-import { FlatList, View, StyleSheet, Dimensions } from 'react-native';
-
-// ─── Components ──────────────────────────────────────────────────────────────
-import PreviousSpotCard, { PreviousSpotCardProps } from '../PreviousSpotCard';
-
-// ─── Utils ───────────────────────────────────────────────────────────────────
-import { getPrimaryRate } from '@/src/utils/listingPrice';
-
-// ─── Assets ──────────────────────────────────────────────────────────────────
-import mapPlaceholder from '@/assets/images/mapimageplaceholder.png';
-
-// ─── Responsive sizing ───────────────────────────────────────────────────────
 const { width: screenWidth } = Dimensions.get('window');
-const CARD_GAP    = screenWidth * 0.03;   // space between cards
-const LIST_H_PAD  = screenWidth * 0.04;   // leading/trailing padding
-
-// ─── Data ────────────────────────────────────────────────────────────────────
-// TODO: Replace with real reservation history from Supabase
-interface SpotItem extends PreviousSpotCardProps {
-  id: string;
-}
-
-const PREVIOUS_SPOTS_DATA: SpotItem[] = [
-  {
-    id: '1',
-    name: 'Target',
-    price: '$5.99',
-    date: '4.26.2026',
-    duration: '3 Hrs',
-    mapImage: mapPlaceholder,
-  },
-  {
-    id: '2',
-    name: 'Tigert Hall',
-    price: '$36.67',
-    date: '3.19.2026',
-    duration: '7.5 hrs',
-    mapImage: mapPlaceholder,
-  },
-];
-
-//adding for reusability across components
-type SpotsListProp = {
-  listingData: {
-    id: string;
-    owner_id: string;
-    address: string;
-    price_per_hour: number | null;
-    photo_url: string;
-    hourly_rate?: number | null;
-    daily_rate?: number | null;
-    weekly_rate?: number | null;
-    monthly_rate?: number | null;
-  },
-  end_time: Date;
-}
+const CARD_GAP   = screenWidth * 0.04;
+const EMPTY_FONT = screenWidth * 0.034;
 
 type PreviousSpotsListProps = {
-  spots: SpotsListProp[] | null;
-}
+  spots: ActiveReservation[] | null;
+};
 
-// ─── Component ───────────────────────────────────────────────────────────────
 export default function PreviousSpotsList({ spots }: PreviousSpotsListProps) {
-
-  if (!spots) return null;
+  if (!spots || spots.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>Place a reservation for it to appear here</Text>
+      </View>
+    );
+  }
 
   return (
-    <FlatList
-      data={spots}
-      keyExtractor={(item) => item.listingData.id}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.listContent}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
-      renderItem={({ item }) => (
-        <PreviousSpotCard
-          name={item.listingData.address}
-          price={(() => { const r = getPrimaryRate(item.listingData); return r ? r.value.toString() : '0'; })()}
-          date={item.end_time.toString()}
-          duration={item.end_time.toString()}
-          mapImage={mapPlaceholder}
-        />
-      )}
-    />
+    <View style={styles.list}>
+      {spots.map((spot, index) => (
+        <View key={spot.id} style={index > 0 ? styles.gap : undefined}>
+          <ReservationCard
+            address={spot.listingData.address}
+            endTime={spot.end_time}
+            totalPrice={spot.total_price}
+            photoUrl={spot.listingData.photo_url}
+            unavailable={spot.listingUnavailable}
+          />
+        </View>
+      ))}
+    </View>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  listContent: {
-    paddingHorizontal: LIST_H_PAD,
+  list: {
+    alignItems: 'center',
   },
-  separator: {
-    width: CARD_GAP,
+  gap: {
+    marginTop: CARD_GAP,
+  },
+  emptyContainer: {
+    alignItems:    'center',
+    paddingVertical: screenWidth * 0.04,
+  },
+  emptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize:   EMPTY_FONT,
+    color:      '#888888',
   },
 });
-

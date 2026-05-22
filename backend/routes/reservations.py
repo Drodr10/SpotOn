@@ -19,10 +19,11 @@ def preview_price():
     if not all([listing_id, start_time, end_time]):
         return jsonify({"error": "Missing query parameters: listing_id, start_time, end_time"}), 400
 
-    # Fetch listing rates
+    # Fetch listing rates. Include legacy price_per_hour so the pricing engine's
+    # fallback works for older listings created before hourly_rate existed.
     try:
         listing_resp = supabase.table("listings").select(
-            "hourly_rate, daily_rate, weekly_rate, monthly_rate"
+            "hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
         ).eq("id", listing_id).single().execute()
         listing_row = listing_resp.data
         if not listing_row:
@@ -33,15 +34,26 @@ def preview_price():
     # Compute pricing
     try:
         price_breakdown = calculate_final_price(listing_row, start_time, end_time)
-        return jsonify({
+        response_body = {
             "subtotal": str(price_breakdown["subtotal"]),
             "platform_fee": str(price_breakdown["platform_fee"]),
             "host_payout": str(price_breakdown["host_payout"]),
             "total": str(price_breakdown["total"]),
             "tier": price_breakdown["tier"],
             "units": str(price_breakdown["units"]),
-            "rate": str(price_breakdown["rate"])
-        }), 200
+            "rate": str(price_breakdown["rate"]),
+        }
+        if "line_items" in price_breakdown:
+            response_body["line_items"] = [
+                {
+                    "tier": li["tier"],
+                    "rate": str(li["rate"]),
+                    "units": str(li["units"]),
+                    "subtotal": str(li["subtotal"]),
+                }
+                for li in price_breakdown["line_items"]
+            ]
+        return jsonify(response_body), 200
     except PricingError as pe:
         return jsonify({"error": str(pe)}), 400
     except Exception as e:
@@ -70,10 +82,11 @@ def book_spot():
     if not all([listing_id, renter_id, start_time, end_time]):
         return jsonify({"error": "Missing required fields"}), 400
 
-    # Fetch listing owner and rates
+    # Fetch listing owner and rates. price_per_hour is included for the
+    # pricing engine's legacy fallback.
     try:
         listing_resp = supabase.table("listings").select(
-            "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate"
+            "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
         ).eq("id", listing_id).single().execute()
         listing_row = listing_resp.data
         if not listing_row:

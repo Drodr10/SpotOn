@@ -55,6 +55,7 @@ import cabinIconAsset from '@/assets/images/cabin.png';
 import placeholderImageAsset from '@/assets/images/mapimageplaceholder.png';
 import calendarImg from '@/assets/images/calendar.png';
 import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
+import dailyTagAsset from '@/assets/images/DailyTag.png';
 
 // ─── Booking utilities ───────────────────────────────────────────────────────
 import {
@@ -95,6 +96,10 @@ function getDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getBookingModeForListing(listing: Listing): 'hourly' | 'weekly' {
+  return listing.weekly_rate != null || listing.monthly_rate != null ? 'weekly' : 'hourly';
 }
 
 // ─── NearbyLocationCard (image removed per Figma 387-82) ─────────────────────
@@ -144,15 +149,31 @@ function NearbyLocationCard({
         </View>
 
         <View style={cardStyles.bottomRow}>
-          {(() => {
-            const r = getPrimaryRate(item);
-            return (
-              <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
-                {r ? `$${r.value.toFixed(2)}` : '—'}
-                <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
-              </Text>
-            );
-          })()}
+          <View>
+            {(() => {
+              const r = getPrimaryRate(item);
+              return (
+                <Text style={[cardStyles.price, { fontSize: fontPrice }]}>
+                  {r ? `$${r.value.toFixed(2)}` : '—'}
+                  <Text style={cardStyles.priceUnit}>{r ? ` / ${r.unit}` : ''}</Text>
+                </Text>
+              );
+            })()}
+            {item.daily_rate != null && (
+              <Image
+                source={dailyTagAsset}
+                style={[cardStyles.rateTag, { height: fontPrice }]}
+                resizeMode="contain"
+              />
+            )}
+            {item.monthly_rate != null && (
+              <Image
+                source={monthlyTagAsset}
+                style={[cardStyles.rateTag, { height: fontPrice }]}
+                resizeMode="contain"
+              />
+            )}
+          </View>
           <Text style={[cardStyles.distance, { fontSize: fontDist }]}>
             {item.distance.toFixed(1)} mi away
           </Text>
@@ -208,10 +229,11 @@ export default function SearchScreen() {
   const PANEL_MAX_HEIGHT = screenHeight * 0.88;
   const PANEL_DETAIL_HEIGHT = screenHeight * 0.7;
 
-  const { query, lat: latParam, lng: lngParam } = useLocalSearchParams<{
+  const { query, lat: latParam, lng: lngParam, openListingId } = useLocalSearchParams<{
     query: string;
     lat: string;
     lng: string;
+    openListingId: string;
   }>();
 
   const userLat = latParam ? parseFloat(latParam) : 29.6516;
@@ -298,6 +320,17 @@ export default function SearchScreen() {
     fetchPublishableKey();
   }, []);
 
+  // Auto-open detail view when arriving from DynamicViewer's arrow button.
+  // Waits for listings to load, then selects the target listing and enters detail view.
+  useEffect(() => {
+    if (!openListingId || loading || listings.length === 0) return;
+    const target = listings.find((l) => l.id === openListingId);
+    if (target) {
+      setFilterIndex(getBookingModeForListing(target) === 'weekly' ? 1 : 0);
+      handleCardPress(target);
+    }
+  }, [openListingId, listings, loading]);
+
   // ─── Detail view animation orchestration ────────────────────────────────
   useEffect(() => {
     if (isDetailView) {
@@ -368,7 +401,7 @@ export default function SearchScreen() {
 
   // ─── Selection helpers ─────────────────────────────────────────────────
   const scrollListToListing = (listingId: string) => {
-    const idx = listings.findIndex((l) => l.id === listingId);
+    const idx = filteredListings.findIndex((l) => l.id === listingId);
     if (idx < 0) return;
     listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
   };
@@ -406,6 +439,20 @@ export default function SearchScreen() {
     setViewState('detail');
   };
 
+  const filteredListings = useMemo(() => {
+    if (filterIndex === 0) {
+      // Hourly tab: has an hourly/daily rate and no weekly/monthly rate
+      return listings.filter(
+        (l) =>
+          (l.hourly_rate != null || l.daily_rate != null || l.price_per_hour != null) &&
+          l.weekly_rate == null &&
+          l.monthly_rate == null,
+      );
+    }
+    // Weekly tab: has a weekly or monthly rate
+    return listings.filter((l) => l.weekly_rate != null || l.monthly_rate != null);
+  }, [listings, filterIndex]);
+
   const selectedListing = useMemo(
     () => listings.find((l) => l.id === selectedId) ?? null,
     [listings, selectedId],
@@ -430,7 +477,7 @@ export default function SearchScreen() {
             title={query ?? 'Searched Location'}
             pinColor="#007AFF"
           />
-          {listings.map((listing) => (
+          {filteredListings.map((listing) => (
           <Marker
             key={listing.id}
             coordinate={{ latitude: listing.latitude, longitude: listing.longitude }}
@@ -528,7 +575,7 @@ export default function SearchScreen() {
                 color="#000"
                 style={{ marginTop: screenHeight * 0.08 }}
               />
-            ) : listings.length === 0 ? (
+            ) : filteredListings.length === 0 ? (
               <Text
                 style={[
                   styles.emptyText,
@@ -540,7 +587,7 @@ export default function SearchScreen() {
             ) : (
               <FlatList<Listing>
                 ref={listRef}
-                data={listings}
+                data={filteredListings}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                   <NearbyLocationCard
@@ -599,9 +646,9 @@ export default function SearchScreen() {
 
         {/* ── Booking View (Hourly Current / Schedule, Figma 389-196 / 389-224) ── */}
         {viewState === 'booking' && selectedListing && (
-          <BookingView
-            listing={selectedListing}
-            mode={filterIndex === 0 ? 'hourly' : 'weekly'}
+            <BookingView
+              listing={selectedListing}
+            mode={getBookingModeForListing(selectedListing)}
             currentUserId={currentUserId}
             screenWidth={screenWidth}
             screenHeight={screenHeight}
@@ -823,8 +870,14 @@ const cardStyles = StyleSheet.create({
   },
   bottomRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
+    gap: 8,
+  },
+  rateTag: {
+    aspectRatio: 2,
+    marginTop: 2,
+    alignSelf: 'flex-start',
   },
   price: {
     fontFamily: CustomFonts.BevellierMedium,
@@ -837,6 +890,8 @@ const cardStyles = StyleSheet.create({
   distance: {
     fontFamily: CustomFonts.SwitzerLight,
     color: 'rgba(0,0,0,0.55)',
+    alignSelf: 'flex-end',
+    textAlign: 'right',
   },
 });
 
@@ -1008,7 +1063,7 @@ function BookingView({
   const MONTHLY_TAG_EXIT_X = screenWidth * 0.5;
   const monthlyTagTranslateX = useSharedValue(MONTHLY_TAG_EXIT_X);
   useEffect(() => {
-    if (currentWeeks >= WEEKS_PER_MONTH) {
+    if (listing.monthly_rate != null && currentWeeks >= WEEKS_PER_MONTH) {
       // ▼ TUNE spring: damping controls overshoot (higher = less bounce), stiffness controls speed ▼
       monthlyTagTranslateX.value = withSpring(0, { damping: 33, stiffness: 200 });
     } else {
@@ -1017,9 +1072,16 @@ function BookingView({
         easing: Easing.in(Easing.cubic),
       });
     }
-  }, [currentWeeks]);
+  }, [currentWeeks, listing.monthly_rate]);
   const monthlyTagAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: monthlyTagTranslateX.value }],
+  }));
+
+  // ─── DailyTag animation (hourly mode) ───────────────────────────────────
+  const DAILY_TAG_EXIT_X = screenWidth * 0.5;
+  const dailyTagTranslateX = useSharedValue(DAILY_TAG_EXIT_X);
+  const dailyTagAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: dailyTagTranslateX.value }],
   }));
 
   // ─── Mode-switch animation ──────────────────────────────────────────────
@@ -1092,6 +1154,28 @@ function BookingView({
     previewEnd,
   );
 
+  // ─── DailyTag animation trigger ─────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== 'hourly' || listing.daily_rate == null) {
+      dailyTagTranslateX.value = withTiming(DAILY_TAG_EXIT_X, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
+      return;
+    }
+    const hasDaily =
+      pricing?.tier === 'daily' ||
+      pricing?.line_items?.some((li) => li.tier === 'daily') === true;
+    if (hasDaily) {
+      dailyTagTranslateX.value = withSpring(0, { damping: 33, stiffness: 200 });
+    } else {
+      dailyTagTranslateX.value = withTiming(DAILY_TAG_EXIT_X, {
+        duration: 220,
+        easing: Easing.in(Easing.cubic),
+      });
+    }
+  }, [pricing, mode, listing.daily_rate]);
+
   // ─── Post-payment routing ──────────────────────────────────────────────
   const handlePaymentSuccess = async () => {
     if (!currentUserId) {
@@ -1121,7 +1205,7 @@ function BookingView({
       }
       router.push({
         pathname: './Chat',
-        params: { conversationId, otherUserName: ownerName },
+        params: { conversationId, otherUserName: ownerName, returnToHome: '1' },
       } as any);
     } catch (e: any) {
       Alert.alert(
@@ -1157,7 +1241,7 @@ function BookingView({
       }
       router.push({
         pathname: './Chat',
-        params: { conversationId, otherUserName: ownerName },
+        params: { conversationId, otherUserName: ownerName, returnToHome: '1' },
       } as any);
     } catch (e: any) {
       Alert.alert(
@@ -1306,7 +1390,7 @@ function BookingView({
               <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
                 <Text style={bookingStyles.totalFinalLabel}>Total</Text>
                 <Text style={bookingStyles.totalFinalAmount}>
-                  {pricingLoading ? '—' : pricingError ? '—' : `$${pricing!.total.toFixed(2)}`}
+                  {pricingLoading || pricingError || !pricing ? '—' : `$${pricing.total.toFixed(2)}`}
                 </Text>
               </View>
             </View>
@@ -1326,6 +1410,8 @@ function BookingView({
                 listingId={listing.id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                startTime={mountTime}
+                endTime={weeklyEnd}
                 disabled={!pricing || !!pricingError}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
@@ -1374,6 +1460,16 @@ function BookingView({
           <Text style={[bookingStyles.brandText, { fontSize: sizes.FONT_HEADER }]}>
             SpotOn Payment
           </Text>
+          <Animated.View
+            style={[{ marginLeft: 'auto' }, dailyTagAnimStyle]}
+            pointerEvents="none"
+          >
+            <Image
+              source={dailyTagAsset}
+              style={{ height: sizes.LOGO_SIZE, aspectRatio: 2.5 }}
+              resizeMode="contain"
+            />
+          </Animated.View>
         </View>
 
         {/* Listing card pinned at top — same visual as detail view's card */}
@@ -1551,16 +1647,29 @@ function BookingView({
         {/* Total block */}
         <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.totalLabel}>Total</Text>
-          <View style={bookingStyles.totalLine}>
-            <Text style={bookingStyles.totalSubtotal}>
-              {pricing
-                ? `$${pricing.rate.toFixed(2)} × ${pricing.units}${tierUnitLabel(pricing.tier)}`
-                : '—'}
-            </Text>
-            <Text style={bookingStyles.totalSubtotalAmount}>
-              {pricing ? `$${pricing.subtotal.toFixed(2)}` : ''}
-            </Text>
-          </View>
+          {pricing?.line_items ? (
+            pricing.line_items.map((li, idx) => (
+              <View key={idx} style={bookingStyles.totalLine}>
+                <Text style={bookingStyles.totalSubtotal}>
+                  {`$${li.rate.toFixed(2)} × ${Math.round(li.units)}${tierUnitLabel(li.tier)}`}
+                </Text>
+                <Text style={bookingStyles.totalSubtotalAmount}>
+                  {`$${li.subtotal.toFixed(2)}`}
+                </Text>
+              </View>
+            ))
+          ) : (
+            <View style={bookingStyles.totalLine}>
+              <Text style={bookingStyles.totalSubtotal}>
+                {pricing
+                  ? `$${pricing.rate.toFixed(2)} × ${Math.round(pricing.units)}${tierUnitLabel(pricing.tier)}`
+                  : '—'}
+              </Text>
+              <Text style={bookingStyles.totalSubtotalAmount}>
+                {pricing ? `$${pricing.subtotal.toFixed(2)}` : ''}
+              </Text>
+            </View>
+          )}
           <View style={bookingStyles.totalLine}>
             <Text style={bookingStyles.totalTaxLabel}>
               {pricingLoading
@@ -1578,7 +1687,7 @@ function BookingView({
           <View style={[bookingStyles.totalLine, bookingStyles.totalFinalRow]}>
             <Text style={bookingStyles.totalFinalLabel}>Total</Text>
             <Text style={bookingStyles.totalFinalAmount}>
-              {pricingLoading ? '—' : pricingError ? '—' : `$${pricing!.total.toFixed(2)}`}
+              {pricingLoading || pricingError || !pricing ? '—' : `$${pricing.total.toFixed(2)}`}
             </Text>
           </View>
         </View>
@@ -1599,6 +1708,8 @@ function BookingView({
               listingId={listing.id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
+              startTime={startDateTime}
+              endTime={endDateTime}
               disabled={!pricing || !!pricingError}
               onPaymentSuccess={handlePaymentSuccess}
             />
