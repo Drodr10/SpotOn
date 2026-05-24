@@ -1408,6 +1408,7 @@ function BookingView({
             <View style={bookingStyles.payWrap}>
               <PaymentCard
                 listingId={listing.id}
+                listerId={listing.owner_id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
                 startTime={mountTime}
@@ -1706,6 +1707,7 @@ function BookingView({
           <View style={bookingStyles.payWrap}>
             <PaymentCard
               listingId={listing.id}
+              listerId={listing.owner_id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
               startTime={startDateTime}

@@ -45,6 +45,9 @@ import * as Location from 'expo-location';
 // ─── Image Picker ─────────────────────────────────────────────────────────────
 import * as ImagePicker from 'expo-image-picker';
 
+// ─── Web Browser ──────────────────────────────────────────────────────────────
+import * as WebBrowser from 'expo-web-browser';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
 
@@ -67,6 +70,9 @@ import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
 import addlistingimageAsset from '@/assets/images/addlistingimage.png';
 import dailyTagAsset from '@/assets/images/DailyTag.png';
 import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
+
+// Stripe
+import { stripe } from '../utils/stripe';
 
 // ─── Sizing ───────────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
@@ -143,6 +149,8 @@ export default function CreateListing2() {
   const [endDate, setEndDate] = useState<Date | null>(null);
 
   // ── Daily / Monthly rate popups ────────────────────────────────────────────
+  const [userId, setUserId] = useState<string | null>(null);
+  const [stripeEnabled, setStripeEnabled] = useState(false);
   const [showDailyPopup, setShowDailyPopup] = useState(false);
   const [dailyEnabled, setDailyEnabled] = useState(true);
   const [dailyRateAccepted, setDailyRateAccepted] = useState(false);
@@ -185,6 +193,57 @@ export default function CreateListing2() {
       duration: 300,
       useNativeDriver: true,
     }).start(() => cb && cb());
+  };
+
+  useEffect(() => {
+    const initialize = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Authentication Error', 'You need to be logged in to create a listing.', [
+          { text: 'OK', onPress: () => router.replace('/Intro') },
+        ]);
+        return;
+      }
+      setUserId(user.id);
+
+      const hasStripeAccount = await stripe.userHasStripeAccount(user.id);
+      if (!hasStripeAccount) {
+        Alert.alert(
+          'Set Up Payouts',
+          'To list a spot and receive payments, you need to set up a Stripe account with us. It only takes a few minutes.',
+          [
+            { text: 'Not Now', style: 'cancel', onPress: () => router.back() },
+            { text: 'Set Up Now', onPress: () => handleSetupPayouts(user.id) },
+          ],
+          { cancelable: false }
+        );
+      }
+      else setStripeEnabled(true);
+    };
+
+    initialize();
+  }, []);
+
+  const handleSetupPayouts = async (currentUserId: string) : Promise<void> => {
+    try {
+      const accountId = await stripe.fetchStripeAccountId(currentUserId);
+      if (!accountId) {
+        Alert.alert('Error', 'Could not create a payments account. Please try again later.');
+        return;
+      }
+      const accountLinkUrl = await stripe.fetchStripeAccountLink(currentUserId);
+      if (!accountLinkUrl) {
+        Alert.alert('Error', 'Could not generate an onboarding link. Please try again.');
+        return;
+      }
+      await WebBrowser.openBrowserAsync(accountLinkUrl);
+      router.back();
+    } catch (error: any) {
+      console.error('Stripe onboarding failed:', error);
+      Alert.alert('Onboarding Error', error.message || 'An unexpected error occurred.');
+    }
   };
 
   useEffect(() => {
@@ -391,10 +450,9 @@ export default function CreateListing2() {
         }
       }
 
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
       if (!userId) {
         Alert.alert('Not logged in', 'Please log in before creating a listing.');
+        setSubmitting(false);
         return;
       }
 
@@ -659,13 +717,13 @@ export default function CreateListing2() {
   const renderBottomButtons = (
     onBack: () => void,
     onContinue: () => void,
-    continueLabel = 'Continue'
+    continueLabel = stripeEnabled ? 'Continue' : 'Set Up Payouts',
   ) => (
     <View style={styles.bottomRow}>
       <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(onBack)} activeOpacity={0.8}>
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.continueBtn} onPress={withLightHaptic(onContinue)} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.continueBtn} onPress={stripeEnabled ? withLightHaptic(onContinue) : () => {} } activeOpacity={0.8}>
         <Text style={styles.continueBtnText}>{continueLabel}</Text>
       </TouchableOpacity>
     </View>

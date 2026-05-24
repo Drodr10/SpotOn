@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, redirect
 from services.stripe_client import *
 
 stripe_bp = Blueprint('stripe', __name__)
@@ -11,7 +11,7 @@ def getKey():
 #This endpoint is used for create the payment sheet initiate a user payment, with the information needed.
 @stripe_bp.route('/stripe/payment-sheet', methods=['POST'])
 def payment_sheet():
-  return generatePaymentSheet(request.json["price"], request.json["listerId"])
+  return generatePaymentSheet(request.json["price"], request.json["lister_id"])
 
 #This endpoint is used for onboarding users to stripe connect. Needs to be done so users have an account to payout to.
 @stripe_bp.route('/stripe/create-connect-account', methods=['POST'])
@@ -22,3 +22,13 @@ def create_connect_account():
 @stripe_bp.route('/stripe/create-account-link', methods=['POST'])
 def create_account_link():
     return createAccountLink(request.json['user_id'])
+
+#This will be the endpoint you'll return to after the end of the onboarding
+@stripe_bp.route('/stripe/onboarding-complete', methods=['GET'])
+def onboarding_return():
+    return redirect("spoton://Homescreen")
+
+#Used for expired account link refresh
+@stripe_bp.route('/stripe/onboarding-expired', methods=['GET'])
+def onboarding_expired():
+    return redirect("spoton://Homescreen")
