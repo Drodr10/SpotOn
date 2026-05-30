@@ -239,6 +239,47 @@ export default function SearchScreen() {
   const userLat = latParam ? parseFloat(latParam) : 29.6516;
   const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
 
+  // Search center: defaults to user's coords but can be overridden by a text query (geocoded)
+  const [searchLat, setSearchLat] = useState<number>(userLat);
+  const [searchLng, setSearchLng] = useState<number>(userLng);
+  const [geocodingLoading, setGeocodingLoading] = useState<boolean>(false);
+
+  // Geocode a free-text query (uses Nominatim). Updates search center on success.
+  const geocodeQuery = useCallback(async (q: string) => {
+    try {
+      setGeocodingLoading(true);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      );
+      const hits = await res.json();
+      if (hits && hits.length > 0) {
+        const lat = parseFloat(hits[0].lat);
+        const lon = parseFloat(hits[0].lon);
+        setSearchLat(lat);
+        setSearchLng(lon);
+      } else {
+        console.warn('[geocode] no results for', q);
+        setSearchLat(userLat);
+        setSearchLng(userLng);
+      }
+    } catch (e) {
+      console.warn('[geocode] error', e);
+      setSearchLat(userLat);
+      setSearchLng(userLng);
+    } finally {
+      setGeocodingLoading(false);
+    }
+  }, [userLat, userLng]);
+
+  useEffect(() => {
+    if (query && query.trim().length > 0) {
+      geocodeQuery(query);
+    } else {
+      setSearchLat(userLat);
+      setSearchLng(userLng);
+    }
+  }, [query, userLat, userLng, geocodeQuery]);
+
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -275,27 +316,27 @@ export default function SearchScreen() {
   };
 
   const initialRegion = {
-    latitude: userLat,
-    longitude: userLng,
+    latitude: searchLat,
+    longitude: searchLng,
     latitudeDelta: 0.04,
     longitudeDelta: 0.04,
   };
 
-  // ─── Fetch listings ─────────────────────────────────────────────────────
+  // ─── Fetch listings (uses search center which may be geocoded from a text query)
   useEffect(() => {
     (async () => {
       setLoading(true);
       const latDelta = 0.0724;
-      const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
+      const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
 
       const { data, error } = await supabase
         .from('listings')
         .select('*')
         .eq('is_active', true)
-        .gte('latitude', userLat - latDelta)
-        .lte('latitude', userLat + latDelta)
-        .gte('longitude', userLng - lngDelta)
-        .lte('longitude', userLng + lngDelta);
+        .gte('latitude', searchLat - latDelta)
+        .lte('latitude', searchLat + latDelta)
+        .gte('longitude', searchLng - lngDelta)
+        .lte('longitude', searchLng + lngDelta);
 
       if (error) {
         console.error('Supabase listings error:', error);
@@ -306,7 +347,7 @@ export default function SearchScreen() {
       const withDistance: Listing[] = (data ?? [])
         .map((l: any) => ({
           ...l,
-          distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
+          distance: getDistanceMiles(searchLat, searchLng, l.latitude, l.longitude),
         }))
         .filter((l: Listing) => l.distance <= 5)
         .sort((a: Listing, b: Listing) => a.distance - b.distance);
@@ -314,7 +355,7 @@ export default function SearchScreen() {
       setListings(withDistance);
       setLoading(false);
     })();
-  }, []);
+  }, [searchLat, searchLng]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -473,7 +514,7 @@ export default function SearchScreen() {
           mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
         >
           <Marker
-            coordinate={{ latitude: userLat, longitude: userLng }}
+            coordinate={{ latitude: searchLat, longitude: searchLng }}
             title={query ?? 'Searched Location'}
             pinColor="#007AFF"
           />
