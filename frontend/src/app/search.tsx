@@ -42,6 +42,8 @@ import Animated, {
 
 // ─── Supabase / Stripe ───────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
+import geocodeQuery from '../utils/geocode';
+import GeocodeDispatcher from '../utils/geocodeDispatcher';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { stripe } from '../utils/stripe';
 import PaymentCard from '@/src/components/PaymentCard';
@@ -243,42 +245,57 @@ export default function SearchScreen() {
   const [searchLat, setSearchLat] = useState<number>(userLat);
   const [searchLng, setSearchLng] = useState<number>(userLng);
   const [geocodingLoading, setGeocodingLoading] = useState<boolean>(false);
+  const dispatcherRef = useRef<GeocodeDispatcher | null>(null);
 
-  // Geocode a free-text query (uses Nominatim). Updates search center on success.
-  const geocodeQuery = useCallback(async (q: string) => {
-    try {
-      setGeocodingLoading(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
-      );
-      const hits = await res.json();
-      if (hits && hits.length > 0) {
-        const lat = parseFloat(hits[0].lat);
-        const lon = parseFloat(hits[0].lon);
-        setSearchLat(lat);
-        setSearchLng(lon);
-      } else {
-        console.warn('[geocode] no results for', q);
-        setSearchLat(userLat);
-        setSearchLng(userLng);
-      }
-    } catch (e) {
-      console.warn('[geocode] error', e);
-      setSearchLat(userLat);
-      setSearchLng(userLng);
-    } finally {
-      setGeocodingLoading(false);
-    }
-  }, [userLat, userLng]);
+  // Initialize dispatcher once
+  useEffect(() => {
+    dispatcherRef.current = new GeocodeDispatcher(geocodeQuery, 300);
+    return () => {
+      dispatcherRef.current?.cancel();
+      dispatcherRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
-    if (query && query.trim().length > 0) {
-      geocodeQuery(query);
-    } else {
+    const disp = dispatcherRef.current;
+    if (!disp) return;
+
+    if (!query || query.trim().length === 0) {
+      disp.cancel();
       setSearchLat(userLat);
       setSearchLng(userLng);
+      setGeocodingLoading(false);
+      return;
     }
-  }, [query, userLat, userLng, geocodeQuery]);
+
+    setGeocodingLoading(true);
+    let mounted = true;
+    disp.search(query)
+      .then((res) => {
+        if (!mounted) return;
+        if (res) {
+          setSearchLat(res.lat);
+          setSearchLng(res.lon);
+        } else {
+          setSearchLat(userLat);
+          setSearchLng(userLng);
+        }
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        console.warn('[geocode] error', e);
+        setSearchLat(userLat);
+        setSearchLng(userLng);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setGeocodingLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [query, userLat, userLng]);
 
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
@@ -321,6 +338,26 @@ export default function SearchScreen() {
     latitudeDelta: 0.04,
     longitudeDelta: 0.04,
   };
+
+  // Animate the map when the search center changes so the user sees the jump.
+  useEffect(() => {
+    try {
+      const region = {
+        latitude: searchLat,
+        longitude: searchLng,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      };
+      // animate if mapRef available
+      if (mapRef && mapRef.current && typeof mapRef.current.animateToRegion === 'function') {
+        // small timeout to allow MapView to be ready
+        setTimeout(() => mapRef.current?.animateToRegion(region, 300), 50);
+      }
+    } catch (e) {
+      // swallow animation errors
+      console.warn('[map] animate error', e);
+    }
+  }, [searchLat, searchLng]);
 
   // ─── Fetch listings (uses search center which may be geocoded from a text query)
   useEffect(() => {
