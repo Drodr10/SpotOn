@@ -22,6 +22,8 @@ import { JwtPayload } from '@supabase/supabase-js';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { api, type ActiveReservation } from '@/src/utils/api';
+import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
 
 import logoAsset from '@/assets/images/spotonlogo.png';
 import penIcon from '@/assets/images/penicon.png';
@@ -32,6 +34,8 @@ import cardPayment from '@/assets/images/profilePage/cardpayment.avif';
 import mailIcon from '@/assets/images/profilePage/material-symbols_mail-rounded.png';
 import auraGradient from '@/assets/images/profilePage/aura_gradient.png';
 import exitIcon from '@/assets/images/profilePage/exit_to_app.png';
+import carParkingIcon from '@/assets/images/carparking.png';
+import addListingIcon from '@/assets/images/addlistingimage.png';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -91,6 +95,7 @@ export default function ProfilePage() {
   const [editingEmail, setEditingEmail] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
+  const [activeReservations, setActiveReservations] = useState<ActiveReservation[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -134,8 +139,16 @@ export default function ProfilePage() {
     loadProfile();
   }, []);
 
+  const loadActiveReservations = async (userId: string) => {
+    const data = await api.getActiveReservations(userId);
+    setActiveReservations(data ?? []);
+  };
+
   useFocusEffect(() => {
-    if (claims?.sub) loadVehicles(claims.sub);
+    if (claims?.sub) {
+      loadVehicles(claims.sub);
+      loadActiveReservations(claims.sub);
+    }
   });
 
   useEffect(() => {
@@ -343,6 +356,42 @@ export default function ProfilePage() {
             />
           </ImageBackground>
 
+          {/* Current reservation(s) — horizontal scroll when multiple. */}
+          {activeReservations.length > 0 && (
+            activeReservations.length === 1 ? (
+              <View style={styles.singleReservationWrap}>
+                <ReservationInfoCard
+                  address={activeReservations[0].listingData.address}
+                  endTime={activeReservations[0].end_time}
+                  totalPrice={activeReservations[0].total_price}
+                  photoUrl={activeReservations[0].listingData.photo_url}
+                  variant='current'
+                  width={screenWidth - H_PAD * 2}
+                />
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.reservationList}
+                snapToAlignment='start'
+                decelerationRate='fast'
+              >
+                {activeReservations.map((r) => (
+                  <ReservationInfoCard
+                    key={r.id}
+                    address={r.listingData.address}
+                    endTime={r.end_time}
+                    totalPrice={r.total_price}
+                    photoUrl={r.listingData.photo_url}
+                    variant='current'
+                    width={screenWidth * 0.82}
+                  />
+                ))}
+              </ScrollView>
+            )
+          )}
+
           {/* Register Your Car banner */}
           <TouchableOpacity
             style={styles.banner}
@@ -382,6 +431,26 @@ export default function ProfilePage() {
             <Text style={styles.bannerText}>Setup{'\n'}Payouts</Text>
             <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
           </View>
+
+          {/* Previous Reservations banner — opens history page */}
+          <TouchableOpacity
+            style={styles.banner}
+            activeOpacity={0.85}
+            onPress={withLightHaptic(() => router.push('./PreviousReservations'))}
+          >
+            <Text style={styles.bannerText}>Previous{'\n'}Reservations</Text>
+            <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
+          </TouchableOpacity>
+
+          {/* Your Current Spots banner — opens spots/bookings page */}
+          <TouchableOpacity
+            style={styles.banner}
+            activeOpacity={0.85}
+            onPress={withLightHaptic(() => router.push('./YourSpots'))}
+          >
+            <Text style={styles.bannerText}>Your{'\n'}Current Spots</Text>
+            <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
+          </TouchableOpacity>
 
           {/* Email card */}
           <View style={styles.emailCard}>
@@ -560,6 +629,15 @@ const styles = StyleSheet.create({
     right: BANNER_IMAGE_RIGHT,
     width: screenWidth * 0.3,
     height: '95%',
+  },
+
+  // Active reservation list
+  singleReservationWrap: {
+    alignItems: 'center',
+  },
+  reservationList: {
+    gap: screenWidth * 0.04,
+    paddingRight: H_PAD,
   },
 
   // Vehicle list

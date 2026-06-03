@@ -49,6 +49,7 @@ import PaymentCard from '@/src/components/PaymentCard';
 // ─── Constants / Components / Assets ─────────────────────────────────────────
 import { CustomFonts, Palette } from '@/src/constants/theme';
 import FilterToggle from '@/src/components/FilterToggle';
+import TooFarBanner from '@/src/components/HomescreenComponents/TooFarBanner';
 import HourScroller from '@/src/components/HourScroller';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset from '@/assets/images/cabin.png';
@@ -240,6 +241,7 @@ export default function SearchScreen() {
   const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
 
   const [listings, setListings] = useState<Listing[]>([]);
+  const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string>('');
@@ -288,7 +290,15 @@ export default function SearchScreen() {
       const latDelta = 0.0724;
       const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
 
-      const { data, error } = await supabase
+      const decorate = (rows: any[]): Listing[] =>
+        rows
+          .map((l: any) => ({
+            ...l,
+            distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
+          }))
+          .sort((a: Listing, b: Listing) => a.distance - b.distance);
+
+      const { data: nearbyData, error: nearbyError } = await supabase
         .from('listings')
         .select('*')
         .eq('is_active', true)
@@ -297,21 +307,30 @@ export default function SearchScreen() {
         .gte('longitude', userLng - lngDelta)
         .lte('longitude', userLng + lngDelta);
 
-      if (error) {
-        console.error('Supabase listings error:', error);
+      if (nearbyError) {
+        console.error('Supabase listings error:', nearbyError);
         setLoading(false);
         return;
       }
 
-      const withDistance: Listing[] = (data ?? [])
-        .map((l: any) => ({
-          ...l,
-          distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
-        }))
-        .filter((l: Listing) => l.distance <= 5)
-        .sort((a: Listing, b: Listing) => a.distance - b.distance);
+      // Always within 5mi when nearby spots exist; otherwise fall back to the
+      // closest listings anywhere so the user is never shown an empty result.
+      let resolved: Listing[] = decorate(nearbyData ?? []).filter((l) => l.distance <= 5);
+      let fallback = false;
 
-      setListings(withDistance);
+      if (resolved.length === 0) {
+        const { data: allData, error: allError } = await supabase
+          .from('listings')
+          .select('*')
+          .eq('is_active', true);
+        if (!allError && allData) {
+          resolved = decorate(allData);
+          fallback = resolved.length > 0;
+        }
+      }
+
+      setListings(resolved);
+      setIsFallback(fallback);
       setLoading(false);
     })();
   }, []);
@@ -603,6 +622,13 @@ export default function SearchScreen() {
                 )}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: sizes.V_PAD }}
+                ListHeaderComponent={
+                  isFallback ? (
+                    <View style={{ marginBottom: screenWidth * 0.04 }}>
+                      <TooFarBanner fullWidth radius={999} />
+                    </View>
+                  ) : null
+                }
                 ItemSeparatorComponent={() => <View style={{ height: screenWidth * 0.025 }} />}
                 onScrollToIndexFailed={(info) => {
                   // Safe fallback: estimate offset, then retry once layout is ready.

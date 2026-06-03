@@ -4,7 +4,7 @@
  * Main screen of the SpotOn app.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Image,
   View,
@@ -20,11 +20,9 @@ import { StatusBar } from 'expo-status-bar';
 import LogoBar from '@/src/components/HomescreenComponents/LogoBar';
 import SearchBar from '@/src/components/HomescreenComponents/SearchBar';
 import DynamicViewer from '@/src/components/HomescreenComponents/DynamicViewer';
-import PreviousSpotsList from '@/src/components/HomescreenComponents/PreviousSpotsList';
+import TooFarBanner from '@/src/components/HomescreenComponents/TooFarBanner';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 import { CustomFonts } from '@/src/constants/theme';
-import { supabase } from '../utils/supabase';
-import { api, type ActiveReservation } from '../utils/api';
 
 import gradientBackgroundAsset from '@/assets/images/gradient_background_v1.png';
 
@@ -33,61 +31,16 @@ const H_PAD        = screenWidth * 0.05;
 const SECTION_GAP  = screenWidth * 0.05;
 const SECTION_LABEL = screenWidth * 0.045;
 
-type ProfileData = {
-  id: string;
-  full_name: string;
-  email: string;
-  rating_avg: number;
-  created_at: string;
-};
-
 export default function Homescreen() {
-  const [userId, setUserId]         = useState<string | null>(null);
-  const [, setProfileData]          = useState<ProfileData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [currentReservationData, setCurrentReservationData] = useState<ActiveReservation[] | null>(null);
-  const [ownerCurrentBookingsData, setOwnerCurrentBookingsData] = useState<ActiveReservation[] | null>(null);
+  const [, setRefreshKey] = useState(0);
+  const [showTooFar, setShowTooFar] = useState(false);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setRefreshKey((k) => k + 1);
     setTimeout(() => setRefreshing(false), 600);
   }, []);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
-      if (error || !session) {
-        console.log('No active session:', error?.message ?? 'session null');
-        return;
-      }
-
-      const id = session.user.id;
-      setUserId(id);
-
-      const { data, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (profileError || !data) {
-        console.log('Error retrieving profile:', profileError?.message);
-        return;
-      }
-
-      setProfileData(data);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!userId) return;
-    const fetchReservationData = async () => {
-      setCurrentReservationData(await api.getActiveReservations(userId));
-      setOwnerCurrentBookingsData(await api.getOwnerActiveBookings(userId));
-    };
-    fetchReservationData();
-  }, [userId, refreshKey]);
 
   return (
     <View style={styles.root}>
@@ -118,28 +71,18 @@ export default function Homescreen() {
               <SearchBar />
             </View>
 
+            {showTooFar && (
+              <View style={styles.section}>
+                <TooFarBanner />
+              </View>
+            )}
+
             {/* DynamicViewer — breaks out of horizontal padding like PreviousSpots */}
             <View style={styles.sectionLabelRow}>
               <Text style={styles.sectionLabel}>Listings Near You</Text>
             </View>
             <View style={[styles.section, styles.fullBleedSection]}>
-              <DynamicViewer />
-            </View>
-
-            <View style={[styles.section, styles.sectionLabelRow]}>
-              <Text style={styles.sectionLabel}>Your Current Reservations</Text>
-            </View>
-
-            <View style={styles.previousSpotsContainer}>
-              <PreviousSpotsList spots={currentReservationData} />
-            </View>
-
-            <View style={[styles.section, styles.sectionLabelRow]}>
-              <Text style={styles.sectionLabel}>Current Bookings For Your Spots</Text>
-            </View>
-
-            <View style={styles.previousSpotsContainer}>
-              <PreviousSpotsList spots={ownerCurrentBookingsData} />
+              <DynamicViewer onFallback={setShowTooFar} />
             </View>
           </ScrollView>
         </View>
@@ -195,9 +138,6 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   fullBleedSection: {
-    marginHorizontal: -H_PAD,
-  },
-  previousSpotsContainer: {
     marginHorizontal: -H_PAD,
   },
 });
