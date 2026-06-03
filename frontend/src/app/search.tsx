@@ -1398,7 +1398,11 @@ function BookingView({
               </View>
             </View>
 
-            {/* Summary line */}
+            {/* Date / time summary */}
+            <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
+            </View>
+
             <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
               <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
               {vehiclesLoading ? (
@@ -1437,14 +1441,9 @@ function BookingView({
               )}
             </View>
 
-            {/* Summary line */}
-            <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
-              <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
-            </View>
-
             {/* Total block */}
             <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-              <Text style={bookingStyles.totalLabel}>Total</Text>
+              <Text style={bookingStyles.totalLabel}>Payment</Text>
 
               {pricing?.tier === 'monthly' ? (
                 <View style={bookingStyles.totalLine}>
@@ -1728,7 +1727,13 @@ function BookingView({
           </Animated.View>
         </View>
 
-        {/* Summary line */}
+        {/* Date / time summary */}
+        <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.summaryText} numberOfLines={2}>
+            {summaryLine}
+          </Text>
+        </View>
+
         <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
           {vehiclesLoading ? (
@@ -1767,16 +1772,9 @@ function BookingView({
           )}
         </View>
 
-        {/* Summary line */}
-        <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
-          <Text style={bookingStyles.summaryText} numberOfLines={2}>
-            {summaryLine}
-          </Text>
-        </View>
-
         {/* Total block */}
         <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-          <Text style={bookingStyles.totalLabel}>Total</Text>
+          <Text style={bookingStyles.totalLabel}>Payment</Text>
           {pricing?.line_items ? (
             pricing.line_items.map((li, idx) => (
               <View key={idx} style={bookingStyles.totalLine}>
@@ -1921,11 +1919,12 @@ const bookingStyles = StyleSheet.create({
     alignItems: 'center',
   },
   vehicleBlock: {
-    marginTop: 8,
+    // Match totalBlock marginTop — same gap as Selected → Payment.
+    marginTop: 28,
   },
   vehicleLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 14,
+    fontSize: 16,
     color: '#000',
     marginBottom: 8,
   },
@@ -2069,7 +2068,7 @@ const bookingStyles = StyleSheet.create({
   },
   totalFinalLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 18,
+    fontSize: 16,
     color: '#000',
   },
   totalFinalAmount: {
