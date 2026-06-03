@@ -1523,6 +1523,7 @@ function BookingView({
             <View style={bookingStyles.payWrap}>
               <PaymentCard
                 listingId={listing.id}
+                listerId={listing.owner_id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
                 vehicleId={selectedVehicleId}
@@ -1860,6 +1861,7 @@ function BookingView({
           <View style={bookingStyles.payWrap}>
             <PaymentCard
               listingId={listing.id}
+              listerId={listing.owner_id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
               vehicleId={selectedVehicleId}

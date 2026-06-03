@@ -10,6 +10,7 @@ import { router } from 'expo-router'
 
 import {  useStripe } from "@stripe/stripe-react-native"
 import { stripe } from "../utils/stripe"
+import type { StripePaymentSheetParams } from '../utils/stripe'
 import { api } from "../utils/api"
 
 import { supabase } from '@/src/utils/supabase';
@@ -18,6 +19,7 @@ import { JwtPayload } from '@supabase/supabase-js';
 
 type PaymentProps = {
     listingId: string;
+    listerId: string;
     price: number;
     hours: number;
     vehicleId?: string | null;
@@ -33,7 +35,7 @@ type PaymentProps = {
     onPaymentSuccess?: (info: { listingId: string; price: number; hours: number }) => void;
 }
 
-export default function PaymentCard ({ listingId, price, hours, vehicleId, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
+export default function PaymentCard ({ listingId, listerId, price, hours, vehicleId, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
     const [claims, setClaims] = useState<JwtPayload>();
@@ -47,7 +49,8 @@ export default function PaymentCard ({ listingId, price, hours, vehicleId, start
             paymentIntent,
             customerSessionClientSecret,
             customer,
-        } = await stripe.fetchPaymentSheetParams(price);
+        } : StripePaymentSheetParams | any
+        = await stripe.fetchPaymentSheetParams(price, listerId);
 
         const { error } = await initPaymentSheet({
             merchantDisplayName: "SpotOn",

@@ -85,3 +85,14 @@ Base URL: `http://localhost:5000/api`
 - **Description**: Generates and returns a payment sheet used for creating a promptable transaction for the user.
 - **Body**: `{price}`, where price is given in cents. 
 - **Response**: `{ paymentIntent, customerSessionClientSecret, customer }`.
+
+### 'POST /stripe/create-connect-account
+- **Description**: Generates a stripe account ID for a given user.
+- **Body**: `{user_id}`, corresponding to their supabase account ID. 
+- **Response**: `{ account_id }`.
+
+### 'POST /stripe/payment-sheet
+- **Description**: Generates a link used for onboarding new users to Stripe.
+- **Body**: `{user_id}`, corresponding to their supabase account ID. 
+- **Response**: `{ account_link_url }` used for user onboarding.
+
