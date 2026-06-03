@@ -49,6 +49,7 @@ import PaymentCard from '@/src/components/PaymentCard';
 // ─── Constants / Components / Assets ─────────────────────────────────────────
 import { CustomFonts, Palette } from '@/src/constants/theme';
 import FilterToggle from '@/src/components/FilterToggle';
+import TooFarBanner from '@/src/components/HomescreenComponents/TooFarBanner';
 import HourScroller from '@/src/components/HourScroller';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset from '@/assets/images/cabin.png';
@@ -240,6 +241,7 @@ export default function SearchScreen() {
   const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
 
   const [listings, setListings] = useState<Listing[]>([]);
+  const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string>('');
@@ -288,7 +290,15 @@ export default function SearchScreen() {
       const latDelta = 0.0724;
       const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
 
-      const { data, error } = await supabase
+      const decorate = (rows: any[]): Listing[] =>
+        rows
+          .map((l: any) => ({
+            ...l,
+            distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
+          }))
+          .sort((a: Listing, b: Listing) => a.distance - b.distance);
+
+      const { data: nearbyData, error: nearbyError } = await supabase
         .from('listings')
         .select('*')
         .eq('is_active', true)
@@ -297,21 +307,30 @@ export default function SearchScreen() {
         .gte('longitude', userLng - lngDelta)
         .lte('longitude', userLng + lngDelta);
 
-      if (error) {
-        console.error('Supabase listings error:', error);
+      if (nearbyError) {
+        console.error('Supabase listings error:', nearbyError);
         setLoading(false);
         return;
       }
 
-      const withDistance: Listing[] = (data ?? [])
-        .map((l: any) => ({
-          ...l,
-          distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
-        }))
-        .filter((l: Listing) => l.distance <= 5)
-        .sort((a: Listing, b: Listing) => a.distance - b.distance);
+      // Always within 5mi when nearby spots exist; otherwise fall back to the
+      // closest listings anywhere so the user is never shown an empty result.
+      let resolved: Listing[] = decorate(nearbyData ?? []).filter((l) => l.distance <= 5);
+      let fallback = false;
 
-      setListings(withDistance);
+      if (resolved.length === 0) {
+        const { data: allData, error: allError } = await supabase
+          .from('listings')
+          .select('*')
+          .eq('is_active', true);
+        if (!allError && allData) {
+          resolved = decorate(allData);
+          fallback = resolved.length > 0;
+        }
+      }
+
+      setListings(resolved);
+      setIsFallback(fallback);
       setLoading(false);
     })();
   }, []);
@@ -603,6 +622,13 @@ export default function SearchScreen() {
                 )}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: sizes.V_PAD }}
+                ListHeaderComponent={
+                  isFallback ? (
+                    <View style={{ marginBottom: screenWidth * 0.04 }}>
+                      <TooFarBanner fullWidth radius={999} />
+                    </View>
+                  ) : null
+                }
                 ItemSeparatorComponent={() => <View style={{ height: screenWidth * 0.025 }} />}
                 onScrollToIndexFailed={(info) => {
                   // Safe fallback: estimate offset, then retry once layout is ready.
@@ -958,6 +984,14 @@ type SizesShape = {
   DETAIL_HEADER_HEIGHT: number;
 };
 
+type VehicleProfile = {
+  id: string;
+  make: string;
+  model: string;
+  color: string;
+  plate_last4?: string | null;
+};
+
 const HARD_CAP_HOURS = 96; // 4 days
 const HARD_CAP_WEEKS = 52;    // 1-year cap
 const HOURS_PER_WEEK = 168;   // 24 × 7
@@ -1023,6 +1057,9 @@ function BookingView({
 
   // ─── Booking-mode state (Current is default per Figma) ───────────────────
   const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
+  const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   // ─── Hourly Current state ───────────────────────────────────────────────
   const [currentHours, setCurrentHours] = useState(1);
@@ -1045,6 +1082,45 @@ function BookingView({
   const [pickerActive, setPickerActive] = useState(false);
   const lockPicker = useCallback(() => setPickerActive(true), []);
   const unlockPicker = useCallback(() => setPickerActive(false), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVehicles = async () => {
+      if (!currentUserId) {
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        return;
+      }
+
+      setVehiclesLoading(true);
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, make, model, color, plate_last4')
+        .eq('owner_user_id', currentUserId)
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn('[booking] vehicle load failed', error);
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        setVehiclesLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as VehicleProfile[];
+      setVehicles(rows);
+      setSelectedVehicleId(rows.length > 0 ? rows[0].id : null);
+      setVehiclesLoading(false);
+    };
+
+    loadVehicles();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
 
   // Clamp Schedule end > start; respect 4-day cap.
   useEffect(() => {
@@ -1144,6 +1220,7 @@ function BookingView({
   );
   const weeklySummary = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
   const weeklyHours   = currentWeeks * HOURS_PER_WEEK;
+  const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) ?? null;
 
   // ─── Pricing preview (replaces client-side tax + totals math) ───────────
   const previewStart = mode === 'hourly' ? startDateTime : mountTime;
@@ -1347,14 +1424,52 @@ function BookingView({
               </View>
             </View>
 
-            {/* Summary line */}
+            {/* Date / time summary */}
             <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
               <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
             </View>
 
+            <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+              {vehiclesLoading ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : vehicles.length === 0 ? (
+                <TouchableOpacity
+                  style={bookingStyles.vehicleEmptyButton}
+                  onPress={withLightHaptic(() => router.push('./Profile'))}
+                  activeOpacity={0.85}
+                >
+                  <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={bookingStyles.vehicleChipsRow}>
+                  {vehicles.map((v) => {
+                    const selected = v.id === selectedVehicleId;
+                    return (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                        onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {!!selectedVehicle && (
+                <Text style={bookingStyles.vehicleSelectedText}>
+                  Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+                </Text>
+              )}
+            </View>
+
             {/* Total block */}
             <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-              <Text style={bookingStyles.totalLabel}>Total</Text>
+              <Text style={bookingStyles.totalLabel}>Payment</Text>
 
               {pricing?.tier === 'monthly' ? (
                 <View style={bookingStyles.totalLine}>
@@ -1411,9 +1526,10 @@ function BookingView({
                 listerId={listing.owner_id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                vehicleId={selectedVehicleId}
                 startTime={mountTime}
                 endTime={weeklyEnd}
-                disabled={!pricing || !!pricingError}
+                disabled={!pricing || !!pricingError || !selectedVehicleId}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
             </View>
@@ -1638,16 +1754,54 @@ function BookingView({
           </Animated.View>
         </View>
 
-        {/* Summary line */}
+        {/* Date / time summary */}
         <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.summaryText} numberOfLines={2}>
             {summaryLine}
           </Text>
         </View>
 
+        <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+          {vehiclesLoading ? (
+            <ActivityIndicator size="small" color="#000" />
+          ) : vehicles.length === 0 ? (
+            <TouchableOpacity
+              style={bookingStyles.vehicleEmptyButton}
+              onPress={withLightHaptic(() => router.push('./Profile'))}
+              activeOpacity={0.85}
+            >
+              <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={bookingStyles.vehicleChipsRow}>
+              {vehicles.map((v) => {
+                const selected = v.id === selectedVehicleId;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                    onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          {!!selectedVehicle && (
+            <Text style={bookingStyles.vehicleSelectedText}>
+              Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+            </Text>
+          )}
+        </View>
+
         {/* Total block */}
         <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-          <Text style={bookingStyles.totalLabel}>Total</Text>
+          <Text style={bookingStyles.totalLabel}>Payment</Text>
           {pricing?.line_items ? (
             pricing.line_items.map((li, idx) => (
               <View key={idx} style={bookingStyles.totalLine}>
@@ -1710,9 +1864,10 @@ function BookingView({
               listerId={listing.owner_id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
+              vehicleId={selectedVehicleId}
               startTime={startDateTime}
               endTime={endDateTime}
-              disabled={!pricing || !!pricingError}
+              disabled={!pricing || !!pricingError || !selectedVehicleId}
               onPaymentSuccess={handlePaymentSuccess}
             />
           </View>
@@ -1790,6 +1945,58 @@ const bookingStyles = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  vehicleBlock: {
+    // Match totalBlock marginTop — same gap as Selected → Payment.
+    marginTop: 28,
+  },
+  vehicleLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 16,
+    color: '#000',
+    marginBottom: 8,
+  },
+  vehicleChipsRow: {
+    gap: 8,
+  },
+  vehicleChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  vehicleChipSelected: {
+    borderColor: '#000',
+    backgroundColor: '#000',
+  },
+  vehicleChipText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleChipTextSelected: {
+    color: '#fff',
+  },
+  vehicleEmptyButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#000',
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  vehicleEmptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleSelectedText: {
+    marginTop: 8,
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 12,
+    color: 'rgba(0,0,0,0.65)',
   },
   calendarBtnInner: {
     flexDirection: 'row',
@@ -1889,7 +2096,7 @@ const bookingStyles = StyleSheet.create({
   },
   totalFinalLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 18,
+    fontSize: 16,
     color: '#000',
   },
   totalFinalAmount: {

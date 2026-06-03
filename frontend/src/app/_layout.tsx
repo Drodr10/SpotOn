@@ -61,6 +61,24 @@ export default function RootLayout() {
                 animation: (route.params as any)?.animation ?? "slide_from_right",
               })}
             />
+            <Stack.Screen
+              name="RegisterVehicle"
+              options={({ route }: any) => ({
+                animation: (route.params as any)?.animation ?? "slide_from_right",
+              })}
+            />
+            <Stack.Screen
+              name="PreviousReservations"
+              options={({ route }: any) => ({
+                animation: (route.params as any)?.animation ?? "slide_from_right",
+              })}
+            />
+            <Stack.Screen
+              name="YourSpots"
+              options={({ route }: any) => ({
+                animation: (route.params as any)?.animation ?? "slide_from_right",
+              })}
+            />
           </Stack>
           <MenuBar />
         </View>

@@ -24,7 +24,7 @@ import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 
-import profileDefault from '../../assets/images/menubar/profile_picture_default.png';
+import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
 import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
@@ -271,8 +271,17 @@ export default function MenuBar() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (cancelled || !user) return;
-      const url = (user.user_metadata as any)?.avatar_url ?? null;
-      setAvatarUrl(url);
+
+      // Avatar lives in profiles.avatar_url — that's the source of truth the
+      // Profile page writes to. Falls through to temprofileicon if not set.
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setAvatarUrl((profileRow?.avatar_url as string | null) ?? null);
+
       const res = await api.getActiveReservation(user.id);
       if (cancelled) return;
       if (res?.endTime) setEndTime(new Date(res.endTime));
