@@ -230,6 +230,13 @@ export default function SearchScreen() {
   const PANEL_MIN_HEIGHT = screenHeight * 0.56;
   const PANEL_MAX_HEIGHT = screenHeight * 0.88;
   const PANEL_DETAIL_HEIGHT = screenHeight * 0.7;
+  const PANEL_HEIGHT_ANIMATION = useMemo(
+    () => ({
+      duration: 380,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+    }),
+    [],
+  );
 
   const { query, lat: latParam, lng: lngParam, openListingId } = useLocalSearchParams<{
     query: string;
@@ -319,6 +326,17 @@ export default function SearchScreen() {
   const isDetailViewSV = useSharedValue(0); // 0 = list, 1 = detail (gates pan gesture)
   const detailOpacity = useSharedValue(0);
   const listOpacity = useSharedValue(1);
+
+  const animatePanelHeight = useCallback(
+    (height: number) => {
+      panelHeight.value = withTiming(height, PANEL_HEIGHT_ANIMATION);
+    },
+    [PANEL_HEIGHT_ANIMATION, panelHeight],
+  );
+
+  const handleDetailContentHeight = useCallback((height: number) => {
+    setDetailContentHeight((current) => (Math.abs(current - height) < 1 ? current : height));
+  }, []);
 
   useEffect(() => {
     supabase.auth.getClaims().then(({ data }) => {
@@ -418,16 +436,27 @@ export default function SearchScreen() {
         detailContentHeight > 0
           ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
           : PANEL_DETAIL_HEIGHT;
-      panelHeight.value = withSpring(targetH, { damping: 20, stiffness: 140 });
+      animatePanelHeight(targetH);
       detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
     } else {
       isDetailViewSV.value = 0;
-      panelHeight.value = withSpring(PANEL_MIN_HEIGHT, { damping: 22, stiffness: 140 });
+      animatePanelHeight(PANEL_MIN_HEIGHT);
       detailOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
     }
-  }, [isDetailView, PANEL_DETAIL_HEIGHT, PANEL_MIN_HEIGHT, PANEL_MAX_HEIGHT]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_DETAIL_HEIGHT,
+    PANEL_MIN_HEIGHT,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+    detailOpacity,
+    listOpacity,
+    isDetailViewSV,
+  ]);
 
   // Refine panel height once the detail content finishes measuring its layout.
   useEffect(() => {
@@ -436,9 +465,15 @@ export default function SearchScreen() {
         PANEL_MAX_HEIGHT,
         sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
       );
-      panelHeight.value = withSpring(target, { damping: 20, stiffness: 140 });
+      animatePanelHeight(target);
     }
-  }, [detailContentHeight]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+  ]);
 
   // ─── Pan gesture for the drag handle ───────────────────────────────────
   const panGesture = useMemo(
@@ -713,7 +748,7 @@ export default function SearchScreen() {
                 fontDist={sizes.FONT_DIST}
                 iconSize={sizes.ICON_SIZE}
                 onBack={handleBackFromDetail}
-                onContentHeight={setDetailContentHeight}
+                onContentHeight={handleDetailContentHeight}
                 onContinue={handleContinueFromDetail}
               />
             )}
