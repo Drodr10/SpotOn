@@ -42,6 +42,8 @@ import Animated, {
 
 // ─── Supabase / Stripe ───────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
+import geocodeQuery from '../utils/geocode';
+import GeocodeDispatcher from '../utils/geocodeDispatcher';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { stripe } from '../utils/stripe';
 import PaymentCard from '@/src/components/PaymentCard';
@@ -229,6 +231,13 @@ export default function SearchScreen() {
   const PANEL_MIN_HEIGHT = screenHeight * 0.56;
   const PANEL_MAX_HEIGHT = screenHeight * 0.88;
   const PANEL_DETAIL_HEIGHT = screenHeight * 0.7;
+  const PANEL_HEIGHT_ANIMATION = useMemo(
+    () => ({
+      duration: 380,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+    }),
+    [],
+  );
 
   const { query, lat: latParam, lng: lngParam, openListingId } = useLocalSearchParams<{
     query: string;
@@ -239,6 +248,62 @@ export default function SearchScreen() {
 
   const userLat = latParam ? parseFloat(latParam) : 29.6516;
   const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
+
+  // Search center: defaults to user's coords but can be overridden by a text query (geocoded)
+  const [searchLat, setSearchLat] = useState<number>(userLat);
+  const [searchLng, setSearchLng] = useState<number>(userLng);
+  const [geocodingLoading, setGeocodingLoading] = useState<boolean>(false);
+  const dispatcherRef = useRef<GeocodeDispatcher | null>(null);
+
+  // Initialize dispatcher once
+  useEffect(() => {
+    dispatcherRef.current = new GeocodeDispatcher(geocodeQuery, 300);
+    return () => {
+      dispatcherRef.current?.cancel();
+      dispatcherRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const disp = dispatcherRef.current;
+    if (!disp) return;
+
+    if (!query || query.trim().length === 0) {
+      disp.cancel();
+      setSearchLat(userLat);
+      setSearchLng(userLng);
+      setGeocodingLoading(false);
+      return;
+    }
+
+    setGeocodingLoading(true);
+    let mounted = true;
+    disp.search(query)
+      .then((res) => {
+        if (!mounted) return;
+        if (res) {
+          setSearchLat(res.lat);
+          setSearchLng(res.lon);
+        } else {
+          setSearchLat(userLat);
+          setSearchLng(userLng);
+        }
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        console.warn('[geocode] error', e);
+        setSearchLat(userLat);
+        setSearchLng(userLng);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setGeocodingLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [query, userLat, userLng]);
 
   const [listings, setListings] = useState<Listing[]>([]);
   const [isFallback, setIsFallback] = useState(false);
@@ -264,6 +329,17 @@ export default function SearchScreen() {
   const detailOpacity = useSharedValue(0);
   const listOpacity = useSharedValue(1);
 
+  const animatePanelHeight = useCallback(
+    (height: number) => {
+      panelHeight.value = withTiming(height, PANEL_HEIGHT_ANIMATION);
+    },
+    [PANEL_HEIGHT_ANIMATION, panelHeight],
+  );
+
+  const handleDetailContentHeight = useCallback((height: number) => {
+    setDetailContentHeight((current) => (Math.abs(current - height) < 1 ? current : height));
+  }, []);
+
   useEffect(() => {
     supabase.auth.getClaims().then(({ data }) => {
       if (data) setCurrentUserId(data.claims.sub);
@@ -277,18 +353,38 @@ export default function SearchScreen() {
   };
 
   const initialRegion = {
-    latitude: userLat,
-    longitude: userLng,
+    latitude: searchLat,
+    longitude: searchLng,
     latitudeDelta: 0.04,
     longitudeDelta: 0.04,
   };
 
-  // ─── Fetch listings ─────────────────────────────────────────────────────
+  // Animate the map when the search center changes so the user sees the jump.
+  useEffect(() => {
+    try {
+      const region = {
+        latitude: searchLat,
+        longitude: searchLng,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      };
+      // animate if mapRef available
+      if (mapRef && mapRef.current && typeof mapRef.current.animateToRegion === 'function') {
+        // small timeout to allow MapView to be ready
+        setTimeout(() => mapRef.current?.animateToRegion(region, 300), 50);
+      }
+    } catch (e) {
+      // swallow animation errors
+      console.warn('[map] animate error', e);
+    }
+  }, [searchLat, searchLng]);
+
+  // ─── Fetch listings (uses search center which may be geocoded from a text query)
   useEffect(() => {
     (async () => {
       setLoading(true);
       const latDelta = 0.0724;
-      const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
+      const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
 
       const decorate = (rows: any[]): Listing[] =>
         rows
@@ -302,10 +398,10 @@ export default function SearchScreen() {
         .from('listings')
         .select('*')
         .eq('is_active', true)
-        .gte('latitude', userLat - latDelta)
-        .lte('latitude', userLat + latDelta)
-        .gte('longitude', userLng - lngDelta)
-        .lte('longitude', userLng + lngDelta);
+        .gte('latitude', searchLat - latDelta)
+        .lte('latitude', searchLat + latDelta)
+        .gte('longitude', searchLng - lngDelta)
+        .lte('longitude', searchLng + lngDelta);
 
       if (nearbyError) {
         console.error('Supabase listings error:', nearbyError);
@@ -333,7 +429,7 @@ export default function SearchScreen() {
       setIsFallback(fallback);
       setLoading(false);
     })();
-  }, []);
+  }, [searchLat, searchLng]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -359,16 +455,27 @@ export default function SearchScreen() {
         detailContentHeight > 0
           ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
           : PANEL_DETAIL_HEIGHT;
-      panelHeight.value = withSpring(targetH, { damping: 20, stiffness: 140 });
+      animatePanelHeight(targetH);
       detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
     } else {
       isDetailViewSV.value = 0;
-      panelHeight.value = withSpring(PANEL_MIN_HEIGHT, { damping: 22, stiffness: 140 });
+      animatePanelHeight(PANEL_MIN_HEIGHT);
       detailOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
     }
-  }, [isDetailView, PANEL_DETAIL_HEIGHT, PANEL_MIN_HEIGHT, PANEL_MAX_HEIGHT]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_DETAIL_HEIGHT,
+    PANEL_MIN_HEIGHT,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+    detailOpacity,
+    listOpacity,
+    isDetailViewSV,
+  ]);
 
   // Refine panel height once the detail content finishes measuring its layout.
   useEffect(() => {
@@ -377,9 +484,15 @@ export default function SearchScreen() {
         PANEL_MAX_HEIGHT,
         sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
       );
-      panelHeight.value = withSpring(target, { damping: 20, stiffness: 140 });
+      animatePanelHeight(target);
     }
-  }, [detailContentHeight]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+  ]);
 
   // ─── Pan gesture for the drag handle ───────────────────────────────────
   const panGesture = useMemo(
@@ -492,7 +605,7 @@ export default function SearchScreen() {
           mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
         >
           <Marker
-            coordinate={{ latitude: userLat, longitude: userLng }}
+            coordinate={{ latitude: searchLat, longitude: searchLng }}
             title={query ?? 'Searched Location'}
             pinColor="#007AFF"
           />
@@ -661,7 +774,7 @@ export default function SearchScreen() {
                 fontDist={sizes.FONT_DIST}
                 iconSize={sizes.ICON_SIZE}
                 onBack={handleBackFromDetail}
-                onContentHeight={setDetailContentHeight}
+                onContentHeight={handleDetailContentHeight}
                 onContinue={handleContinueFromDetail}
               />
             )}
