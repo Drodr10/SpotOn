@@ -48,7 +48,11 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number):
 const DEFAULT_LAT = 29.6516;
 const DEFAULT_LNG = -82.3248;
 
-export default function DynamicViewer() {
+interface DynamicViewerProps {
+  onFallback?: (isFallback: boolean) => void;
+}
+
+export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
   const { width: W, height: H } = useWindowDimensions();
   const router = useRouter();
 
@@ -106,34 +110,60 @@ export default function DynamicViewer() {
   }, []);
 
   // ── Fetch listings ────────────────────────────────────────────────────────
+  // Tries to load listings within 5mi. If none exist nearby, falls back to
+  // the closest listings anywhere — sorted by distance, no limit.
   const fetchListings = async (lat: number, lng: number) => {
     setLoading(true);
-    const latDelta = 0.09;
-    const lngDelta = 0.09 / Math.cos((lat * Math.PI) / 180);
 
-    const { data, error } = await supabase
+    const baseSelect = supabase
       .from('listings')
       .select(
         'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
       )
       .eq('is_active', true)
-      .not('photo_url', 'is', null)
-      .gte('latitude', lat - latDelta)
-      .lte('latitude', lat + latDelta)
-      .gte('longitude', lng - lngDelta)
-      .lte('longitude', lng + lngDelta);
+      .not('photo_url', 'is', null);
 
-    if (!error && data) {
-      const sorted: NearbyListing[] = data
+    const mapRows = (data: any[]): NearbyListing[] =>
+      data
         .filter((l: any) => l.photo_url && l.photo_url.trim() !== '')
         .map((l: any) => ({
           ...l,
           distance: haversineMiles(lat, lng, l.latitude, l.longitude),
         }))
-        .filter((l: NearbyListing) => l.distance <= 5)
         .sort((a: NearbyListing, b: NearbyListing) => a.distance - b.distance);
-      setListings(sorted);
+
+    const latDelta = 0.09;
+    const lngDelta = 0.09 / Math.cos((lat * Math.PI) / 180);
+
+    const { data: nearbyData, error: nearbyError } = await baseSelect
+      .gte('latitude', lat - latDelta)
+      .lte('latitude', lat + latDelta)
+      .gte('longitude', lng - lngDelta)
+      .lte('longitude', lng + lngDelta);
+
+    let resolved: NearbyListing[] = [];
+    let isFallback = false;
+
+    if (!nearbyError && nearbyData) {
+      resolved = mapRows(nearbyData).filter((l) => l.distance <= 5);
     }
+
+    if (resolved.length === 0) {
+      const { data: allData, error: allError } = await supabase
+        .from('listings')
+        .select(
+          'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
+        )
+        .eq('is_active', true)
+        .not('photo_url', 'is', null);
+      if (!allError && allData && allData.length > 0) {
+        resolved = mapRows(allData);
+        isFallback = true;
+      }
+    }
+
+    setListings(resolved);
+    onFallback?.(isFallback && resolved.length > 0);
     setLoading(false);
   };
 

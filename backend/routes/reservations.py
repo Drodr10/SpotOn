@@ -75,12 +75,30 @@ def book_spot():
     # Extract required fields
     listing_id = data.get("listing_id")
     renter_id = data.get("renter_id")
+    vehicle_id = data.get("vehicle_id")
     start_time = data.get("start_time")
     end_time = data.get("end_time")
 
     # Validate required fields (total_price must be computed server-side)
-    if not all([listing_id, renter_id, start_time, end_time]):
+    if not all([listing_id, renter_id, vehicle_id, start_time, end_time]):
         return jsonify({"error": "Missing required fields"}), 400
+
+    # Ensure renter can only reserve with their own vehicle.
+    try:
+        vehicle_resp = (
+            supabase.table("vehicles")
+            .select("id, owner_user_id")
+            .eq("id", vehicle_id)
+            .single()
+            .execute()
+        )
+        vehicle_row = vehicle_resp.data
+        if not vehicle_row:
+            return jsonify({"error": "Selected vehicle not found"}), 404
+        if vehicle_row.get("owner_user_id") != renter_id:
+            return jsonify({"error": "Selected vehicle does not belong to renter"}), 403
+    except Exception:
+        return jsonify({"error": "Selected vehicle not found"}), 404
 
     # Fetch listing owner and rates. price_per_hour is included for the
     # pricing engine's legacy fallback.
@@ -113,6 +131,7 @@ def book_spot():
             "p_listing_id": listing_id,
             "p_renter_id": renter_id,
             "p_owner_id": owner_id,
+            "p_vehicle_id": vehicle_id,
             "p_start_time": start_time,
             "p_end_time": end_time,
             "p_total_price": str(total_price),
