@@ -10,7 +10,6 @@ import { router } from 'expo-router'
 
 import {  useStripe } from "@stripe/stripe-react-native"
 import { stripe } from "../utils/stripe"
-import type { StripePaymentSheetParams } from '../utils/stripe'
 import { api } from "../utils/api"
 
 import { supabase } from '@/src/utils/supabase';
@@ -19,7 +18,6 @@ import { JwtPayload } from '@supabase/supabase-js';
 
 type PaymentProps = {
     listingId: string;
-    listerId: string;
     price: number;
     hours: number;
     vehicleId?: string | null;
@@ -49,8 +47,7 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             paymentIntent,
             customerSessionClientSecret,
             customer,
-        } : StripePaymentSheetParams | any
-        = await stripe.fetchPaymentSheetParams(price, listerId);
+        } = await stripe.fetchPaymentSheetParams(price);
 
         const { error } = await initPaymentSheet({
             merchantDisplayName: "SpotOn",

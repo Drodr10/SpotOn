@@ -9,7 +9,6 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY")
 secretKey = os.getenv("STRIPE_SECRET_KEY")
-backendUrl = os.getenv("BACKEND_URL")
 
 def generatePaymentSheet(price: float, listerId: str):
     stripe.api_key = secretKey
@@ -51,21 +50,18 @@ def generatePaymentSheet(price: float, listerId: str):
 
 def createConnectAccount(user_id: str):
     stripe.api_key = secretKey
-    print(f"Attempting to create Stripe Connect account for user {user_id}")
 
     try:
         profile_data = supabase.table("profiles").select("email, stripe_account_id").eq("id", user_id).single().execute().data
 
         if not profile_data:
-            print(f"User profile not found for user {user_id}")
             return jsonify({ "error": "User profile not found" }), 404
 
         if profile_data.get("stripe_account_id"):
-            # Account already exists
             print(f"Stripe account already exists for user {user_id}: {profile_data['stripe_account_id']}")
             return jsonify({ "account_id": profile_data["stripe_account_id"] })
 
-        user_email = profile_data.get("email")
+        user_email = profileData.get("email")
         if not user_email:
             return jsonify({ "error": "User email not found in profile" }), 400
 
@@ -80,10 +76,12 @@ def createConnectAccount(user_id: str):
         )
         print(f"Account created successfully for {user_email}: {account.id}")
 
+        supabase.table("profiles").update({ "stripe_account_id": account.id }).eq("id", user_id).execute()
+
         return jsonify({ "account_id": account.id })
 
     except Exception as err:
-        print(f"Error creating Stripe Connect account: {str(err)}")
+        print(f"Error creating Stripe Connect account: {err}")
         return jsonify({'error': str(err)}), 500
 
 def createAccountLink(user_id: str):
@@ -94,11 +92,10 @@ def createAccountLink(user_id: str):
         account_id = profile_data.get("stripe_account_id") if profile_data else None
 
         if not account_id:
-            print(f"Stripe account ID not found for user {user_id}")
             return jsonify({ "error": "Stripe account ID not found for this user. Please create an account first." }), 404
 
-        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete"
-        refresh_url = f"https://{backendUrl}/api/stripe/onboarding-expired"
+        return_url = "spoton://Homescreen"
+        refresh_url = "spoton://stripe-onboarding-refresh"
 
         account_link = stripe.AccountLink.create(
             account=account_id,
@@ -110,5 +107,5 @@ def createAccountLink(user_id: str):
         return jsonify({ "account_link_url": account_link.url})
 
     except Exception as err:
-        print(f"Error creating account link: {str(err)}")
+        print(f"Error creating account link: {err}")
         return jsonify({ "error": str(err) }), 500

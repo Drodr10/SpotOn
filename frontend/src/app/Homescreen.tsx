@@ -51,6 +51,7 @@ export default function Homescreen() {
         source={gradientBackgroundAsset}
         style={styles.gradientBackground}
         resizeMode="cover"
+        pointerEvents="none"
       />
 
       {/* Content respects top safe area; background does not */}
