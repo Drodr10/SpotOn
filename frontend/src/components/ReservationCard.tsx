@@ -64,9 +64,15 @@ interface ReservationCardProps {
   totalPrice:   number | null;
   photoUrl:     string | null;
   unavailable?: boolean;
+  vehicleSummary?: {
+    make: string;
+    model: string;
+    color: string;
+    licensePlate?: string;
+  } | null;
 }
 
-export default function ReservationCard({ address, endTime, totalPrice, photoUrl }: ReservationCardProps) {
+export default function ReservationCard({ address, endTime, totalPrice, photoUrl, vehicleSummary }: ReservationCardProps) {
   const [timeLeft, setTimeLeft] = useState(() => formatTimeRemaining(endTime));
 
   useEffect(() => {
@@ -98,6 +104,12 @@ export default function ReservationCard({ address, endTime, totalPrice, photoUrl
 
       {/* Countdown timer */}
       <Text style={styles.timer}>{timeLeft}</Text>
+
+      {!!vehicleSummary && (
+        <Text style={styles.vehicleText}>
+          {`Vehicle: ${vehicleSummary.color} ${vehicleSummary.make} ${vehicleSummary.model}${vehicleSummary.licensePlate ? ` • ${vehicleSummary.licensePlate}` : ''}`}
+        </Text>
+      )}
 
       {/* Listing image fills remaining card height; omitted when no photo so card autosizes */}
       {photoUrl && (
@@ -172,6 +184,13 @@ const styles = StyleSheet.create({
     color:        '#000000',
     marginBottom: CARD_HEIGHT * 0.03,
     lineHeight:   TIMER_FONT * 1.55,
+  },
+  vehicleText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: TIMER_FONT,
+    color: 'rgba(0,0,0,0.75)',
+    marginBottom: CARD_HEIGHT * 0.02,
+    lineHeight: TIMER_FONT * 1.45,
   },
   image: {
     flex:         1,

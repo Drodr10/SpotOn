@@ -22,6 +22,12 @@ export type ActiveReservation = {
     total_price: number | null;
     status: string | null;
     listingUnavailable: boolean;
+    vehicleSummary?: {
+        make: string;
+        model: string;
+        color: string;
+        licensePlate?: string;
+    } | null;
 };
 
 const PLACEHOLDER_LISTING = (listingId: string): ListingForCard => ({
@@ -41,6 +47,7 @@ const reserveSpot = async (
     listing_id: string,
     price: number,
     renter_id: string,
+    vehicle_id: string,
     start_time: number,
     end_time: number,
 ) => {
@@ -55,6 +62,7 @@ const reserveSpot = async (
     const payload = {
         listing_id,
         renter_id,
+        vehicle_id,
         start_time: new Date(start_time).toISOString(),
         end_time:   new Date(end_time).toISOString(),
         total_price: price,
@@ -132,6 +140,7 @@ const getActiveReservations = async (userId: string): Promise<ActiveReservation[
             total_price:         r.total_price as number | null,
             status:              r.status as string | null,
             listingUnavailable:  unavailable,
+            vehicleSummary:      null,
         });
     }
     return results;
@@ -175,9 +184,83 @@ const getReservations = async (userId: string): Promise<ActiveReservation[] | nu
             total_price:        r.total_price as number | null,
             status:             r.status as string | null,
             listingUnavailable: unavailable,
+            vehicleSummary:     null,
         });
     }
     return results;
 };
 
-export const api = { reserveSpot, getActiveReservation, getActiveReservations, getReservations };
+const getOwnerActiveBookings = async (ownerId: string): Promise<ActiveReservation[] | null> => {
+    const { data: ownerListings, error: listingError } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('owner_id', ownerId)
+        .eq('is_active', true);
+
+    if (listingError) {
+        console.warn('[getOwnerActiveBookings] listings query error', listingError);
+        return null;
+    }
+
+    const listingIds = (ownerListings ?? []).map((l: { id: string }) => l.id);
+    if (listingIds.length === 0) return [];
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('id, listing_id, start_time, end_time, total_price, status')
+        .in('listing_id', listingIds)
+        .lte('start_time', now)
+        .gt('end_time', now)
+        .order('end_time', { ascending: true });
+
+    if (error) {
+        console.warn('[getOwnerActiveBookings] reservations query error', error);
+        return null;
+    }
+    if (!data || data.length === 0) return [];
+
+    const results: ActiveReservation[] = [];
+    for (const r of data) {
+        const { listing, unavailable } = await fetchListingForReservation(r.listing_id);
+
+        let vehicleSummary: ActiveReservation['vehicleSummary'] = null;
+        try {
+            const vehicleResp = await supabase.rpc('get_active_booking_vehicle_for_listing_owner', {
+                p_reservation_id: r.id,
+            });
+            const row = vehicleResp.data?.[0];
+            if (row) {
+                vehicleSummary = {
+                    make: row.make,
+                    model: row.model,
+                    color: row.color,
+                    licensePlate: row.license_plate,
+                };
+            }
+        } catch (vehicleError) {
+            console.warn('[getOwnerActiveBookings] vehicle RPC error', vehicleError);
+        }
+
+        results.push({
+            id:                 r.id,
+            listingData:        listing,
+            start_time:         new Date(r.start_time),
+            end_time:           new Date(r.end_time),
+            total_price:        r.total_price as number | null,
+            status:             r.status as string | null,
+            listingUnavailable: unavailable,
+            vehicleSummary,
+        });
+    }
+
+    return results;
+};
+
+export const api = {
+    reserveSpot,
+    getActiveReservation,
+    getActiveReservations,
+    getReservations,
+    getOwnerActiveBookings,
+};

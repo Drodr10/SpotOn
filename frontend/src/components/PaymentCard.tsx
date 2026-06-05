@@ -4,12 +4,9 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    TextInput,
-    Image,
-    Button,
     Alert
 } from 'react-native'
-import { router, useLocalSearchParams } from 'expo-router'
+import { router } from 'expo-router'
 
 import {  useStripe } from "@stripe/stripe-react-native"
 import { stripe } from "../utils/stripe"
@@ -25,6 +22,7 @@ type PaymentProps = {
     listerId: string;
     price: number;
     hours: number;
+    vehicleId?: string | null;
     startTime?: Date;
     endTime?: Date;
     disabled?: boolean;
@@ -37,7 +35,7 @@ type PaymentProps = {
     onPaymentSuccess?: (info: { listingId: string; price: number; hours: number }) => void;
 }
 
-export default function PaymentCard ({ listingId, listerId, price, hours, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
+export default function PaymentCard ({ listingId, listerId, price, hours, vehicleId, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
     const [claims, setClaims] = useState<JwtPayload>();
@@ -89,11 +87,15 @@ export default function PaymentCard ({ listingId, listerId, price, hours, startT
             Alert.alert('Reservation Error', 'No active user session. Please sign in again.');
             return;
         }
+        if (!vehicleId) {
+            Alert.alert('Vehicle Required', 'Select a vehicle before checking out.');
+            return;
+        }
 
         const reservationStart = startMs ?? Date.now();
         const reservationEnd = endMs ?? reservationStart + 3600 * hours * 1000;
         try {
-            await api.reserveSpot(listingId, price, claims.sub, reservationStart, reservationEnd);
+            await api.reserveSpot(listingId, price, claims.sub, vehicleId, reservationStart, reservationEnd);
         } catch (e: any) {
             console.error('[PaymentCard] reservation insert failed', e);
             Alert.alert('Reservation Error', e?.message ?? 'Could not save your reservation. Please contact support.');
@@ -137,9 +139,9 @@ export default function PaymentCard ({ listingId, listerId, price, hours, startT
     return (
         <View style={styles.container}>
             <TouchableOpacity
-                disabled={loading || !!externalDisabled}
+                disabled={loading || !!externalDisabled || !vehicleId}
                 onPress={openPaymentSheet}
-                style={[styles.button, (loading || externalDisabled) && styles.buttonDisabled]}
+                style={[styles.button, (loading || externalDisabled || !vehicleId) && styles.buttonDisabled]}
             >
                 <Text style={styles.text}>{ loading ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
             </TouchableOpacity>

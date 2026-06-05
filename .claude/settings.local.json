@@ -9,7 +9,12 @@
       "mcp__claude_ai_Figma__get_design_context",
       "mcp__4f88c44c-ae67-42f4-bf84-eb5a1eee44ff__list_projects",
       "mcp__4f88c44c-ae67-42f4-bf84-eb5a1eee44ff__execute_sql",
-      "mcp__e2416a92-1fb2-4b73-9b62-ee5b36492092__get_design_context"
+      "mcp__e2416a92-1fb2-4b73-9b62-ee5b36492092__get_design_context",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__claude_ai_Figma__get_screenshot",
+      "Bash(curl -s -o /tmp/profile_v2.png \"https://www.figma.com/api/mcp/asset/7aca574b-04be-4141-b00f-dd9f5285131a\")"
     ]
   }
 }

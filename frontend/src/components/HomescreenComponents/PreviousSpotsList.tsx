@@ -31,6 +31,7 @@ export default function PreviousSpotsList({ spots }: PreviousSpotsListProps) {
             totalPrice={spot.total_price}
             photoUrl={spot.listingData.photo_url}
             unavailable={spot.listingUnavailable}
+            vehicleSummary={spot.vehicleSummary}
           />
         </View>
       ))}

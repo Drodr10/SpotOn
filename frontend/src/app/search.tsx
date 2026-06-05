@@ -42,6 +42,8 @@ import Animated, {
 
 // ─── Supabase / Stripe ───────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
+import geocodeQuery from '../utils/geocode';
+import GeocodeDispatcher from '../utils/geocodeDispatcher';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { stripe } from '../utils/stripe';
 import PaymentCard from '@/src/components/PaymentCard';
@@ -49,6 +51,7 @@ import PaymentCard from '@/src/components/PaymentCard';
 // ─── Constants / Components / Assets ─────────────────────────────────────────
 import { CustomFonts, Palette } from '@/src/constants/theme';
 import FilterToggle from '@/src/components/FilterToggle';
+import TooFarBanner from '@/src/components/HomescreenComponents/TooFarBanner';
 import HourScroller from '@/src/components/HourScroller';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import cabinIconAsset from '@/assets/images/cabin.png';
@@ -228,6 +231,13 @@ export default function SearchScreen() {
   const PANEL_MIN_HEIGHT = screenHeight * 0.56;
   const PANEL_MAX_HEIGHT = screenHeight * 0.88;
   const PANEL_DETAIL_HEIGHT = screenHeight * 0.7;
+  const PANEL_HEIGHT_ANIMATION = useMemo(
+    () => ({
+      duration: 380,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+    }),
+    [],
+  );
 
   const { query, lat: latParam, lng: lngParam, openListingId } = useLocalSearchParams<{
     query: string;
@@ -239,7 +249,64 @@ export default function SearchScreen() {
   const userLat = latParam ? parseFloat(latParam) : 29.6516;
   const userLng = lngParam ? parseFloat(lngParam) : -82.3248;
 
+  // Search center: defaults to user's coords but can be overridden by a text query (geocoded)
+  const [searchLat, setSearchLat] = useState<number>(userLat);
+  const [searchLng, setSearchLng] = useState<number>(userLng);
+  const [geocodingLoading, setGeocodingLoading] = useState<boolean>(false);
+  const dispatcherRef = useRef<GeocodeDispatcher | null>(null);
+
+  // Initialize dispatcher once
+  useEffect(() => {
+    dispatcherRef.current = new GeocodeDispatcher(geocodeQuery, 300);
+    return () => {
+      dispatcherRef.current?.cancel();
+      dispatcherRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const disp = dispatcherRef.current;
+    if (!disp) return;
+
+    if (!query || query.trim().length === 0) {
+      disp.cancel();
+      setSearchLat(userLat);
+      setSearchLng(userLng);
+      setGeocodingLoading(false);
+      return;
+    }
+
+    setGeocodingLoading(true);
+    let mounted = true;
+    disp.search(query)
+      .then((res) => {
+        if (!mounted) return;
+        if (res) {
+          setSearchLat(res.lat);
+          setSearchLng(res.lon);
+        } else {
+          setSearchLat(userLat);
+          setSearchLng(userLng);
+        }
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        console.warn('[geocode] error', e);
+        setSearchLat(userLat);
+        setSearchLng(userLng);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setGeocodingLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [query, userLat, userLng]);
+
   const [listings, setListings] = useState<Listing[]>([]);
+  const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string>('');
@@ -262,6 +329,17 @@ export default function SearchScreen() {
   const detailOpacity = useSharedValue(0);
   const listOpacity = useSharedValue(1);
 
+  const animatePanelHeight = useCallback(
+    (height: number) => {
+      panelHeight.value = withTiming(height, PANEL_HEIGHT_ANIMATION);
+    },
+    [PANEL_HEIGHT_ANIMATION, panelHeight],
+  );
+
+  const handleDetailContentHeight = useCallback((height: number) => {
+    setDetailContentHeight((current) => (Math.abs(current - height) < 1 ? current : height));
+  }, []);
+
   useEffect(() => {
     supabase.auth.getClaims().then(({ data }) => {
       if (data) setCurrentUserId(data.claims.sub);
@@ -275,46 +353,83 @@ export default function SearchScreen() {
   };
 
   const initialRegion = {
-    latitude: userLat,
-    longitude: userLng,
+    latitude: searchLat,
+    longitude: searchLng,
     latitudeDelta: 0.04,
     longitudeDelta: 0.04,
   };
 
-  // ─── Fetch listings ─────────────────────────────────────────────────────
+  // Animate the map when the search center changes so the user sees the jump.
+  useEffect(() => {
+    try {
+      const region = {
+        latitude: searchLat,
+        longitude: searchLng,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      };
+      // animate if mapRef available
+      if (mapRef && mapRef.current && typeof mapRef.current.animateToRegion === 'function') {
+        // small timeout to allow MapView to be ready
+        setTimeout(() => mapRef.current?.animateToRegion(region, 300), 50);
+      }
+    } catch (e) {
+      // swallow animation errors
+      console.warn('[map] animate error', e);
+    }
+  }, [searchLat, searchLng]);
+
+  // ─── Fetch listings (uses search center which may be geocoded from a text query)
   useEffect(() => {
     (async () => {
       setLoading(true);
       const latDelta = 0.0724;
-      const lngDelta = 0.0724 / Math.cos((userLat * Math.PI) / 180);
+      const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
 
-      const { data, error } = await supabase
+      const decorate = (rows: any[]): Listing[] =>
+        rows
+          .map((l: any) => ({
+            ...l,
+            distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
+          }))
+          .sort((a: Listing, b: Listing) => a.distance - b.distance);
+
+      const { data: nearbyData, error: nearbyError } = await supabase
         .from('listings')
         .select('*')
         .eq('is_active', true)
-        .gte('latitude', userLat - latDelta)
-        .lte('latitude', userLat + latDelta)
-        .gte('longitude', userLng - lngDelta)
-        .lte('longitude', userLng + lngDelta);
+        .gte('latitude', searchLat - latDelta)
+        .lte('latitude', searchLat + latDelta)
+        .gte('longitude', searchLng - lngDelta)
+        .lte('longitude', searchLng + lngDelta);
 
-      if (error) {
-        console.error('Supabase listings error:', error);
+      if (nearbyError) {
+        console.error('Supabase listings error:', nearbyError);
         setLoading(false);
         return;
       }
 
-      const withDistance: Listing[] = (data ?? [])
-        .map((l: any) => ({
-          ...l,
-          distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
-        }))
-        .filter((l: Listing) => l.distance <= 5)
-        .sort((a: Listing, b: Listing) => a.distance - b.distance);
+      // Always within 5mi when nearby spots exist; otherwise fall back to the
+      // closest listings anywhere so the user is never shown an empty result.
+      let resolved: Listing[] = decorate(nearbyData ?? []).filter((l) => l.distance <= 5);
+      let fallback = false;
 
-      setListings(withDistance);
+      if (resolved.length === 0) {
+        const { data: allData, error: allError } = await supabase
+          .from('listings')
+          .select('*')
+          .eq('is_active', true);
+        if (!allError && allData) {
+          resolved = decorate(allData);
+          fallback = resolved.length > 0;
+        }
+      }
+
+      setListings(resolved);
+      setIsFallback(fallback);
       setLoading(false);
     })();
-  }, []);
+  }, [searchLat, searchLng]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -340,16 +455,27 @@ export default function SearchScreen() {
         detailContentHeight > 0
           ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
           : PANEL_DETAIL_HEIGHT;
-      panelHeight.value = withSpring(targetH, { damping: 20, stiffness: 140 });
+      animatePanelHeight(targetH);
       detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
     } else {
       isDetailViewSV.value = 0;
-      panelHeight.value = withSpring(PANEL_MIN_HEIGHT, { damping: 22, stiffness: 140 });
+      animatePanelHeight(PANEL_MIN_HEIGHT);
       detailOpacity.value = withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) });
       listOpacity.value = withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) });
     }
-  }, [isDetailView, PANEL_DETAIL_HEIGHT, PANEL_MIN_HEIGHT, PANEL_MAX_HEIGHT]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_DETAIL_HEIGHT,
+    PANEL_MIN_HEIGHT,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+    detailOpacity,
+    listOpacity,
+    isDetailViewSV,
+  ]);
 
   // Refine panel height once the detail content finishes measuring its layout.
   useEffect(() => {
@@ -358,9 +484,15 @@ export default function SearchScreen() {
         PANEL_MAX_HEIGHT,
         sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
       );
-      panelHeight.value = withSpring(target, { damping: 20, stiffness: 140 });
+      animatePanelHeight(target);
     }
-  }, [detailContentHeight]);
+  }, [
+    isDetailView,
+    detailContentHeight,
+    PANEL_MAX_HEIGHT,
+    sizes.DETAIL_HEADER_HEIGHT,
+    animatePanelHeight,
+  ]);
 
   // ─── Pan gesture for the drag handle ───────────────────────────────────
   const panGesture = useMemo(
@@ -473,7 +605,7 @@ export default function SearchScreen() {
           mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
         >
           <Marker
-            coordinate={{ latitude: userLat, longitude: userLng }}
+            coordinate={{ latitude: searchLat, longitude: searchLng }}
             title={query ?? 'Searched Location'}
             pinColor="#007AFF"
           />
@@ -603,6 +735,13 @@ export default function SearchScreen() {
                 )}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: sizes.V_PAD }}
+                ListHeaderComponent={
+                  isFallback ? (
+                    <View style={{ marginBottom: screenWidth * 0.04 }}>
+                      <TooFarBanner fullWidth radius={999} />
+                    </View>
+                  ) : null
+                }
                 ItemSeparatorComponent={() => <View style={{ height: screenWidth * 0.025 }} />}
                 onScrollToIndexFailed={(info) => {
                   // Safe fallback: estimate offset, then retry once layout is ready.
@@ -635,7 +774,7 @@ export default function SearchScreen() {
                 fontDist={sizes.FONT_DIST}
                 iconSize={sizes.ICON_SIZE}
                 onBack={handleBackFromDetail}
-                onContentHeight={setDetailContentHeight}
+                onContentHeight={handleDetailContentHeight}
                 onContinue={handleContinueFromDetail}
               />
             )}
@@ -958,6 +1097,14 @@ type SizesShape = {
   DETAIL_HEADER_HEIGHT: number;
 };
 
+type VehicleProfile = {
+  id: string;
+  make: string;
+  model: string;
+  color: string;
+  plate_last4?: string | null;
+};
+
 const HARD_CAP_HOURS = 96; // 4 days
 const HARD_CAP_WEEKS = 52;    // 1-year cap
 const HOURS_PER_WEEK = 168;   // 24 × 7
@@ -1023,6 +1170,9 @@ function BookingView({
 
   // ─── Booking-mode state (Current is default per Figma) ───────────────────
   const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
+  const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
   // ─── Hourly Current state ───────────────────────────────────────────────
   const [currentHours, setCurrentHours] = useState(1);
@@ -1045,6 +1195,45 @@ function BookingView({
   const [pickerActive, setPickerActive] = useState(false);
   const lockPicker = useCallback(() => setPickerActive(true), []);
   const unlockPicker = useCallback(() => setPickerActive(false), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVehicles = async () => {
+      if (!currentUserId) {
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        return;
+      }
+
+      setVehiclesLoading(true);
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, make, model, color, plate_last4')
+        .eq('owner_user_id', currentUserId)
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn('[booking] vehicle load failed', error);
+        setVehicles([]);
+        setSelectedVehicleId(null);
+        setVehiclesLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as VehicleProfile[];
+      setVehicles(rows);
+      setSelectedVehicleId(rows.length > 0 ? rows[0].id : null);
+      setVehiclesLoading(false);
+    };
+
+    loadVehicles();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId]);
 
   // Clamp Schedule end > start; respect 4-day cap.
   useEffect(() => {
@@ -1144,6 +1333,7 @@ function BookingView({
   );
   const weeklySummary = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
   const weeklyHours   = currentWeeks * HOURS_PER_WEEK;
+  const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) ?? null;
 
   // ─── Pricing preview (replaces client-side tax + totals math) ───────────
   const previewStart = mode === 'hourly' ? startDateTime : mountTime;
@@ -1347,14 +1537,52 @@ function BookingView({
               </View>
             </View>
 
-            {/* Summary line */}
+            {/* Date / time summary */}
             <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
               <Text style={bookingStyles.summaryText}>{weeklySummary}</Text>
             </View>
 
+            <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+              <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+              {vehiclesLoading ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : vehicles.length === 0 ? (
+                <TouchableOpacity
+                  style={bookingStyles.vehicleEmptyButton}
+                  onPress={withLightHaptic(() => router.push('./Profile'))}
+                  activeOpacity={0.85}
+                >
+                  <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={bookingStyles.vehicleChipsRow}>
+                  {vehicles.map((v) => {
+                    const selected = v.id === selectedVehicleId;
+                    return (
+                      <TouchableOpacity
+                        key={v.id}
+                        style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                        onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {!!selectedVehicle && (
+                <Text style={bookingStyles.vehicleSelectedText}>
+                  Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+                </Text>
+              )}
+            </View>
+
             {/* Total block */}
             <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-              <Text style={bookingStyles.totalLabel}>Total</Text>
+              <Text style={bookingStyles.totalLabel}>Payment</Text>
 
               {pricing?.tier === 'monthly' ? (
                 <View style={bookingStyles.totalLine}>
@@ -1411,9 +1639,10 @@ function BookingView({
                 listerId={listing.owner_id}
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
+                vehicleId={selectedVehicleId}
                 startTime={mountTime}
                 endTime={weeklyEnd}
-                disabled={!pricing || !!pricingError}
+                disabled={!pricing || !!pricingError || !selectedVehicleId}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
               />
             </View>
@@ -1638,16 +1867,54 @@ function BookingView({
           </Animated.View>
         </View>
 
-        {/* Summary line */}
+        {/* Date / time summary */}
         <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.summaryText} numberOfLines={2}>
             {summaryLine}
           </Text>
         </View>
 
+        <View style={[bookingStyles.vehicleBlock, { paddingHorizontal: sizes.H_PAD }]}>
+          <Text style={bookingStyles.vehicleLabel}>Vehicle</Text>
+          {vehiclesLoading ? (
+            <ActivityIndicator size="small" color="#000" />
+          ) : vehicles.length === 0 ? (
+            <TouchableOpacity
+              style={bookingStyles.vehicleEmptyButton}
+              onPress={withLightHaptic(() => router.push('./Profile'))}
+              activeOpacity={0.85}
+            >
+              <Text style={bookingStyles.vehicleEmptyText}>Add a vehicle in Profile to continue checkout</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={bookingStyles.vehicleChipsRow}>
+              {vehicles.map((v) => {
+                const selected = v.id === selectedVehicleId;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[bookingStyles.vehicleChip, selected && bookingStyles.vehicleChipSelected]}
+                    onPress={withLightHaptic(() => setSelectedVehicleId(v.id))}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
+                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          {!!selectedVehicle && (
+            <Text style={bookingStyles.vehicleSelectedText}>
+              Selected: {`${selectedVehicle.color} ${selectedVehicle.make} ${selectedVehicle.model}`}
+            </Text>
+          )}
+        </View>
+
         {/* Total block */}
         <View style={[bookingStyles.totalBlock, { paddingHorizontal: sizes.H_PAD }]}>
-          <Text style={bookingStyles.totalLabel}>Total</Text>
+          <Text style={bookingStyles.totalLabel}>Payment</Text>
           {pricing?.line_items ? (
             pricing.line_items.map((li, idx) => (
               <View key={idx} style={bookingStyles.totalLine}>
@@ -1710,9 +1977,10 @@ function BookingView({
               listerId={listing.owner_id}
               price={pricing?.total ?? 0}
               hours={hoursBooked}
+              vehicleId={selectedVehicleId}
               startTime={startDateTime}
               endTime={endDateTime}
-              disabled={!pricing || !!pricingError}
+              disabled={!pricing || !!pricingError || !selectedVehicleId}
               onPaymentSuccess={handlePaymentSuccess}
             />
           </View>
@@ -1790,6 +2058,58 @@ const bookingStyles = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  vehicleBlock: {
+    // Match totalBlock marginTop — same gap as Selected → Payment.
+    marginTop: 28,
+  },
+  vehicleLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 16,
+    color: '#000',
+    marginBottom: 8,
+  },
+  vehicleChipsRow: {
+    gap: 8,
+  },
+  vehicleChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  vehicleChipSelected: {
+    borderColor: '#000',
+    backgroundColor: '#000',
+  },
+  vehicleChipText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleChipTextSelected: {
+    color: '#fff',
+  },
+  vehicleEmptyButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#000',
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  vehicleEmptyText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 13,
+    color: '#000',
+  },
+  vehicleSelectedText: {
+    marginTop: 8,
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 12,
+    color: 'rgba(0,0,0,0.65)',
   },
   calendarBtnInner: {
     flexDirection: 'row',
@@ -1889,7 +2209,7 @@ const bookingStyles = StyleSheet.create({
   },
   totalFinalLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 18,
+    fontSize: 16,
     color: '#000',
   },
   totalFinalAmount: {
