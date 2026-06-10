@@ -1,22 +1,58 @@
 from flask import Blueprint, jsonify, request
 from services.supabase_client import supabase
+from datetime import datetime
 
 listings_bp = Blueprint('listings', __name__)
+
+def parse_dt(dt_str):
+    if not dt_str:
+        return None
+    if dt_str.endswith('Z'):
+        dt_str = dt_str[:-1] + '+00:00'
+    return datetime.fromisoformat(dt_str)
 
 @listings_bp.route('/listings', methods=['GET'])
 def get_all_listings():
     # Query parameters for availability check (optional)
-    start_time = request.args.get('start_time')  # ISO 8601
-    end_time = request.args.get('end_time')      # ISO 8601
+    start_time_str = request.args.get('start_time')  # ISO 8601
+    end_time_str = request.args.get('end_time')      # ISO 8601
     
-    if start_time and end_time:
-        # Time-range aware search: use RPC to exclude booked listings
+    if start_time_str and end_time_str:
         try:
-            response = supabase.rpc("get_available_listings", {
-                "p_start_time": start_time,
-                "p_end_time": end_time
-            }).execute()
-            return jsonify(response.data), 200
+            req_start = parse_dt(start_time_str)
+            req_end = parse_dt(end_time_str)
+
+            # Part A: Availability Check (Pull active listings)
+            listings_resp = supabase.table("listings").select("*").eq("is_active", True).execute()
+            all_listings = listings_resp.data if listings_resp.data else []
+
+            # Part B: Exclusion Check (Fetch active reservations)
+            reservations_resp = supabase.table("reservations")\
+                .select("listing_id, start_time, end_time, status")\
+                .execute()
+            all_reservations = reservations_resp.data if reservations_resp.data else []
+
+            # Filter to active reservations: ignore 'cancelled', 'completed', 'failed'
+            ignored_statuses = ['cancelled', 'completed', 'failed']
+            active_reservations = [res for res in all_reservations if res.get('status') not in ignored_statuses]
+
+            # Filter out listings that have overlapping reservations
+            available_listings = []
+            for listing in all_listings:
+                is_booked = False
+                for res in active_reservations:
+                    if res["listing_id"] == listing["id"]:
+                        res_start = parse_dt(res["start_time"])
+                        res_end = parse_dt(res["end_time"])
+                        # Exclusion condition: (requested_start < booking_end) AND (requested_end > booking_start)
+                        if req_start < res_end and req_end > res_start:
+                            is_booked = True
+                            break
+
+                if not is_booked:
+                    available_listings.append(listing)
+
+            return jsonify(available_listings), 200
         except Exception as e:
             return jsonify({"error": f"Search failed: {str(e)}"}), 500
     else:
