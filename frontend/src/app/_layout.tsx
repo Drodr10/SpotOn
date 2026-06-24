@@ -14,6 +14,7 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     SwitzerLight: require("../../assets/fonts/Switzer-Light.otf"),
     SwitzerSemibold: require("../../assets/fonts/Switzer-Semibold.otf"),
+    SwitzerSemiboldItalic: require("../../assets/fonts/Switzer-SemiboldItalic.otf"),
     BevellierMedium: require("../../assets/fonts/Bevellier-Medium.otf"),
   });
 
@@ -33,6 +34,9 @@ export default function RootLayout() {
         <View style={{ flex: 1, position: "relative" }}>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index" />
+            <Stack.Screen name="Intro" options={{ animation: 'fade' }} />
+            <Stack.Screen name="SignIn" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Onboarding" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="QuickSearch" />
             <Stack.Screen
               name="Homescreen"

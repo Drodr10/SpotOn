@@ -1,251 +1,138 @@
 /**
- * Introduction Page — First screen shown on app launch.
- * Displays branding, tagline, and login fields.
- *
- * TODO: Connect Username and Password fields to Supabase Auth
- * via the backend's POST /api/auth/login endpoint.
- * On successful login, navigate to Homescreen.
- * On first-time users, add a sign-up flow.
+ * Intro - First screen on app launch (Figma 699-112).
+ * Full-bleed onboarding.intro hero, small logo top-right, wordmark + tagline
+ * bottom-left, with Sign Up (filled) and Sign In (outlined) pills.
  */
 
-// ─── React & React Native ────────────────────────────────────────────────────
-import React, { useState,useRef, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   Image,
   StyleSheet,
   Dimensions,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Keyboard,
+  TouchableOpacity,
+  ImageBackground,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-// ─── Auth & Supabase ───────────────────────────────────────────────────────────────
-import Auth from '@/src/components/Auth';
-
-// ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { withLightHaptic } from '@/src/utils/haptics';
 
-// ─── Assets ──────────────────────────────────────────────────────────────────
-import frontImageAsset  from '@/assets/images/frontimage.jpeg';
-import spotonLogoAsset  from '@/assets/images/spotonlogo.png';
+import introBg from '@/assets/images/onboardingflow/onboarding.intro.png';
+import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
 
-// ─── Responsive sizing ───────────────────────────────────────────────────────
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const { width: SW, height: SH } = Dimensions.get('window');
 
-const H_PAD         = screenWidth * 0.06;   // horizontal padding inside the card
-const IMAGE_HEIGHT  = screenHeight * 0.60;  // hero image covers ~60% of screen
-const CARD_OVERLAP  = screenHeight * 0.04;  // how much the card pulls up over the image
-const INPUT_HEIGHT  = screenWidth * 0.13;   // pill input height
-const INPUT_RADIUS  = 999;                  // full pill shape
-const LOGO_SIZE     = screenWidth * 0.07;   // small SpotOn logo
-const ARROW_SIZE    = screenWidth * 0.09;   // enter arrow icon
-const FONT_SPOTON   = screenWidth * 0.035;  // "SpotOn" label next to logo
-const FONT_TAGLINE  = screenWidth * 0.048;  // tagline text
-const FONT_INPUT    = screenWidth * 0.038;  // input placeholder / text
-
-// ─── Component ───────────────────────────────────────────────────────────────
 export default function Intro() {
-
-  //State to toggle between Login and Sign Up forms
-  const [isNewUser, setIsNewUser] =  useState<boolean>(false);
-  const scrollRef = useRef<ScrollView>(null);
-
-  useEffect(()  => {
-    const sub = Keyboard.addListener('keyboardDidShow', ()  => {
-      scrollRef.current?.scrollToEnd({animated: true });
-    });
-    return () =>  sub.remove();
-  }, []);
-
   return (
-    // Figma: "Introduction Page" — near-white background fills any gaps
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView ref ={scrollRef}  contentContainerStyle = {{ flexGrow: 1 }} bounces= {false} keyboardShouldPersistTaps ="handled">
-      <StatusBar style="dark" />
+    <View style={styles.screen}>
+      <StatusBar style="light" />
+      <ImageBackground source={introBg} style={StyleSheet.absoluteFill} resizeMode="cover" />
 
-      {/* ── 1. frontimage — Figma: "frontimage" ──────────────────────────── */}
-      {/*
-        Container clips the oversized image so only the left portion is visible.
-        The image is wider than the screen and left-anchored, which keeps the
-        front of the car in view rather than the centered middle.
-      */}
-      <View style={styles.heroContainer}>
-        <Image
-          source={frontImageAsset}
-          style={styles.heroImage}
-          resizeMode="cover"
-        />
-      </View>
-
-      {/* ── 2. Bottom Card — Figma: "Bottom Card" ────────────────────────── */}
-      {/*
-        Pulled up by CARD_OVERLAP via negative marginTop so it slightly
-        overlaps the hero image, creating a layered / card effect.
-      */}
-      <View style={styles.card}>
-
-        {/* ── Group 1 — Branding Row — Figma: "Group 1" ─────────────────── */}
-        <View style={styles.brandingRow}>
-          {/* SpotOn Logo — Figma: "SpotOn Logo" */}
-          <Image
-            source={spotonLogoAsset}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          {/* "SpotOn" label */}
-          <Text style={styles.brandingText}>SpotOn</Text>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        {/* Top-right logo only */}
+        <View style={styles.topBar}>
+          <Image source={spotonLogoAsset} style={styles.cornerLogo} resizeMode="contain" />
         </View>
 
-        {/* ── Tagline — Figma: "Your Next Spot, Is Just A Tap Away." ────── */}
-        <Text style={styles.tagline}>Your next spot,{'\n'}is just one tap away.</Text>
+        <View style={styles.bottomBlock}>
+          <Text style={styles.brand}>
+            <Text style={styles.brandBold}>Spot</Text>
+            <Text style={styles.brandLight}>On</Text>
+          </Text>
 
-        {/* ── Group 2 — Login Fields — Figma: "Group 2" ─────────────────── */}
+          <Text style={styles.tagline}>Instant spots, easy earnings,{'\n'}the smartest way to park.</Text>
 
-        <Auth styles={styles} isNewUser={isNewUser} handleTypeChange={setIsNewUser} />
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={withLightHaptic(() => router.push('/Onboarding'))}
+              style={styles.signUpButton}
+            >
+              <Text style={styles.signUpText}>Sign Up</Text>
+            </TouchableOpacity>
 
-      </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={withLightHaptic(() => router.push('/SignIn'))}
+              style={styles.signInButton}
+            >
+              <Text style={styles.signInText}>Sign In</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+const H_PAD = SW * 0.06;
+const BUTTON_HEIGHT = SH * 0.058;
+const BUTTON_MIN_WIDTH = SW * 0.27;
+
 const styles = StyleSheet.create({
-  // Figma: "Introduction Page" — near-white background
-  screen: {
-    flex: 1,
-    backgroundColor: '#FEFEFE',
-  },
+  screen: { flex: 1, backgroundColor: '#000' },
+  safe: { flex: 1, justifyContent: 'space-between' },
 
-  // ── Hero Image ──────────────────────────────────────────────────────────────
-  // Figma: "frontimage" — full-bleed, covers ~60% of screen height
-  // Container clips the oversized image to screen width, left-anchored
-  heroContainer: {
-    width: screenWidth,
-    height: IMAGE_HEIGHT,
-    overflow: 'hidden',
-  },
-  heroImage: {
-    // Wider than the screen so the right side overflows off-screen,
-    // leaving the left (front of car) portion visible
-    width: screenWidth * 2,
-    height: IMAGE_HEIGHT,
-  },
-
-  // ── Bottom Card ─────────────────────────────────────────────────────────────
-  // Figma: "Bottom Card" — warm gray, rounded top corners, overlaps image
-  card: {
-    flex: 1,
-    backgroundColor: '#DCDBD8',
-    borderTopLeftRadius: screenWidth * 0.07,
-    borderTopRightRadius: screenWidth * 0.07,
-    // Pull the card up over the hero image
-    marginTop: -CARD_OVERLAP,
-    marginHorizontal: H_PAD * 0.25,
-    paddingHorizontal: H_PAD,
-    paddingTop: screenWidth * 0.06,
-    paddingBottom: screenWidth * 0.08,
-    overflow: "scroll"
-  },
-
-  // ── Branding Row ────────────────────────────────────────────────────────────
-  // Figma: "Group 1" — logo + "SpotOn" text side by side
-  brandingRow: {
+  topBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: screenWidth * 0.01,
-    marginBottom: screenWidth * 0.03,
+    justifyContent: 'flex-end',
+    paddingHorizontal: H_PAD,
+    paddingTop: SH * 0.005,
   },
-  logo: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
-    opacity: 0.75,
-  },
-  brandingText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: FONT_SPOTON,
-    color: 'rgba(0,0,0,0.75)',
-  },
+  cornerLogo: { width: SW * 0.085, height: SW * 0.085, opacity: 0.95 },
 
-  // ── Tagline ─────────────────────────────────────────────────────────────────
-  // Figma: "Your Next Spot, Is Just A Tap Away."
+  bottomBlock: {
+    paddingHorizontal: H_PAD,
+    paddingBottom: SH * 0.05,
+  },
+  brand: { color: '#FFFFFF', fontSize: SW * 0.085, letterSpacing: 0.3, marginBottom: SH * 0.012 },
+  brandBold: { fontFamily: CustomFonts.SwitzerSemibold },
+  brandLight: { fontFamily: CustomFonts.SwitzerLight },
+
   tagline: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: FONT_TAGLINE,
-    color: '#000000',
-    marginBottom: screenWidth * 0.07,
-    lineHeight: screenWidth * 0.065,
+    color: '#FFFFFF',
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: SW * 0.042,
+    lineHeight: SW * 0.054,
+    marginBottom: SH * 0.025,
+    opacity: 0.95,
   },
 
-  // ── Login Fields ────────────────────────────────────────────────────────────
-  // Figma: "Group 2"
-  loginGroup: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: screenWidth * 0.025,
-    marginVertical: screenWidth * 0.025,
-  },
+  buttonRow: { flexDirection: 'row', gap: 10 },
 
-  // Shared pill-shaped input style (Username + Password)
-  input: {
-    width: '100%',
-    height: INPUT_HEIGHT,
+  signUpButton: {
     backgroundColor: '#FFFFFF',
-    borderRadius: INPUT_RADIUS,
-    borderWidth: 0.5,
-    borderColor: 'rgba(0,0,0,0.15)',
-    paddingHorizontal: screenWidth * 0.05,
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_INPUT,
-    color: '#000000',
-  },
-
-  // Wrapper that stacks the password TextInput with the arrow overlaid
-  passwordRow: {
-    position: 'relative',
-    justifyContent: 'center',
-  },
-
-  // enter arrow — sits over the right edge of the password input
-  arrowButton: {
-    position: 'absolute',
-    right: screenWidth * 0.01,
-    justifyContent: 'center',
+    paddingHorizontal: SW * 0.07,
+    height: BUTTON_HEIGHT,
+    minWidth: BUTTON_MIN_WIDTH,
+    borderRadius: 999,
     alignItems: 'center',
-    padding: screenWidth * 0.015,
+    justifyContent: 'center',
   },
-  arrowIcon: {
-    width: ARROW_SIZE,
-    height: ARROW_SIZE,
+  signUpText: {
+    color: '#000',
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.04,
   },
 
-  // Sign up / Log in toggle button
-  toggleButton: {
-    width: '100%',
-    height: INPUT_HEIGHT - 12,
-    alignSelf: 'center',
-    borderRadius: INPUT_RADIUS,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,1)',
-    paddingHorizontal: screenWidth * 0.05,
-    backgroundColor: '#333333',
-    fontFamily: CustomFonts.SwitzerLight,
-    justifyContent: 'center',
+  signInButton: {
+    backgroundColor: 'rgba(255,255,255,0)',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    paddingHorizontal: SW * 0.07,
+    height: BUTTON_HEIGHT,
+    minWidth: BUTTON_MIN_WIDTH,
+    borderRadius: 999,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  buttonText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_INPUT,
-    color: "#FFFFFF",
+  signInText: {
+    color: '#FFFFFF',
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.04,
   },
-  authError: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: FONT_INPUT - 2,
-    color: "#rgba(200, 0, 0, 1)",
-    paddingHorizontal: screenWidth * 0.05,
-  }
 });

@@ -57,3 +57,52 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
 ```
+
+4. **Ngrok Setup** (for testing on a physical device):
+
+   1. Install ngrok (if not already):
+   ```bash
+   brew install ngrok
+   ```
+
+   2. Authenticate (one-time, if you haven't):
+
+      Go to [ngrok.com](https://ngrok.com), sign in, and grab your auth token from the dashboard. Then:
+   ```bash
+   ngrok config add-authtoken YOUR_TOKEN_HERE
+   ```
+
+   3. Start your Flask backend:
+   ```bash
+   cd backend
+   python app.py
+   ```
+
+   4. In a second terminal, start ngrok pointing at port 5000:
+   ```bash
+   ngrok http 5000
+   ```
+
+      You'll see output like:
+   ```
+   Forwarding   https://abc123.ngrok-free.app -> http://localhost:5000
+   ```
+
+   5. Copy that ngrok URL and put it in your `.env`:
+
+      Open `frontend/.env` and add/update:
+   ```
+   EXPO_PUBLIC_IP=abc123.ngrok-free.app
+   ```
+
+      Note: your code already builds the URL as `https://${EXPO_PUBLIC_IP}/api` — so just paste the hostname without `https://` and without a trailing slash.
+
+   6. Restart Expo (important — env vars are baked in at start):
+   ```bash
+   cd frontend
+   npx expo start --clear
+   ```
+
+      Scan the QR code with Expo Go on your phone and it'll work.
+
+
