@@ -16,6 +16,7 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser'
 
 import { supabase } from '@/src/utils/supabase';
 import { JwtPayload } from '@supabase/supabase-js';
@@ -36,6 +37,8 @@ import auraGradient from '@/assets/images/profilePage/aura_gradient.png';
 import exitIcon from '@/assets/images/profilePage/exit_to_app.png';
 import carParkingIcon from '@/assets/images/carparking.png';
 import addListingIcon from '@/assets/images/addlistingimage.png';
+
+import { stripe } from '@/src/utils/stripe';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -98,6 +101,8 @@ export default function ProfilePage() {
   const [activeReservations, setActiveReservations] = useState<ActiveReservation[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [payoutSetup, setPayoutSetup] = useState(false);
+  const [stripeOnboardingLoading, setStripeOnboardingLoading] = useState(false);
 
   const nameInput = useRef<TextInput>(null);
   const emailInput = useRef<TextInput>(null);
@@ -132,6 +137,7 @@ export default function ProfilePage() {
     setUser(data as ProfileData);
     setName(data.full_name);
     setEmail(data.email);
+    setPayoutSetup(data.stripe_account_id);
     await loadVehicles(claimsResp.claims.sub);
   };
 
@@ -264,6 +270,26 @@ export default function ProfilePage() {
       setAvatarUploading(false);
     }
   };
+
+  const beginStripeOnboarding = async () => {
+    if (payoutSetup || !claims?.sub || stripeOnboardingLoading) return;
+    setStripeOnboardingLoading(true);
+
+    try {
+      await stripe.fetchStripeAccountId(claims.sub);
+      const onboardingLink = await stripe.fetchStripeAccountLink(claims.sub);
+
+      if (onboardingLink) {
+        WebBrowser.openBrowserAsync(onboardingLink);
+      } 
+    }
+    catch (err) {
+      console.log("Error starting onboarding process: " + err);
+    }
+    finally { 
+      setStripeOnboardingLoading(false); 
+    }
+  }
 
   if (!user) return <SafeAreaView style={styles.safeArea} />;
 
@@ -427,10 +453,17 @@ export default function ProfilePage() {
           )}
 
           {/* Setup Payouts banner */}
-          <View style={styles.banner}>
-            <Text style={styles.bannerText}>Setup{'\n'}Payouts</Text>
+          <TouchableOpacity 
+            style={styles.banner}
+            activeOpacity={0.85}
+            onPress={withLightHaptic(async () => beginStripeOnboarding())}
+          >
+            <Text style={styles.bannerText}>
+              { stripeOnboardingLoading ? 'Loading...' : 
+                payoutSetup ? 'Payouts\nSetup!' : 'Setup\nPayouts'}
+            </Text>
             <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
-          </View>
+          </TouchableOpacity>
 
           {/* Previous Reservations banner — opens history page */}
           <TouchableOpacity

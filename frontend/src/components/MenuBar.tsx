@@ -15,6 +15,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useSegments } from 'expo-router';
@@ -22,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 
 import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
+import { stripe } from '../utils/stripe';
 import { CustomFonts } from '../constants/theme';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
@@ -373,9 +375,31 @@ export default function MenuBar() {
   const slideFor = (target: TabKey): 'slide_from_left' | 'slide_from_right' =>
     TAB_ORDER[target] < tabIndex ? 'slide_from_left' : 'slide_from_right';
 
-  const handlePress = (key: TabKey) => {
+  const handlePress = async (key: TabKey) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     const animation = slideFor(key);
+
+    if (key === 'add') {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        Alert.alert('Not Logged In', 'You need to be logged in to create a listing.');
+        return;
+      }
+
+      const hasStripe = await stripe.userHasStripeAccount(session.user.id);
+      if (!hasStripe) {
+        Alert.alert(
+          'Payouts Not Set Up',
+          'Please set up payouts in your Profile before creating a listing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Go to Profile', onPress: () => router.push({ pathname: '/Profile', params: { animation } } as any) },
+          ]
+        );
+        return;
+      }
+    }
+
     if (key === 'profile')  router.push({ pathname: '/Profile',       params: { animation } } as any);
     else if (key === 'home')     router.push({ pathname: '/Homescreen',    params: { animation } } as any);
     else if (key === 'messages') router.push({ pathname: '/Messages',      params: { animation } } as any);
