@@ -32,9 +32,9 @@ def get_all_listings():
                 .execute()
             all_reservations = reservations_resp.data if reservations_resp.data else []
 
-            # Filter to active reservations: ignore 'cancelled', 'completed', 'failed'
-            ignored_statuses = ['cancelled', 'completed', 'failed']
-            active_reservations = [res for res in all_reservations if res.get('status') not in ignored_statuses]
+            # Filter to active blocking reservations only
+            blocking_statuses = ['pending', 'confirmed', 'paid']
+            active_reservations = [res for res in all_reservations if res.get('status') in blocking_statuses]
 
             # Filter out listings that have overlapping reservations
             available_listings = []
