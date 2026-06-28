@@ -394,17 +394,24 @@ export default function SearchScreen() {
           }))
           .sort((a: Listing, b: Listing) => a.distance - b.distance);
 
-      const { data: nearbyData, error: nearbyError } = await supabase
-        .from('listings')
-        .select('*')
-        .eq('is_active', true)
-        .gte('latitude', searchLat - latDelta)
-        .lte('latitude', searchLat + latDelta)
-        .gte('longitude', searchLng - lngDelta)
-        .lte('longitude', searchLng + lngDelta);
+      const API_IP = process.env.EXPO_PUBLIC_IP ?? "nulled";
+      const backendUrl = API_IP !== "nulled" ? `https://${API_IP}` : process.env.EXPO_PUBLIC_BACKEND_URL;
+      const qs = `lat=${searchLat}&lng=${searchLng}&lat_delta=${latDelta}&lng_delta=${lngDelta}`;
 
-      if (nearbyError) {
-        console.error('Supabase listings error:', nearbyError);
+      let nearbyData: any[] = [];
+      try {
+        const res = await fetch(`${backendUrl}/api/listings?${qs}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (res.ok) {
+          nearbyData = await res.json();
+        } else {
+          console.error('Backend listings error:', await res.text());
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error('Backend listings fetch error:', err);
         setLoading(false);
         return;
       }
@@ -415,13 +422,19 @@ export default function SearchScreen() {
       let fallback = false;
 
       if (resolved.length === 0) {
-        const { data: allData, error: allError } = await supabase
-          .from('listings')
-          .select('*')
-          .eq('is_active', true);
-        if (!allError && allData) {
-          resolved = decorate(allData);
-          fallback = resolved.length > 0;
+        try {
+          const resAll = await fetch(`${backendUrl}/api/listings`, {
+            headers: { 'ngrok-skip-browser-warning': 'true' }
+          });
+          if (resAll.ok) {
+            const allData = await resAll.json();
+            if (allData) {
+              resolved = decorate(allData);
+              fallback = resolved.length > 0;
+            }
+          }
+        } catch (err) {
+          console.error('Backend fallback fetch error:', err);
         }
       }
 

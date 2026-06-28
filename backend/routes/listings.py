@@ -17,51 +17,65 @@ def get_all_listings():
     start_time_str = request.args.get('start_time')  # ISO 8601
     end_time_str = request.args.get('end_time')      # ISO 8601
     
-    if start_time_str and end_time_str:
-        try:
-            req_start = parse_dt(start_time_str)
-            req_end = parse_dt(end_time_str)
+    # Bounding box parameters
+    lat = request.args.get('lat', type=float)
+    lng = request.args.get('lng', type=float)
+    lat_delta = request.args.get('lat_delta', type=float)
+    lng_delta = request.args.get('lng_delta', type=float)
 
-            # Part A: Availability Check (Pull active listings)
-            listings_resp = supabase.table("listings").select("*").eq("is_active", True).execute()
-            all_listings = listings_resp.data if listings_resp.data else []
+    # Default to now if time bounds are not provided to exclude currently active reservations
+    if not start_time_str or not end_time_str:
+        now_str = datetime.utcnow().isoformat() + "Z"
+        start_time_str = now_str
+        end_time_str = now_str
 
-            # Part B: Exclusion Check (Fetch active reservations)
-            reservations_resp = supabase.table("reservations")\
-                .select("listing_id, start_time, end_time, status")\
-                .execute()
-            all_reservations = reservations_resp.data if reservations_resp.data else []
+    try:
+        req_start = parse_dt(start_time_str)
+        req_end = parse_dt(end_time_str)
 
-            # Filter to active blocking reservations only
-            blocking_statuses = ['pending', 'confirmed', 'paid']
-            active_reservations = [res for res in all_reservations if res.get('status') in blocking_statuses]
+        # Build listings query
+        query = supabase.table("listings").select("*").eq("is_active", True)
 
-            # Filter out listings that have overlapping reservations
-            available_listings = []
-            for listing in all_listings:
-                is_booked = False
-                for res in active_reservations:
-                    if res["listing_id"] == listing["id"]:
-                        res_start = parse_dt(res["start_time"])
-                        res_end = parse_dt(res["end_time"])
-                        # Exclusion condition: (requested_start < booking_end) AND (requested_end > booking_start)
-                        if req_start < res_end and req_end > res_start:
-                            is_booked = True
-                            break
+        # Apply bounding box if all parameters are present
+        if all(v is not None for v in [lat, lng, lat_delta, lng_delta]):
+            query = query.gte('latitude', lat - lat_delta)\
+                         .lte('latitude', lat + lat_delta)\
+                         .gte('longitude', lng - lng_delta)\
+                         .lte('longitude', lng + lng_delta)
 
-                if not is_booked:
-                    available_listings.append(listing)
+        # Part A: Availability Check (Pull active listings)
+        listings_resp = query.execute()
+        all_listings = listings_resp.data if listings_resp.data else []
 
-            return jsonify(available_listings), 200
-        except Exception as e:
-            return jsonify({"error": f"Search failed: {str(e)}"}), 500
-    else:
-        # Backward compatible: return all active listings (no time filtering)
-        response = supabase.table("listings")\
-            .select("*")\
-            .eq("is_active", True)\
+        # Part B: Exclusion Check (Fetch active reservations)
+        reservations_resp = supabase.table("reservations")\
+            .select("listing_id, start_time, end_time, status")\
             .execute()
-        return jsonify(response.data), 200
+        all_reservations = reservations_resp.data if reservations_resp.data else []
+
+        # Filter to active blocking reservations only
+        blocking_statuses = ['pending', 'confirmed', 'paid']
+        active_reservations = [res for res in all_reservations if res.get('status') in blocking_statuses]
+
+        # Filter out listings that have overlapping reservations
+        available_listings = []
+        for listing in all_listings:
+            is_booked = False
+            for res in active_reservations:
+                if res["listing_id"] == listing["id"]:
+                    res_start = parse_dt(res["start_time"])
+                    res_end = parse_dt(res["end_time"])
+                    # Exclusion condition: (requested_start < booking_end) AND (requested_end > booking_start)
+                    if req_start < res_end and req_end > res_start:
+                        is_booked = True
+                        break
+
+            if not is_booked:
+                available_listings.append(listing)
+
+        return jsonify(available_listings), 200
+    except Exception as e:
+        return jsonify({"error": f"Search failed: {str(e)}"}), 500
 
 @listings_bp.route('/listings/<listing_id>', methods=['GET'])
 def get_listing(listing_id):
