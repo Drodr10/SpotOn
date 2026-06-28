@@ -115,14 +115,6 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
   const fetchListings = async (lat: number, lng: number) => {
     setLoading(true);
 
-    const baseSelect = supabase
-      .from('listings')
-      .select(
-        'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
-      )
-      .eq('is_active', true)
-      .not('photo_url', 'is', null);
-
     const mapRows = (data: any[]): NearbyListing[] =>
       data
         .filter((l: any) => l.photo_url && l.photo_url.trim() !== '')
@@ -135,30 +127,39 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
     const latDelta = 0.09;
     const lngDelta = 0.09 / Math.cos((lat * Math.PI) / 180);
 
-    const { data: nearbyData, error: nearbyError } = await baseSelect
-      .gte('latitude', lat - latDelta)
-      .lte('latitude', lat + latDelta)
-      .gte('longitude', lng - lngDelta)
-      .lte('longitude', lng + lngDelta);
+    const API_IP = process.env.EXPO_PUBLIC_IP ?? "nulled";
+    const backendUrl = API_IP !== "nulled" ? `https://${API_IP}` : process.env.EXPO_PUBLIC_BACKEND_URL;
 
     let resolved: NearbyListing[] = [];
     let isFallback = false;
 
-    if (!nearbyError && nearbyData) {
-      resolved = mapRows(nearbyData).filter((l) => l.distance <= 5);
+    try {
+      const qs = `lat=${lat}&lng=${lng}&lat_delta=${latDelta}&lng_delta=${lngDelta}`;
+      const response = await fetch(`${backendUrl}/api/listings?${qs}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (response.ok) {
+        const nearbyData = await response.json();
+        resolved = mapRows(nearbyData).filter((l) => l.distance <= 5);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch nearby listings from backend:", err);
     }
 
     if (resolved.length === 0) {
-      const { data: allData, error: allError } = await supabase
-        .from('listings')
-        .select(
-          'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
-        )
-        .eq('is_active', true)
-        .not('photo_url', 'is', null);
-      if (!allError && allData && allData.length > 0) {
-        resolved = mapRows(allData);
-        isFallback = true;
+      try {
+        const fallbackResponse = await fetch(`${backendUrl}/api/listings`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (fallbackResponse.ok) {
+          const allData = await fallbackResponse.json();
+          if (allData && allData.length > 0) {
+            resolved = mapRows(allData);
+            isFallback = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch fallback listings from backend:", err);
       }
     }
 
