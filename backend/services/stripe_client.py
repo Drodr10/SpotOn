@@ -17,7 +17,8 @@ def generatePaymentSheet(price: float, listerId: str):
     print(f"Attempting to create payment sheet")
     customer = stripe.Customer.create()
 
-    listerStripeConnectId = supabase.table("profiles").select("stripe_account_id").eq("id", listerId).execute().data[0]["stripe_account_id"]
+    idData = supabase.table("profiles").select("stripe_account_id").eq("id", listerId).single().execute()
+    listerStripeConnectId = idData.data.get("stripe_account_id") if idData.data else None
 
     customer_session = stripe.CustomerSession.create(
         customer=customer.id,
@@ -31,23 +32,28 @@ def generatePaymentSheet(price: float, listerId: str):
     priceInCents = int(price * 100)
     applicationFeeAmount = int(priceInCents * 0.15)
 
-    payment_intent = stripe.PaymentIntent.create(
-        amount=priceInCents,
-        currency="usd",
-        customer=customer.id,
-        automatic_payment_methods={
-            "enabled": True,
-        },
-        application_fee_amount=applicationFeeAmount,
-        transfer_data={
-            'destination': listerStripeConnectId,
-        }
-    )
+    paymentIntentParams = {
+        "amount": priceInCents,
+        "currency": "usd",
+        "customer": customer.id,
+        "automatic_payment_methods": {"enabled": True},
+    }
+
+    if listerStripeConnectId:
+        paymentIntentParams["application_fee_amount"] = applicationFeeAmount
+        paymentIntentParams["transfer_data"] = {"destination": listerStripeConnectId}
+        
+        #TODO: Logic to save the amount the user is owed in the databases for later payout
+
+    payment_intent = stripe.PaymentIntent.create(**paymentIntentParams)
+
     
-    return jsonify(paymentIntent=payment_intent.client_secret,
-                   customerSessionClientSecret=customer_session.client_secret,
-                   customer=customer.id,
-                   publishableKey=publishableKey)
+    return jsonify(
+        paymentIntent=payment_intent.client_secret,
+        customerSessionClientSecret=customer_session.client_secret,
+        customer=customer.id,
+        publishableKey=publishableKey
+    )
 
 def createConnectAccount(user_id: str):
     stripe.api_key = secretKey
