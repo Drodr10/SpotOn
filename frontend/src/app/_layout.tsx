@@ -2,11 +2,13 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import MenuBar from "../components/MenuBar";
+import { supabase } from "../utils/supabase";
+import { registerForPushNotifications } from "../utils/push";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -23,6 +25,17 @@ export default function RootLayout() {
       await SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  // Register for push (payout notifications) whenever a session is active.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) registerForPushNotifications();
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) registerForPushNotifications();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;

@@ -21,6 +21,7 @@ import LogoBar from '@/src/components/HomescreenComponents/LogoBar';
 import SearchBar from '@/src/components/HomescreenComponents/SearchBar';
 import DynamicViewer from '@/src/components/HomescreenComponents/DynamicViewer';
 import TooFarBanner from '@/src/components/HomescreenComponents/TooFarBanner';
+import PayoutBanner from '@/src/components/HomescreenComponents/PayoutBanner';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 import { CustomFonts } from '@/src/constants/theme';
 
@@ -69,6 +70,8 @@ export default function Homescreen() {
             <View style={styles.section}>
               <SearchBar />
             </View>
+
+            <PayoutBanner />
 
             {showTooFar && (
               <View style={styles.section}>

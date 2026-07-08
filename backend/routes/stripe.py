@@ -1,34 +1,69 @@
+import os
 from flask import Blueprint, jsonify, request, redirect
-from services.stripe_client import *
+from services.stripe_client import (
+    publishableKey,
+    create_booking_payment,
+    createConnectAccount,
+    createAccountLink,
+    handle_webhook,
+)
+from services.payouts import run_payout_sweep
 
 stripe_bp = Blueprint('stripe', __name__)
 
+
 @stripe_bp.route('/stripe/key', methods=['GET'])
 def getKey():
-    responseData = { "publishableKey": publishableKey }
-    return jsonify(responseData), 200
+    return jsonify({"publishableKey": publishableKey}), 200
 
-#This endpoint is used for create the payment sheet initiate a user payment, with the information needed.
-@stripe_bp.route('/stripe/payment-sheet', methods=['POST'])
-def payment_sheet():
-  return generatePaymentSheet(request.json["price"], request.json["lister_id"])
 
-#This endpoint is used for onboarding users to stripe connect. Needs to be done so users have an account to payout to.
+# Atomically reserve the slot and start a platform-held payment for a booking.
+# Funds are held on SpotOn's balance and transferred to the seller later.
+@stripe_bp.route('/stripe/create-booking-payment', methods=['POST'])
+def create_booking_payment_route():
+    data = request.json or {}
+    required = ("listing_id", "renter_id", "vehicle_id", "start_time", "end_time")
+    if not all(data.get(k) for k in required):
+        return jsonify({"error": f"Missing required fields: {', '.join(required)}"}), 400
+    return create_booking_payment(
+        data["listing_id"], data["renter_id"], data["vehicle_id"],
+        data["start_time"], data["end_time"],
+    )
+
+
+# Onboarding: create the seller's Express connected account (lazily, at payout setup).
 @stripe_bp.route('/stripe/create-connect-account', methods=['POST'])
 def create_connect_account():
     return createConnectAccount(request.json['user_id'])
 
-#This endpoint is used after a user ID is generated so that the user can finish their account onboarding
+
+# Onboarding: hosted Stripe onboarding link for the seller to finish KYC/bank setup.
 @stripe_bp.route('/stripe/create-account-link', methods=['POST'])
 def create_account_link():
     return createAccountLink(request.json['user_id'])
 
-#This will be the endpoint you'll return to after the end of the onboarding
+
 @stripe_bp.route('/stripe/onboarding-complete', methods=['GET'])
 def onboarding_return():
     return redirect("spoton://Homescreen")
 
-#Used for expired account link refresh
+
 @stripe_bp.route('/stripe/onboarding-expired', methods=['GET'])
 def onboarding_expired():
     return redirect("spoton://Homescreen")
+
+
+# Stripe -> SpotOn events: payment_intent.succeeded, account.updated, etc.
+@stripe_bp.route('/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    return handle_webhook(request.get_data(), request.headers.get("Stripe-Signature", ""))
+
+
+# Periodic housekeeping (invoked by pg_cron / the fallback scheduler).
+# Guarded by a shared secret so it can't be triggered by arbitrary clients.
+@stripe_bp.route('/stripe/run-payout-sweep', methods=['POST'])
+def run_sweep():
+    expected = os.getenv("SWEEP_SECRET")
+    if not expected or request.headers.get("X-Sweep-Secret") != expected:
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(run_payout_sweep()), 200

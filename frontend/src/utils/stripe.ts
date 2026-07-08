@@ -5,6 +5,15 @@ export interface StripePaymentSheetParams {
     paymentIntent: string;
     customerSessionClientSecret: string;
     customer: string;
+    reservationId: string;
+}
+
+export interface BookingPaymentArgs {
+    listing_id: string;
+    renter_id: string;
+    vehicle_id: string;
+    start_time: string; // ISO 8601
+    end_time: string;   // ISO 8601
 }
 
 const getKey = async () : Promise<string | null> => {
@@ -19,27 +28,36 @@ const getKey = async () : Promise<string | null> => {
     return data.publishableKey;
 }
 
-const fetchPaymentSheetParams = async (price: number, lister_id: string) : Promise <StripePaymentSheetParams | null>=> {
-    console.log(`Attempting to fetch payment sheet @ ${API_IP}/stripe/payment-sheet`)
+/**
+ * Atomically reserve the slot and start a platform-held payment. The backend
+ * creates the reservation (pending_payment) before returning the sheet, so a
+ * charge can never exist without a reservation. Funds are held on SpotOn's
+ * balance and transferred to the seller after the session ends + onboarding.
+ */
+const createBookingPayment = async (args: BookingPaymentArgs) : Promise <StripePaymentSheetParams | null> => {
+    console.log(`Attempting to create booking payment @ ${API_IP}/stripe/create-booking-payment`)
     const { data: { session } } = await supabase.auth.getSession();
 
-    const resp = await fetch(`${API_IP}/stripe/payment-sheet`, {
+    const resp = await fetch(`${API_IP}/stripe/create-booking-payment`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             "ngrok-skip-browser-warning": "true",
             "Authorization": `Bearer ${session?.access_token}`
         },
-        
-        body: JSON.stringify({ price, lister_id })
+        body: JSON.stringify(args)
     })
 
-    if (!resp.ok) { return null; }
+    if (!resp.ok) {
+        const detail = await resp.text().catch(() => '');
+        console.log(`Error creating booking payment (${resp.status}): ${detail}`);
+        return null;
+    }
 
-    const { paymentIntent, customerSessionClientSecret, customer } = await resp.json();
-    console.log("Fetched payment sheet");
+    const { paymentIntent, customerSessionClientSecret, customer, reservationId } = await resp.json();
+    console.log("Created booking payment");
 
-    return { paymentIntent, customerSessionClientSecret, customer };
+    return { paymentIntent, customerSessionClientSecret, customer, reservationId };
 }
 
 const fetchStripeAccountId = async (user_id: string): Promise<string | null> => {
@@ -110,4 +128,4 @@ const userHasStripeAccount = async (userId: string): Promise<boolean> => {
   return !!data?.stripe_account_id;
 };
 
-export const stripe = { getKey, fetchPaymentSheetParams, fetchStripeAccountId, fetchStripeAccountLink, userHasStripeAccount }
+export const stripe = { getKey, createBookingPayment, fetchStripeAccountId, fetchStripeAccountLink, userHasStripeAccount }

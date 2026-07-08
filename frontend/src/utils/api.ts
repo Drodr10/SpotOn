@@ -257,10 +257,43 @@ const getOwnerActiveBookings = async (ownerId: string): Promise<ActiveReservatio
     return results;
 };
 
+/**
+ * Total money a seller has earned but not yet been paid (funds held on the
+ * platform balance), summed from reservations in 'held' or 'payout_ready'.
+ * Drives the "You have $X waiting — set up payouts" home-screen banner.
+ */
+const getPendingPayout = async (ownerId: string): Promise<{ total: number; count: number }> => {
+    const { data: ownerListings, error: listingError } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('owner_id', ownerId);
+
+    if (listingError) {
+        console.warn('[getPendingPayout] listings query error', listingError);
+        return { total: 0, count: 0 };
+    }
+    const listingIds = (ownerListings ?? []).map((l: { id: string }) => l.id);
+    if (listingIds.length === 0) return { total: 0, count: 0 };
+
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('host_payout, payout_status')
+        .in('listing_id', listingIds)
+        .in('payout_status', ['held', 'payout_ready']);
+
+    if (error || !data) {
+        console.warn('[getPendingPayout] reservations query error', error);
+        return { total: 0, count: 0 };
+    }
+    const total = data.reduce((sum: number, r: { host_payout: number | null }) => sum + Number(r.host_payout ?? 0), 0);
+    return { total, count: data.length };
+};
+
 export const api = {
     reserveSpot,
     getActiveReservation,
     getActiveReservations,
     getReservations,
     getOwnerActiveBookings,
+    getPendingPayout,
 };

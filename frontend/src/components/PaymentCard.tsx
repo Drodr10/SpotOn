@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { 
-    View, 
+import { useEffect, useRef, useState } from 'react'
+import {
+    View,
     Text,
     StyleSheet,
     TouchableOpacity,
@@ -10,12 +10,9 @@ import { router } from 'expo-router'
 
 import {  useStripe } from "@stripe/stripe-react-native"
 import { stripe } from "../utils/stripe"
-import type { StripePaymentSheetParams } from '../utils/stripe'
-import { api } from "../utils/api"
 
 import { supabase } from '@/src/utils/supabase';
 import { triggerLightHaptic } from '@/src/utils/haptics';
-import { JwtPayload } from '@supabase/supabase-js';
 
 type PaymentProps = {
     listingId: string;
@@ -38,36 +35,61 @@ type PaymentProps = {
 export default function PaymentCard ({ listingId, listerId, price, hours, vehicleId, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
     const [loading, setLoading] = useState<boolean>(true);
-    const [claims, setClaims] = useState<JwtPayload>();
+    const [ready, setReady] = useState<boolean>(false);
+    // Guards against duplicate reservation creation on re-init/strict-mode.
+    const initKeyRef = useRef<string | null>(null);
     const startMs = startTime?.getTime();
     const endMs = endTime?.getTime();
-    
+
     const initializePaymentSheet = async () => {
-        if (externalDisabled) return;
+        if (externalDisabled || !vehicleId) return;
+
+        const reservationStart = startMs ?? Date.now();
+        const reservationEnd = endMs ?? reservationStart + 3600 * hours * 1000;
+        const key = `${listingId}|${vehicleId}|${reservationStart}|${reservationEnd}`;
+        if (initKeyRef.current === key) return; // already initialized for these params
+        initKeyRef.current = key;
+
         setLoading(true);
-        const {
-            paymentIntent,
-            customerSessionClientSecret,
-            customer,
-        } : StripePaymentSheetParams | any
-        = await stripe.fetchPaymentSheetParams(price, listerId);
+        setReady(false);
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            setLoading(false);
+            initKeyRef.current = null;
+            Alert.alert('Sign in required', 'No active user session. Please sign in again.');
+            return;
+        }
+
+        const params = await stripe.createBookingPayment({
+            listing_id: listingId,
+            renter_id: user.id,
+            vehicle_id: vehicleId,
+            start_time: new Date(reservationStart).toISOString(),
+            end_time: new Date(reservationEnd).toISOString(),
+        });
+
+        if (!params) {
+            setLoading(false);
+            initKeyRef.current = null; // allow retry
+            Alert.alert('Booking unavailable', 'This spot may already be booked for that time. Please try another slot.');
+            return;
+        }
 
         const { error } = await initPaymentSheet({
             merchantDisplayName: "SpotOn",
-            customerId: customer,
-            customerSessionClientSecret: customerSessionClientSecret,
-            paymentIntentClientSecret: paymentIntent,
+            customerId: params.customer,
+            customerSessionClientSecret: params.customerSessionClientSecret,
+            paymentIntentClientSecret: params.paymentIntent,
             allowsDelayedPaymentMethods: true,
             returnURL: 'spoton://stripe-redirect',
-            defaultBillingDetails: {
-                name: "Diego Rodriguez"
-            }
         });
 
-        if(!error)
-            setLoading(false);
-        else {
-            setLoading(false);
+        setLoading(false);
+        if (!error) {
+            setReady(true);
+        } else {
+            initKeyRef.current = null;
             Alert.alert(`Error: ${error.code}`, error.message);
         }
     }
@@ -83,25 +105,8 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             return;
         }
 
-        if (!claims?.sub) {
-            Alert.alert('Reservation Error', 'No active user session. Please sign in again.');
-            return;
-        }
-        if (!vehicleId) {
-            Alert.alert('Vehicle Required', 'Select a vehicle before checking out.');
-            return;
-        }
-
-        const reservationStart = startMs ?? Date.now();
-        const reservationEnd = endMs ?? reservationStart + 3600 * hours * 1000;
-        try {
-            await api.reserveSpot(listingId, price, claims.sub, vehicleId, reservationStart, reservationEnd);
-        } catch (e: any) {
-            console.error('[PaymentCard] reservation insert failed', e);
-            Alert.alert('Reservation Error', e?.message ?? 'Could not save your reservation. Please contact support.');
-            return;
-        }
-
+        // The reservation already exists server-side (created before the sheet);
+        // payment_intent.succeeded webhook flips it to 'held'. Nothing to insert.
         Alert.alert('Payment Successful');
         if (onPaymentSuccess) {
             onPaymentSuccess({ listingId, price, hours });
@@ -115,33 +120,15 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             initializePaymentSheet();
         }, 500);
         return () => clearTimeout(timeout);
-    }, [price, hours, startMs, endMs]);
-    
-    useEffect(() => {
-        supabase.auth.getClaims().then(async (resp) => {
-        const {data, error} = resp;
+    }, [price, hours, startMs, endMs, vehicleId]);
 
-        if (error || !data) {
-            console.log("Error in finding matching user ID: " + (error ? error : "Data error"));
-            return;
-        }
-        setClaims(data.claims);
-        const { data: profileData, error: profileError } =  await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
-
-        if (profileError || !profileData) {
-            console.log("Error in retriving user profile data: " + (profileError ? profileError : "Data error"));
-            return;
-        }
-        });
-  }, []);
-    
 
     return (
         <View style={styles.container}>
             <TouchableOpacity
-                disabled={loading || !!externalDisabled || !vehicleId}
+                disabled={loading || !ready || !!externalDisabled || !vehicleId}
                 onPress={openPaymentSheet}
-                style={[styles.button, (loading || externalDisabled || !vehicleId) && styles.buttonDisabled]}
+                style={[styles.button, (loading || !ready || externalDisabled || !vehicleId) && styles.buttonDisabled]}
             >
                 <Text style={styles.text}>{ loading ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
             </TouchableOpacity>
