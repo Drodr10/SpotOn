@@ -1,6 +1,4 @@
 import os
-import threading
-import time
 
 from flask import Flask
 from flask_cors import CORS
@@ -16,27 +14,37 @@ app = Flask(__name__)
 CORS(app)
 
 
-# Fallback payout sweep scheduler. pg_cron (Supabase) is the primary trigger;
-# enable this only if pg_cron is unavailable by setting ENABLE_SWEEP_SCHEDULER=true.
+# ── Payout sweep scheduler (APScheduler, in-process) ─────────────────────────
+# Primary trigger for the session-ended / auto-refund sweep. Runs natively in
+# the Flask process so it uses the same .env + code and logs to the terminal.
+#
+# IMPORTANT: this must run in exactly ONE process. Under gunicorn use a single
+# worker (or set ENABLE_SWEEP_SCHEDULER=true on only one instance); otherwise
+# each worker would run the sweep in parallel. The /api/stripe/run-payout-sweep
+# endpoint remains available as a manual/backup trigger.
 def _start_sweep_scheduler():
+    from apscheduler.schedulers.background import BackgroundScheduler
     from services.payouts import run_payout_sweep
 
     interval = int(os.getenv("SWEEP_INTERVAL_SECONDS", "900"))
 
-    def _loop():
-        while True:
-            time.sleep(interval)
+    def _job():
+        with app.app_context():
             try:
                 summary = run_payout_sweep()
                 print(f"[sweep] {summary}")
             except Exception as err:  # noqa: BLE001
                 print(f"[sweep] error: {err}")
 
-    threading.Thread(target=_loop, daemon=True).start()
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(_job, trigger="interval", seconds=interval, id="payout_sweep")
+    scheduler.start()
+    print(f"[sweep] scheduler started (every {interval}s)")
 
 
-# Only start in the worker process (avoid the Werkzeug reloader's parent).
-if os.getenv("ENABLE_SWEEP_SCHEDULER", "false").lower() == "true" \
+# On by default; skip the Werkzeug reloader's parent process so the debug
+# server doesn't start two schedulers.
+if os.getenv("ENABLE_SWEEP_SCHEDULER", "true").lower() == "true" \
         and os.getenv("WERKZEUG_RUN_MAIN") != "false":
     _start_sweep_scheduler()
 
