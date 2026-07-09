@@ -385,19 +385,6 @@ export default function MenuBar() {
         Alert.alert('Not Logged In', 'You need to be logged in to create a listing.');
         return;
       }
-
-      const hasStripe = await stripe.userHasStripeAccount(session.user.id);
-      if (!hasStripe) {
-        Alert.alert(
-          'Payouts Not Set Up',
-          'Please set up payouts in your Profile before creating a listing.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Go to Profile', onPress: () => router.push({ pathname: '/Profile', params: { animation } } as any) },
-          ]
-        );
-        return;
-      }
     }
 
     if (key === 'profile')  router.push({ pathname: '/Profile',       params: { animation } } as any);
