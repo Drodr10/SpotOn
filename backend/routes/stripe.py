@@ -3,6 +3,8 @@ from flask import Blueprint, jsonify, request, redirect
 from services.stripe_client import (
     publishableKey,
     create_booking_payment,
+    release_booking_hold,
+    finalize_booking,
     createConnectAccount,
     createAccountLink,
     handle_webhook,
@@ -29,6 +31,22 @@ def create_booking_payment_route():
         data["listing_id"], data["renter_id"], data["vehicle_id"],
         data["start_time"], data["end_time"],
     )
+
+
+# Release a checkout hold early (renter dismissed the Stripe sheet). The sweep
+# is the backstop, but releasing now frees the slot for others immediately.
+@stripe_bp.route('/stripe/release-hold', methods=['POST'])
+def release_hold_route():
+    data = request.json or {}
+    return release_booking_hold(data.get("hold_id"))
+
+
+# Client calls this the moment the payment sheet returns success, so the
+# reservation exists immediately instead of waiting on the webhook (idempotent).
+@stripe_bp.route('/stripe/finalize-booking', methods=['POST'])
+def finalize_booking_route():
+    data = request.json or {}
+    return finalize_booking(data.get("payment_intent_id"))
 
 
 # Onboarding: create the seller's Express connected account (lazily, at payout setup).

@@ -1,5 +1,6 @@
 import os
 import json
+import traceback
 import stripe
 from flask import jsonify
 from dotenv import load_dotenv
@@ -40,29 +41,34 @@ def _fresh_customer_session(customer_id: str):
     )
 
 
-def _sheet_response(payment_intent_client_secret, customer_session_secret, customer_id, reservation_id):
+def _sheet_response(payment_intent_client_secret, customer_session_secret, customer_id, hold_id=None):
     return jsonify(
         paymentIntent=payment_intent_client_secret,
         customerSessionClientSecret=customer_session_secret,
         customer=customer_id,
-        reservationId=reservation_id,
+        holdId=hold_id,
         publishableKey=publishableKey,
     )
+
+
+# Minutes a Reserve-press hold stays valid before the sweep frees the slot.
+HOLD_TTL_MINUTES = 5
 
 
 def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
                            start_time: str, end_time: str):
     """
-    Atomically reserve the slot and start a platform-held payment.
+    Hold-and-confirm checkout. Called when the renter presses Reserve.
 
-    Unlike the old destination-charge flow, this creates a PaymentIntent on the
-    SpotOn platform (no transfer_data / application_fee) so the funds are held on
-    our balance. The reservation is created FIRST (status pending / payout_status
-    pending_payment) so a charge can never exist without a reservation row.
-
-    Idempotent: if the same renter already has a pending_payment reservation for
-    the exact same slot, we reuse it and its PaymentIntent instead of creating a
-    duplicate (prevents double-booking on checkout re-inits/retries).
+    1. Acquire a short-lived hold on the slot (reservation_holds). If another
+       renter is already checking out an overlapping slot — or it's already
+       booked — this returns 409 {code: slot_unavailable} and no PaymentIntent
+       is created.
+    2. Create a platform-held PaymentIntent carrying the booking details in
+       metadata. The real reservation row is NOT created here — it is created by
+       the payment_intent.succeeded webhook (finalize_paid_reservation), so an
+       abandoned checkout never leaves a reservation behind. The hold self-expires
+       via the sweep after HOLD_TTL_MINUTES.
     """
     stripe.api_key = secretKey
 
@@ -82,62 +88,31 @@ def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
         return jsonify({"error": f"Pricing error: {str(e)}"}), 500
 
     total_cents = _to_cents(breakdown["total"])
-    start_dt, end_dt = _parse_ts(start_time), _parse_ts(end_time)
 
-    # ── Idempotency: reuse an in-flight pending_payment reservation ─────────
-    existing_rows = (
-        supabase.table("reservations")
-        .select("*")
-        .eq("listing_id", listing_id)
-        .eq("renter_id", renter_id)
-        .eq("payout_status", "pending_payment")
-        .execute()
-        .data
-    ) or []
-    reused = next(
-        (r for r in existing_rows
-         if _parse_ts(r["start_time"]) == start_dt and _parse_ts(r["end_time"]) == end_dt),
-        None,
-    )
+    # ── Acquire the slot hold (atomic, per-listing serialized) ──────────────
+    try:
+        hold_result = supabase.rpc("acquire_booking_hold", {
+            "p_listing_id": listing_id,
+            "p_renter_id": renter_id,
+            "p_vehicle_id": vehicle_id,
+            "p_start_time": start_time,
+            "p_end_time": end_time,
+            "p_ttl_minutes": HOLD_TTL_MINUTES,
+        }).execute()
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
 
-    reservation_id = None
-    if reused:
-        reservation_id = reused["id"]
-        pi_id = reused.get("stripe_payment_intent")
-        if pi_id:
-            try:
-                pi = stripe.PaymentIntent.retrieve(pi_id)
-                if pi.status in _PAYABLE_PI_STATES:
-                    session = _fresh_customer_session(pi.customer)
-                    return _sheet_response(pi.client_secret, session.client_secret, pi.customer, reservation_id)
-            except Exception:  # noqa: BLE001 - fall through and mint a new PI
-                pass
+    hold_row = hold_result.data[0] if hold_result.data else {}
+    if hold_row.get("error_message") == "slot_unavailable":
+        return jsonify({
+            "error": "This spot is being booked right now. Try again in a few minutes.",
+            "code": "slot_unavailable",
+        }), 409
+    hold_id = hold_row.get("hold_id")
+    if not hold_id:
+        return jsonify({"error": "Could not hold this slot"}), 500
 
-    # ── Otherwise create the reservation (RPC handles overlap + conversation) ─
-    if not reservation_id:
-        try:
-            result = supabase.rpc("create_reservation_with_conversation", {
-                "p_listing_id": listing_id,
-                "p_renter_id": renter_id,
-                "p_owner_id": owner_id,
-                "p_vehicle_id": vehicle_id,
-                "p_start_time": start_time,
-                "p_end_time": end_time,
-                "p_total_price": str(breakdown["total"]),
-                "p_platform_fee": str(breakdown["platform_fee"]),
-                "p_host_payout": str(breakdown["host_payout"]),
-            }).execute()
-        except Exception as e:  # noqa: BLE001
-            return jsonify({"error": f"Database error: {str(e)}"}), 500
-
-        row = result.data[0] if result.data else {}
-        if row.get("error_message"):
-            return jsonify({"error": row["error_message"]}), 409
-        reservation_id = row.get("reservation_id")
-        if not reservation_id:
-            return jsonify({"error": "Failed to create reservation"}), 500
-
-    # ── Platform-held PaymentIntent (no transfer_data / application_fee) ─────
+    # ── Platform-held PaymentIntent (reservation created later, on success) ──
     try:
         customer = stripe.Customer.create()
         session = _fresh_customer_session(customer.id)
@@ -146,21 +121,39 @@ def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
             currency="usd",
             customer=customer.id,
             automatic_payment_methods={"enabled": True},
-            transfer_group=str(reservation_id),
-            metadata={"reservation_id": str(reservation_id), "seller_id": str(owner_id)},
+            metadata={
+                "hold_id": str(hold_id),
+                "listing_id": str(listing_id),
+                "renter_id": str(renter_id),
+                "vehicle_id": str(vehicle_id),
+                "seller_id": str(owner_id),
+                "start_time": start_time,
+                "end_time": end_time,
+                "total_price": str(breakdown["total"]),
+                "platform_fee": str(breakdown["platform_fee"]),
+                "host_payout": str(breakdown["host_payout"]),
+            },
         )
-        supabase.table("reservations").update(
-            {"stripe_payment_intent": payment_intent.id}
-        ).eq("id", reservation_id).execute()
     except Exception as e:  # noqa: BLE001
-        # Roll back the freshly created reservation so the slot isn't locked.
-        if not reused:
-            supabase.table("reservations").update(
-                {"status": "cancelled", "payout_status": "cancelled"}
-            ).eq("id", reservation_id).execute()
+        # Free the hold so the slot isn't stuck until TTL if setup failed.
+        _delete_hold(hold_id)
         return jsonify({"error": f"Payment setup failed: {str(e)}"}), 500
 
-    return _sheet_response(payment_intent.client_secret, session.client_secret, customer.id, reservation_id)
+    return _sheet_response(payment_intent.client_secret, session.client_secret, customer.id, hold_id)
+
+
+def _delete_hold(hold_id: str):
+    try:
+        supabase.table("reservation_holds").delete().eq("id", hold_id).execute()
+    except Exception as err:  # noqa: BLE001
+        print(f"[stripe] failed to delete hold {hold_id}: {err}")
+
+
+def release_booking_hold(hold_id: str):
+    """Free a hold immediately (e.g. the renter dismissed the payment sheet)."""
+    if hold_id:
+        _delete_hold(hold_id)
+    return jsonify({"released": True}), 200
 
 
 def createConnectAccount(user_id: str):
@@ -247,12 +240,159 @@ def handle_webhook(payload: bytes, sig_header: str):
     return jsonify({"received": True}), 200
 
 
+def _to_plain_dict(obj):
+    """
+    Normalize a Stripe StripeObject (or nested StripeObject) into plain dicts.
+    Needed because in some Stripe SDK versions, StripeObject.__getattr__ treats
+    method names like `.get` as key lookups and raises AttributeError. Working
+    with a plain dict sidesteps that entirely.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    # stripe.util.convert_to_dict exists across versions; fall back to
+    # `to_dict_recursive` / `to_dict` / json round-trip.
+    for meth in ("to_dict_recursive", "to_dict"):
+        fn = getattr(obj, meth, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:  # noqa: BLE001
+                pass
+    try:
+        return json.loads(str(obj))
+    except Exception:  # noqa: BLE001
+        try:
+            return dict(obj)
+        except Exception:  # noqa: BLE001
+            return obj
+
+
+def _num(value, default=0.0) -> float:
+    """Coerce metadata (which Stripe stores as strings) to a real number."""
+    if value is None or value == "":
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _finalize_reservation_from_pi(pi) -> dict:
+    """
+    Create the real reservation from a succeeded PaymentIntent's metadata
+    (set in create_booking_payment). Idempotent on the PaymentIntent id, so it's
+    safe to run from BOTH the webhook and the client's post-payment call. The
+    renter's hold is released by finalize_paid_reservation.
+
+    Returns {"reservation_id": str} on success or {"error": str}.
+    """
+    try:
+        # Stripe's StripeObject shadows dict methods like .get in some SDK
+        # versions — flatten to a plain dict first so downstream code is safe.
+        pi_dict = _to_plain_dict(pi) if not isinstance(pi, dict) else pi
+        md = pi_dict.get("metadata") or {}
+        if not isinstance(md, dict):
+            md = _to_plain_dict(md) or {}
+        raw_charge = pi_dict.get("latest_charge")
+        if isinstance(raw_charge, dict):
+            charge = raw_charge.get("id")
+        else:
+            charge = raw_charge  # str id, or None
+        pi_id = pi_dict.get("id")
+
+        required = ("listing_id", "renter_id", "vehicle_id", "start_time", "end_time")
+        missing = [k for k in required if not md.get(k)]
+        if missing:
+            return {"error": f"missing_metadata: {','.join(missing)}"}
+
+        params = {
+            "p_listing_id": str(md["listing_id"]),
+            "p_renter_id": str(md["renter_id"]),
+            "p_vehicle_id": str(md["vehicle_id"]),
+            "p_start_time": str(md["start_time"]),
+            "p_end_time": str(md["end_time"]),
+            "p_total_price": _num(md.get("total_price")),
+            "p_platform_fee": _num(md.get("platform_fee")),
+            "p_host_payout": _num(md.get("host_payout")),
+            "p_payment_intent": str(pi_id),
+            "p_charge_id": str(charge) if charge else None,
+        }
+
+        try:
+            result = supabase.rpc("finalize_paid_reservation", params).execute()
+        except Exception as err:  # noqa: BLE001
+            print(f"[stripe] finalize_paid_reservation RPC raised: {err}")
+            traceback.print_exc()
+            return {"error": f"db_error: {err}"}
+
+        data = getattr(result, "data", None)
+        print(f"[stripe] finalize_paid_reservation returned data={data!r}")
+
+        if not data:
+            return {"error": "rpc_empty_response"}
+
+        # RETURNS TABLE → list of rows; occasionally scalar depending on client.
+        row = data[0] if isinstance(data, list) else data
+        if not isinstance(row, dict):
+            return {"error": f"rpc_unexpected_shape: {type(row).__name__}"}
+
+        if row.get("error_message"):
+            return {"error": row["error_message"]}
+
+        rid = row.get("reservation_id")
+        if not rid:
+            return {"error": "rpc_no_reservation_id"}
+        return {"reservation_id": rid}
+    except Exception as err:  # noqa: BLE001 — never let this bubble to Flask as a 500
+        print(f"[stripe] _finalize_reservation_from_pi crashed: {err}")
+        traceback.print_exc()
+        return {"error": f"finalize_crashed: {err}"}
+
+
 def _on_payment_succeeded(pi: dict):
-    charge = pi.get("latest_charge")
-    supabase.table("reservations").update(
-        {"stripe_charge_id": charge, "payout_status": "held", "status": "confirmed"}
-    ).eq("stripe_payment_intent", pi["id"]).eq("payout_status", "pending_payment").execute()
-    print(f"[stripe] payment succeeded for PI {pi['id']} (charge {charge}) -> held")
+    """Webhook path — reliable backstop that creates the reservation on payment."""
+    outcome = _finalize_reservation_from_pi(pi)
+    if outcome.get("error") == "missing_metadata":
+        print(f"[stripe] payment {pi['id']} missing booking metadata; skipping finalize")
+    elif outcome.get("error"):
+        # Refund-on-conflict intentionally deferred: log loudly so a
+        # charged-but-unbooked payment is visible until it's built out.
+        print(f"[stripe] WARNING payment {pi['id']} succeeded but reservation "
+              f"not created ({outcome['error']}); needs manual review")
+    else:
+        print(f"[stripe] payment succeeded for PI {pi['id']} -> reservation {outcome['reservation_id']} (held)")
+
+
+def finalize_booking(payment_intent_id: str):
+    """
+    Client-invoked finalize, called the instant the payment sheet returns
+    success. Confirms the PaymentIntent really succeeded, then creates the
+    reservation. Idempotent with the webhook — whichever runs first wins, the
+    other is a no-op. Makes booking work even if `stripe listen` isn't forwarding.
+    """
+    stripe.api_key = secretKey
+    if not payment_intent_id:
+        return jsonify({"error": "Missing payment_intent_id"}), 400
+    try:
+        pi_obj = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["latest_charge"])
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"Could not retrieve payment: {e}"}), 502
+
+    pi = _to_plain_dict(pi_obj) if not isinstance(pi_obj, dict) else pi_obj
+    if pi.get("status") != "succeeded":
+        return jsonify({"error": "Payment not completed", "status": pi.get("status")}), 409
+
+    try:
+        outcome = _finalize_reservation_from_pi(pi)
+    except Exception as e:  # noqa: BLE001 — belt-and-suspenders so nothing becomes an HTML 500
+        traceback.print_exc()
+        return jsonify({"error": f"finalize_unhandled: {e}"}), 500
+
+    if outcome.get("error"):
+        # 409 signals "payment fine, reservation could not be created" — the client shows the message.
+        return jsonify({"error": outcome["error"]}), 409
+    return jsonify({"reservationId": outcome["reservation_id"]}), 200
 
 
 def _on_account_updated(account: dict):

@@ -296,4 +296,10 @@ def run_payout_sweep() -> dict:
         ).eq("id", res["id"]).execute()
         summary["expired"] += 1
 
+    # 4) Expired checkout holds → delete so the slot is bookable again.
+    try:
+        supabase.table("reservation_holds").delete().lte("expires_at", _iso(now)).execute()
+    except Exception as err:  # noqa: BLE001
+        print(f"[payouts] hold cleanup failed: {err}")
+
     return summary

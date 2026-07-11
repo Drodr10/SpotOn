@@ -11,6 +11,7 @@ import {
   Dimensions,
   Easing,
   Image,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -23,7 +24,6 @@ import * as Haptics from 'expo-haptics';
 
 import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
-import { stripe } from '../utils/stripe';
 import { CustomFonts } from '../constants/theme';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
@@ -32,6 +32,7 @@ import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
 import messagesBlack from '../../assets/images/menubar/messages_black.png';
 import addWhite from '../../assets/images/menubar/add_white.png';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ▼▼▼ SIZE CONTROLS ▼▼▼
@@ -257,6 +258,54 @@ export default function MenuBar() {
   const [now, setNow]             = useState<number>(Date.now());
   const [screenW, setScreenW]     = useState(Dimensions.get('window').width);
 
+  // ── Payout-info popup (shown when tapping + before entering the create flow) ──
+  const [showAddInfo, setShowAddInfo] = useState(false);
+  const addInfoAnim   = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  const addInfoBackdrop = useRef(new Animated.Value(0)).current;
+  // Slide direction to hand off to the create-listing route once the user continues.
+  const addInfoSlide  = useRef<'slide_from_left' | 'slide_from_right'>('slide_from_right');
+
+  const openAddInfo = (animation: 'slide_from_left' | 'slide_from_right') => {
+    addInfoSlide.current = animation;
+    addInfoAnim.setValue(Dimensions.get('window').height);
+    setShowAddInfo(true);
+    Animated.parallel([
+      // Spring to match the springy feel of the other card popups in the app.
+      Animated.spring(addInfoAnim, {
+        toValue: 0,
+        damping: 14,
+        stiffness: 130,
+        mass: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(addInfoBackdrop, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeAddInfo = (cb?: () => void) => {
+    Animated.parallel([
+      Animated.spring(addInfoAnim, {
+        toValue: Dimensions.get('window').height,
+        damping: 14,
+        stiffness: 130,
+        mass: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(addInfoBackdrop, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowAddInfo(false);
+      cb?.();
+    });
+  };
+
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', ({ window }) => setScreenW(window.width));
     return () => sub.remove();
@@ -386,18 +435,10 @@ export default function MenuBar() {
         return;
       }
 
-      const hasStripe = await stripe.userHasStripeAccount(session.user.id);
-      if (!hasStripe) {
-        Alert.alert(
-          'Payouts Not Set Up',
-          'Please set up payouts in your Profile before creating a listing.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Go to Profile', onPress: () => router.push({ pathname: '/Profile', params: { animation } } as any) },
-          ]
-        );
-        return;
-      }
+      // Zero-friction listing: no Stripe account required up front. Show a quick
+      // heads-up about deferred payout setup, then enter the create-listing flow.
+      openAddInfo(animation);
+      return;
     }
 
     if (key === 'profile')  router.push({ pathname: '/Profile',       params: { animation } } as any);
@@ -410,7 +451,10 @@ export default function MenuBar() {
 
   const addIconSize = Math.round(barH * ADD_ICON_RATIO);
 
+  const W = screenW;
+
   return (
+    <>
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: insets.bottom + BOTTOM_OFFSET }]}>
       <View style={styles.barRow}>
         {/* Main pill — profile, home, messages */}
@@ -528,6 +572,56 @@ export default function MenuBar() {
         </TouchableOpacity>
       </View>
     </View>
+
+    {/* Payout-info popup — slides up when tapping +, mirrors the create-listing
+        rate popups (black card, Continue button). */}
+    <Modal visible={showAddInfo} transparent animationType="none" onRequestClose={() => closeAddInfo()}>
+      <Animated.View style={[styles.addInfoBackdrop, { opacity: addInfoBackdrop }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => closeAddInfo()} />
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.addInfoCard,
+          {
+            bottom: W * 0.05 + insets.bottom,
+            paddingTop: W * 0.055,
+            paddingBottom: W * 0.045,
+            paddingHorizontal: W * 0.06,
+            borderRadius: W * 0.07,
+            transform: [{ translateY: addInfoAnim }],
+          },
+        ]}
+      >
+        <Image
+          source={spotonLogoCircle}
+          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+          resizeMode="contain"
+        />
+
+        <Text style={[styles.addInfoTitle, { fontSize: W * 0.055, marginBottom: W * 0.03, marginTop: W * 0.005 }]}>
+          List now, get paid later
+        </Text>
+        <Text style={[styles.addInfoBody, { fontSize: W * 0.036, lineHeight: W * 0.052, marginBottom: W * 0.055 }]}>
+          You can create your listing and start earning right away — no business account needed. When your first booking
+          comes in, we'll ask for a few quick payout details so your money goes straight to your bank.
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.addInfoContinue, { height: W * 0.12, borderRadius: W * 0.06 }]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            closeAddInfo(() =>
+              router.push({ pathname: '/CreateListing2', params: { animation: addInfoSlide.current } } as any)
+            );
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.addInfoContinueText, { fontSize: W * 0.04 }]}>Continue</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </Modal>
+    </>
   );
 }
 
@@ -584,5 +678,45 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 1,
     backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+
+  // ── Payout-info popup ────────────────────────────────────────────────────────
+  addInfoBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  addInfoCard: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: '#000',
+    zIndex: 20,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+  },
+  addInfoLogo: {
+    position: 'absolute',
+    opacity: 0.9,
+    zIndex: 1,
+  },
+  addInfoTitle: {
+    fontFamily: CustomFonts.BevellierMedium,
+    color: '#fff',
+  },
+  addInfoBody: {
+    fontFamily: CustomFonts.SwitzerLight,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  addInfoContinue: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addInfoContinueText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    color: '#fff',
   },
 });
