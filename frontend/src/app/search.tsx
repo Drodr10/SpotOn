@@ -85,7 +85,86 @@ interface Listing {
   is_active: boolean;
   photo_url: string | null;
   created_at: string;
+  available_from: string | null;
+  available_until: string | null;
+  // Populated by get_visible_listings(...): the earliest instant the listing
+  // becomes bookable. Null when it's bookable right now. Reflects the max of
+  // future available_from and the end_time of any current confirmed reservation.
+  next_available_at: string | null;
   distance: number; // miles, computed client-side
+}
+
+// Full-date label used for future-dated listings (available_from banner).
+function formatAvailableFromDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+// Compact "clock time" like "4:30 PM" (drops :00 when on the hour).
+function formatClockTime(d: Date): string {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const period = h >= 12 ? 'PM' : 'AM';
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${display} ${period}` : `${display}:${pad2Local(m)} ${period}`;
+}
+function pad2Local(n: number): string { return n < 10 ? `0${n}` : String(n); }
+
+// Smart label: time-only if the target lands on today, otherwise a full date.
+function formatSmartWhen(target: Date): string {
+  const now = new Date();
+  if (isSameCalendarDay(now, target)) return formatClockTime(target);
+  return target.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function parseIsoDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// The unified "when will this listing be bookable" for banners + BookingView.
+function getNextAvailableAt(listing: Pick<Listing, 'available_from' | 'next_available_at'>): Date | null {
+  const nextAvail = parseIsoDate(listing.next_available_at);
+  const availFrom = parseIsoDate(listing.available_from);
+  const now = Date.now();
+  const candidates: Date[] = [];
+  if (nextAvail && nextAvail.getTime() > now) candidates.push(nextAvail);
+  if (availFrom && availFrom.getTime() > now) candidates.push(availFrom);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((max, d) => (d.getTime() > max.getTime() ? d : max));
+}
+
+// Banner copy for Search cards / detail view.
+//   • listing not yet started (future available_from, no current reservation):
+//     "Available on or after {full date}"
+//   • listing currently reserved (or a mix):
+//     "This listing will be available after {smart when}"
+function getBannerLabel(listing: Pick<Listing, 'available_from' | 'next_available_at'>): string | null {
+  const next = getNextAvailableAt(listing);
+  if (!next) return null;
+  const availFrom = parseIsoDate(listing.available_from);
+  const availFromInFuture = availFrom && availFrom.getTime() > Date.now();
+  const nextAvailFromSameSource =
+    availFromInFuture && Math.abs(availFrom!.getTime() - next.getTime()) < 1000;
+  if (nextAvailFromSameSource) {
+    return `Available on or after ${formatAvailableFromDate(availFrom!.toISOString())}`;
+  }
+  return `This listing will be available after ${formatSmartWhen(next)}`;
 }
 
 // ─── Haversine helper ─────────────────────────────────────────────────────────
@@ -134,6 +213,20 @@ function NearbyLocationCard({
       activeOpacity={0.85}
     >
       <View style={[cardStyles.card, selected && cardStyles.cardSelected]}>
+        {(() => {
+          const label = getBannerLabel(item);
+          if (!label) return null;
+          return (
+            <View style={detailStyles.availableBanner}>
+              <Text
+                style={[detailStyles.availableBannerText, { fontSize: fontLabel }]}
+                numberOfLines={1}
+              >
+                {label}
+              </Text>
+            </View>
+          );
+        })()}
         <Text style={[cardStyles.title, { fontSize: fontTitle }]} numberOfLines={2}>
           {item.address}
         </Text>
@@ -380,56 +473,69 @@ export default function SearchScreen() {
   }, [searchLat, searchLng]);
 
   // ─── Fetch listings (uses search center which may be geocoded from a text query)
+  //
+  // Search calls get_visible_listings(TRUE): drops expired listings and listings
+  // with a live conflict at now() (confirmed reservation or unexpired hold), but
+  // still surfaces not-yet-live listings so they can render an "Available on or
+  // after {date}" banner.
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const latDelta = 0.0724;
-      const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
 
+      // Sort: bookable-now listings first (by distance), then locked/banner
+      // listings (by distance). Banner listings always rank below any bookable
+      // listing regardless of proximity.
       const decorate = (rows: any[]): Listing[] =>
         rows
           .map((l: any) => ({
             ...l,
             distance: getDistanceMiles(userLat, userLng, l.latitude, l.longitude),
           }))
-          .sort((a: Listing, b: Listing) => a.distance - b.distance);
+          .sort((a: Listing, b: Listing) => {
+            const aLocked = getNextAvailableAt(a) !== null ? 1 : 0;
+            const bLocked = getNextAvailableAt(b) !== null ? 1 : 0;
+            if (aLocked !== bLocked) return aLocked - bLocked;
+            return a.distance - b.distance;
+          });
 
-      const { data: nearbyData, error: nearbyError } = await supabase
-        .from('listings')
-        .select('*')
-        .eq('is_active', true)
-        .gte('latitude', searchLat - latDelta)
-        .lte('latitude', searchLat + latDelta)
-        .gte('longitude', searchLng - lngDelta)
-        .lte('longitude', searchLng + lngDelta);
+      const { data: visibleData, error: visibleError } = await supabase.rpc(
+        'get_visible_listings',
+        { p_include_upcoming: true, p_include_active_reserved: true },
+      );
 
-      if (nearbyError) {
-        console.error('Supabase listings error:', nearbyError);
+      if (visibleError) {
+        console.error('Supabase get_visible_listings error:', visibleError);
+        setListings([]);
+        setIsFallback(false);
         setLoading(false);
         return;
       }
 
+      const latDelta = 0.0724;
+      const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
+      const inBox = (visibleData ?? []).filter(
+        (l: any) =>
+          l.latitude >= searchLat - latDelta &&
+          l.latitude <= searchLat + latDelta &&
+          l.longitude >= searchLng - lngDelta &&
+          l.longitude <= searchLng + lngDelta,
+      );
+
       // Always within 5mi when nearby spots exist; otherwise fall back to the
       // closest listings anywhere so the user is never shown an empty result.
-      let resolved: Listing[] = decorate(nearbyData ?? []).filter((l) => l.distance <= 5);
+      let resolved: Listing[] = decorate(inBox).filter((l) => l.distance <= 5);
       let fallback = false;
 
-      if (resolved.length === 0) {
-        const { data: allData, error: allError } = await supabase
-          .from('listings')
-          .select('*')
-          .eq('is_active', true);
-        if (!allError && allData) {
-          resolved = decorate(allData);
-          fallback = resolved.length > 0;
-        }
+      if (resolved.length === 0 && (visibleData?.length ?? 0) > 0) {
+        resolved = decorate(visibleData);
+        fallback = resolved.length > 0;
       }
 
       setListings(resolved);
       setIsFallback(fallback);
       setLoading(false);
     })();
-  }, [searchLat, searchLng]);
+  }, [searchLat, searchLng, userLat, userLng]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -827,10 +933,31 @@ function ListingDetailView({
 }) {
   const imgSource = listing.photo_url ? { uri: listing.photo_url } : placeholderImageAsset;
   const actionButtonHeight = screenWidth * 0.11;
+  const bannerLabel = getBannerLabel(listing);
   return (
     <View style={detailStyles.wrap}>
       {/* Inner view measured so the panel can auto-fit its height */}
       <View onLayout={(e) => onContentHeight(e.nativeEvent.layout.height)}>
+      {/* "Available on or after…" / "…available after…" banner (Search-only) */}
+      {bannerLabel && (
+        <View
+          style={[
+            detailStyles.availableBanner,
+            {
+              paddingHorizontal: screenWidth * 0.045,
+              paddingVertical: screenWidth * 0.028,
+              marginBottom: screenWidth * 0.02,
+            },
+          ]}
+        >
+          <Text
+            style={[detailStyles.availableBannerText, { fontSize: fontLabel }]}
+            numberOfLines={1}
+          >
+            {bannerLabel}
+          </Text>
+        </View>
+      )}
       {/* Image */}
       <Image
         source={imgSource}
@@ -1067,6 +1194,21 @@ const detailStyles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerSemibold,
     color: '#fff',
   },
+  availableBanner: {
+    alignSelf: 'stretch',
+    backgroundColor: '#000',
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  availableBannerText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
 });
 
 // ─── Booking View (Figma 389-196 / 389-224) ─────────────────────────────────
@@ -1168,6 +1310,20 @@ function BookingView({
   // Mount-time anchor — minutes captured once, never drifts with wall clock.
   const mountTime = useMemo(() => new Date(), []);
 
+  // Listings that are reserved right now / not yet started get a locked Current
+  // tab and a Schedule mode pre-seeded to next-available. Computed once at mount
+  // so we don't fight state during interaction.
+  const nextAvailableAt = useMemo(() => getNextAvailableAt(listing), [listing]);
+  const unavailableNow = nextAvailableAt !== null;
+  const unavailableMessage = useMemo(() => {
+    if (!nextAvailableAt) return null;
+    return `Not available currently, but you can schedule after ${formatSmartWhen(nextAvailableAt)}.`;
+  }, [nextAvailableAt]);
+
+  // "Earliest bookable" anchor — replaces mountTime for start-time initialization
+  // whenever the listing is currently locked (reserved / not-yet-started).
+  const earliestStart = unavailableNow ? nextAvailableAt! : mountTime;
+
   // ─── Booking-mode state (Current is default per Figma) ───────────────────
   const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
   const [vehicles, setVehicles] = useState<VehicleProfile[]>([]);
@@ -1178,15 +1334,36 @@ function BookingView({
   const [currentHours, setCurrentHours] = useState(1);
 
   // ─── Hourly Schedule state ──────────────────────────────────────────────
-  const initialStartHour = mountTime.getHours();
-  const [startHour, setStartHour] = useState(initialStartHour);
+  // When the listing is locked, seed Schedule to the next-available instant
+  // (rounded up to the next hour if there are stray minutes) so the moment the
+  // user taps Schedule they're already positioned on a bookable slot.
+  const initialScheduleStartHour = (() => {
+    if (unavailableNow) {
+      const rounded = new Date(nextAvailableAt!);
+      if (rounded.getMinutes() > 0 || rounded.getSeconds() > 0) {
+        rounded.setHours(rounded.getHours() + 1, 0, 0, 0);
+      }
+      return rounded.getHours();
+    }
+    return mountTime.getHours();
+  })();
+  const initialScheduleStartDate = (() => {
+    const base = new Date(earliestStart);
+    // If we bumped the hour past 23 while rounding, roll the day forward.
+    if (unavailableNow) {
+      const n = new Date(nextAvailableAt!);
+      const rolled = n.getMinutes() > 0 || n.getSeconds() > 0;
+      if (rolled && n.getHours() === 23) {
+        base.setDate(base.getDate() + 1);
+      }
+    }
+    base.setHours(0, 0, 0, 0);
+    return base;
+  })();
+  const [startHour, setStartHour] = useState(initialScheduleStartHour);
   // End hour is "extended" — can exceed 23 for day rollover.
-  const [endHour, setEndHour] = useState(initialStartHour + 2);
-  const [scheduleStart, setScheduleStart] = useState<Date>(() => {
-    const d = new Date(mountTime);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [endHour, setEndHour] = useState(initialScheduleStartHour + 2);
+  const [scheduleStart, setScheduleStart] = useState<Date>(initialScheduleStartDate);
   const [scheduleEndDate, setScheduleEndDate] = useState<Date | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
   // True while the user is interacting with any of the picker wheels — gates
@@ -1327,16 +1504,18 @@ function BookingView({
     : `${shortDateWithDay(startDateTime)} → ${shortDateWithDay(endDateTime)} | ${formatTimeWithMinutes(startDateTime)} - ${formatTimeWithMinutes(endDateTime)}`;
 
   // ─── Weekly derived values ───────────────────────────────────────────────
+  // Weekly bookings on locked listings anchor to next-available instead of now.
+  const weeklyStart = earliestStart;
   const weeklyEnd = useMemo(
-    () => new Date(mountTime.getTime() + currentWeeks * 7 * 24 * 3_600_000),
-    [mountTime, currentWeeks],
+    () => new Date(weeklyStart.getTime() + currentWeeks * 7 * 24 * 3_600_000),
+    [weeklyStart, currentWeeks],
   );
-  const weeklySummary = `${shortDate(mountTime)} → ${shortDate(weeklyEnd)}`;
+  const weeklySummary = `${shortDate(weeklyStart)} → ${shortDate(weeklyEnd)}`;
   const weeklyHours   = currentWeeks * HOURS_PER_WEEK;
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId) ?? null;
 
   // ─── Pricing preview (replaces client-side tax + totals math) ───────────
-  const previewStart = mode === 'hourly' ? startDateTime : mountTime;
+  const previewStart = mode === 'hourly' ? startDateTime : weeklyStart;
   const previewEnd   = mode === 'hourly' ? endDateTime   : weeklyEnd;
   const { pricing, loading: pricingLoading, error: pricingError } = usePricingPreview(
     listing.id,
@@ -1478,6 +1657,28 @@ function BookingView({
 
             {/* Listing card */}
             <View style={[bookingStyles.cardWrap, { paddingHorizontal: sizes.H_PAD }]}>
+              {unavailableMessage && (
+                <View
+                  style={[
+                    detailStyles.availableBanner,
+                    {
+                      marginBottom: screenWidth * 0.02,
+                      paddingHorizontal: screenWidth * 0.045,
+                      paddingVertical: screenWidth * 0.028,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      detailStyles.availableBannerText,
+                      { fontSize: sizes.FONT_LABEL },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {unavailableMessage}
+                  </Text>
+                </View>
+              )}
               <View style={[cardStyles.card, cardStyles.cardSelected]}>
                 <Text style={[cardStyles.title, { fontSize: sizes.FONT_TITLE }]} numberOfLines={2}>
                   {listing.address}
@@ -1640,7 +1841,7 @@ function BookingView({
                 price={pricing?.total ?? 0}
                 hours={weeklyHours}
                 vehicleId={selectedVehicleId}
-                startTime={mountTime}
+                startTime={weeklyStart}
                 endTime={weeklyEnd}
                 disabled={!pricing || !!pricingError || !selectedVehicleId}
                 onPaymentSuccess={handleWeeklyPaymentSuccess}
@@ -1799,22 +2000,31 @@ function BookingView({
             },
           ]}
         >
-          {/* Current mode: 1 centered scroller (hours booked) */}
+          {/* Current mode: 1 centered scroller (hours booked) — locked listings
+              swap the scroller for a message that steers the user to Schedule. */}
           <Animated.View
             style={[bookingStyles.scrollerLayer, currentScrollerAnimStyle]}
             pointerEvents={bookingMode === 'current' ? 'auto' : 'none'}
           >
             <Text style={bookingStyles.scrollerLabel}>Hours</Text>
-            <HourScroller
-              value={currentHours}
-              onChange={setCurrentHours}
-              min={1}
-              max={HARD_CAP_HOURS}
-              fontSize={Math.min(48, screenWidth * 0.12)}
-              visibleCount={5}
-              onInteractionStart={lockPicker}
-              onInteractionEnd={unlockPicker}
-            />
+            {unavailableNow ? (
+              <View style={bookingStyles.unavailableLockBox}>
+                <Text style={bookingStyles.unavailableLockText}>
+                  {unavailableMessage}
+                </Text>
+              </View>
+            ) : (
+              <HourScroller
+                value={currentHours}
+                onChange={setCurrentHours}
+                min={1}
+                max={HARD_CAP_HOURS}
+                fontSize={Math.min(48, screenWidth * 0.12)}
+                visibleCount={5}
+                onInteractionStart={lockPicker}
+                onInteractionEnd={unlockPicker}
+              />
+            )}
           </Animated.View>
 
           {/* Schedule mode: 2 scrollers side-by-side (start | end) */}
@@ -1870,7 +2080,7 @@ function BookingView({
         {/* Date / time summary */}
         <View style={[bookingStyles.summaryRow, { paddingHorizontal: sizes.H_PAD }]}>
           <Text style={bookingStyles.summaryText} numberOfLines={2}>
-            {summaryLine}
+            {unavailableNow && bookingMode === 'current' ? '—' : summaryLine}
           </Text>
         </View>
 
@@ -1980,17 +2190,28 @@ function BookingView({
               vehicleId={selectedVehicleId}
               startTime={startDateTime}
               endTime={endDateTime}
-              disabled={!pricing || !!pricingError || !selectedVehicleId}
+              disabled={
+                !pricing ||
+                !!pricingError ||
+                !selectedVehicleId ||
+                (unavailableNow && bookingMode === 'current')
+              }
               onPaymentSuccess={handlePaymentSuccess}
             />
           </View>
         </View>
 
-        {/* Single-date picker overlay (Schedule mode) */}
+        {/* Single-date picker overlay (Schedule mode).
+            Bounded to the listing's live availability window:
+              • min = earliest bookable moment (now, or next_available_at when
+                the listing is currently reserved / not-yet-started)
+              • max = the listing's available_until (if set) */}
         <DateRangePicker
           visible={showCalendar}
           initialStart={scheduleStart}
           singleSelect
+          minDate={earliestStart}
+          maxDate={parseIsoDate(listing.available_until)}
           helperText="Pick the day for your reservation."
           confirmLabel="Confirm date"
           popupOpacity={0.85}
@@ -2153,6 +2374,24 @@ const bookingStyles = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(0,0,0,0.5)',
     marginBottom: 6,
+  },
+  // Locked-listing message shown in place of the Current-mode hour scroller
+  // when the listing is reserved right now or hasn't started yet. Same black
+  // pill visual language as the Search banner so the two obviously belong to
+  // the same "not-bookable-now" story.
+  unavailableLockBox: {
+    backgroundColor: '#000',
+    borderRadius: 999,
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+    maxWidth: '92%',
+  },
+  unavailableLockText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 14,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   summaryRow: {
     marginTop: 18,

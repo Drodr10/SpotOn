@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/src/utils/supabase';
-import { type ListingForCard } from '@/src/utils/api';
+import { api, type ActiveReservation, type ListingForCard } from '@/src/utils/api';
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
 import { getPrimaryRate } from '@/src/utils/listingPrice';
@@ -40,6 +40,7 @@ type OwnerListing = ListingForCard & { is_active?: boolean };
 
 export default function YourSpots() {
   const [listings, setListings] = useState<OwnerListing[] | null>(null);
+  const [activeBookings, setActiveBookings] = useState<ActiveReservation[] | null>(null);
   const [totalEarnings, setTotalEarnings] = useState<number | null>(null);
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export default function YourSpots() {
       const { data: claimsResp } = await supabase.auth.getClaims();
       if (!claimsResp) {
         setListings([]);
+        setActiveBookings([]);
         setTotalEarnings(0);
         return;
       }
@@ -62,6 +64,9 @@ export default function YourSpots() {
         .order('created_at', { ascending: false });
       const ownerListings = (listingRows ?? []) as OwnerListing[];
       setListings(ownerListings);
+
+      const bookings = await api.getOwnerActiveBookings(ownerId);
+      setActiveBookings(bookings ?? []);
 
       // Sum total_price across every reservation made on this owner's listings.
       // Done in a single query against listing_id IN (...) — works for both
@@ -101,7 +106,7 @@ export default function YourSpots() {
           <Image source={logoAsset} style={styles.logo} resizeMode='contain' />
         </View>
 
-        <Text style={styles.title}>Your Current Spots</Text>
+        <Text style={styles.title}>Your Seller Account</Text>
 
         {/* Total earnings — aura-gradient pill card, same width as listings */}
         <ImageBackground
@@ -115,6 +120,34 @@ export default function YourSpots() {
             {totalEarnings === null ? '—' : `$${totalEarnings.toFixed(2)}`}
           </Text>
         </ImageBackground>
+
+        {/* Active bookings on the user's listings. */}
+        <Text style={styles.sectionLabel}>Active Bookings</Text>
+        {activeBookings === null ? (
+          <ActivityIndicator color='#000' />
+        ) : activeBookings.length === 0 ? (
+          <Text style={styles.emptyText}>No active bookings on your spots.</Text>
+        ) : (
+          <View style={styles.list}>
+            {activeBookings.map((b) => {
+              const vehicleLine = b.vehicleSummary
+                ? `Vehicle: ${b.vehicleSummary.color} ${b.vehicleSummary.make} ${b.vehicleSummary.model}${b.vehicleSummary.licensePlate ? ` • ${b.vehicleSummary.licensePlate}` : ''}`
+                : undefined;
+              return (
+                <ReservationInfoCard
+                  key={b.id}
+                  address={b.listingData.address}
+                  endTime={b.end_time}
+                  totalPrice={b.total_price}
+                  photoUrl={b.listingData.photo_url}
+                  variant='current'
+                  secondaryLineOverride={vehicleLine}
+                  width={CARD_WIDTH}
+                />
+              );
+            })}
+          </View>
+        )}
 
         {/* My listings */}
         <Text style={styles.sectionLabel}>My Listings</Text>

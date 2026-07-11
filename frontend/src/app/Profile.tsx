@@ -465,23 +465,23 @@ export default function ProfilePage() {
             <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
-          {/* Previous Reservations banner — opens history page */}
+          {/* Your Reservations banner — opens history page */}
           <TouchableOpacity
             style={styles.banner}
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./PreviousReservations'))}
           >
-            <Text style={styles.bannerText}>Previous{'\n'}Reservations</Text>
+            <Text style={styles.bannerText}>Your{'\n'}Reservations</Text>
             <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
-          {/* Your Current Spots banner — opens spots/bookings page */}
+          {/* Your Seller Account banner — opens spots/bookings page */}
           <TouchableOpacity
             style={styles.banner}
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./YourSpots'))}
           >
-            <Text style={styles.bannerText}>Your{'\n'}Current Spots</Text>
+            <Text style={styles.bannerText}>Your Seller{'\n'}Account</Text>
             <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 

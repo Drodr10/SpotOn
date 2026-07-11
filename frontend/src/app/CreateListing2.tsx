@@ -379,7 +379,11 @@ export default function CreateListing2() {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (dateRange?: { start: Date | null; end: Date | null }) => {
+    // Calendar's onConfirm calls setStartDate/setEndDate + handleSubmit synchronously,
+    // so this render still sees the old state. Prefer the freshly-picked dates.
+    const chosenStart = dateRange?.start ?? startDate;
+    const chosenEnd = dateRange?.end ?? endDate;
     if (periodType === 0 && pricePerHour <= 0) {
       Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
       return;
@@ -441,6 +445,8 @@ export default function CreateListing2() {
         ...ratePayload,
         is_active: true,
         photo_url: photoUrl,
+        available_from: chosenStart ? chosenStart.toISOString() : null,
+        available_until: chosenEnd ? chosenEnd.toISOString() : null,
       });
 
       if (error) throw new Error(error.message);
@@ -659,7 +665,7 @@ export default function CreateListing2() {
       onConfirm={(start, end) => {
         setStartDate(start);
         setEndDate(end);
-        handleSubmit();
+        handleSubmit({ start, end });
       }}
     />
   );

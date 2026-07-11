@@ -33,14 +33,12 @@ const LOGO_SIZE = screenWidth * 0.12;
 
 export default function PreviousReservations() {
   const [items, setItems] = useState<ActiveReservation[] | null>(null);
-  const [activeBookings, setActiveBookings] = useState<ActiveReservation[] | null>(null);
 
   useEffect(() => {
     (async () => {
       const { data: claimsResp } = await supabase.auth.getClaims();
       if (!claimsResp) {
         setItems([]);
-        setActiveBookings([]);
         return;
       }
       const userId = claimsResp.claims.sub;
@@ -49,9 +47,6 @@ export default function PreviousReservations() {
       const now = Date.now();
       const past = (list ?? []).filter((r) => r.end_time.getTime() < now);
       setItems(past);
-
-      const bookings = await api.getOwnerActiveBookings(userId);
-      setActiveBookings(bookings ?? []);
     })();
   }, []);
 
@@ -69,35 +64,7 @@ export default function PreviousReservations() {
           <Image source={logoAsset} style={styles.logo} resizeMode='contain' />
         </View>
 
-        <Text style={styles.title}>Previous Reservations</Text>
-
-        {/* Active bookings on the user's listings — owner-facing section. */}
-        <Text style={styles.sectionLabel}>Active Bookings</Text>
-        {activeBookings === null ? (
-          <ActivityIndicator color='#000' />
-        ) : activeBookings.length === 0 ? (
-          <Text style={styles.emptyText}>No active bookings on your spots.</Text>
-        ) : (
-          <View style={styles.list}>
-            {activeBookings.map((b) => {
-              const vehicleLine = b.vehicleSummary
-                ? `Vehicle: ${b.vehicleSummary.color} ${b.vehicleSummary.make} ${b.vehicleSummary.model}${b.vehicleSummary.licensePlate ? ` • ${b.vehicleSummary.licensePlate}` : ''}`
-                : undefined;
-              return (
-                <ReservationInfoCard
-                  key={b.id}
-                  address={b.listingData.address}
-                  endTime={b.end_time}
-                  totalPrice={b.total_price}
-                  photoUrl={b.listingData.photo_url}
-                  variant='current'
-                  secondaryLineOverride={vehicleLine}
-                  width={screenWidth - H_PAD * 2}
-                />
-              );
-            })}
-          </View>
-        )}
+        <Text style={styles.title}>Your Reservations</Text>
 
         <Text style={styles.sectionLabel}>Past Reservations</Text>
         {items === null ? (
