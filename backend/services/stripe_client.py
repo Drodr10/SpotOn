@@ -219,6 +219,8 @@ def createAccountLink(user_id: str):
         print(f"Error creating account link: {str(err)}")
         return jsonify({"error": str(err)}), 500
 
+def onboardingComplete(user_id: str):
+    supabase.table("profiles").update({"payouts_enabled": True}).eq("id", user_id).execute()
 
 # ── Webhooks ────────────────────────────────────────────────────────────────
 def handle_webhook(payload: bytes, sig_header: str):

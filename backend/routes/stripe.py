@@ -9,6 +9,7 @@ from services.stripe_client import (
     createAccountLink,
     sync_connect_account,
     handle_webhook,
+    onboardingComplete,
 )
 from services.payouts import run_payout_sweep
 from services.notifications import run_notification_sweep
