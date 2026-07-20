@@ -1553,10 +1553,8 @@ function BookingView({
       return;
     }
     if (currentUserId === listing.owner_id) {
-      Alert.alert(
-        'Reservation booked',
-        'You booked your own listing — no chat to open.',
-      );
+      // Defensive only — PaymentCard blocks self-booking before payment now.
+      Alert.alert('Unexpected error', "This booking couldn't be completed.");
       onPaymentDone();
       return;
     }
@@ -1593,7 +1591,8 @@ function BookingView({
       return;
     }
     if (currentUserId === listing.owner_id) {
-      Alert.alert('Reservation booked', 'You booked your own listing — no chat to open.');
+      // Defensive only — PaymentCard blocks self-booking before payment now.
+      Alert.alert('Unexpected error', "This booking couldn't be completed.");
       onPaymentDone();
       return;
     }

@@ -8,12 +8,12 @@ import { supabase } from '@/src/utils/supabase';
 import { stripe } from '@/src/utils/stripe';
 import { api } from '@/src/utils/api';
 import { triggerLightHaptic } from '@/src/utils/haptics';
+import { BANNER_SIDE_MARGIN, BANNER_RADIUS, BANNER_HEIGHT, BANNER_H_PAD } from './bannerStyle';
 
 const { width: screenWidth } = Dimensions.get('window');
-const SIDE_MARGIN = screenWidth * 0.035;
-const RADIUS = screenWidth * 0.07;
-const V_PAD = screenWidth * 0.04;
-const H_PAD = screenWidth * 0.05;
+const SIDE_MARGIN = BANNER_SIDE_MARGIN;
+const RADIUS = BANNER_RADIUS;
+const H_PAD = BANNER_H_PAD;
 
 /**
  * Home-screen prompt that appears only when the signed-in seller has earned
@@ -60,6 +60,8 @@ export default function PayoutBanner() {
         return;
       }
       await WebBrowser.openBrowserAsync(url);
+      // Backstop the webhook: sync payout status from Stripe on return, then refresh.
+      await stripe.syncAccount(userId);
       await load(); // refresh state after they return
     } catch (error: any) {
       Alert.alert('Onboarding Error', error?.message ?? 'An unexpected error occurred.');
@@ -79,7 +81,7 @@ export default function PayoutBanner() {
           <Text style={styles.subtitle}>Set up payouts to get paid</Text>
         </View>
         {loading
-          ? <ActivityIndicator color="#FFFFFF" />
+          ? <ActivityIndicator color="#000000" />
           : <Text style={styles.cta}>Set up →</Text>}
       </TouchableOpacity>
     </View>
@@ -88,10 +90,11 @@ export default function PayoutBanner() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#1E7D46',
+    backgroundColor: '#F4F4F4',
     borderRadius: RADIUS,
+    minHeight: BANNER_HEIGHT,
     paddingHorizontal: H_PAD,
-    paddingVertical: V_PAD,
+    paddingVertical: screenWidth * 0.03,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -103,17 +106,17 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: screenWidth * 0.042,
-    color: '#FFFFFF',
+    color: '#000000',
   },
   subtitle: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: screenWidth * 0.033,
-    color: 'rgba(255,255,255,0.85)',
+    color: 'rgba(0,0,0,0.85)',
     marginTop: 2,
   },
   cta: {
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: screenWidth * 0.038,
-    color: '#FFFFFF',
+    color: '#000000',
   },
 });

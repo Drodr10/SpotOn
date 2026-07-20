@@ -186,6 +186,37 @@ const fetchStripeAccountLink = async (user_id: string): Promise<string | null> =
     return account_link_url;
 }
 
+/**
+ * Backstop the seller calls after the hosted-onboarding browser closes. The
+ * backend re-fetches their Connect account from Stripe and, if payouts are now
+ * enabled, releases their pending reservations — covering the case where the
+ * account.updated webhook was missed. Idempotent; best-effort.
+ * Returns whether payouts are enabled so the UI can refresh accordingly.
+ */
+const syncAccount = async (user_id: string): Promise<{ payoutsEnabled: boolean }> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    try {
+        const resp = await fetch(`${API_IP}/stripe/sync-account`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true",
+                "Authorization": `Bearer ${session?.access_token}`,
+            },
+            body: JSON.stringify({ user_id }),
+        });
+        if (!resp.ok) {
+            console.log(`sync-account failed (${resp.status})`);
+            return { payoutsEnabled: false };
+        }
+        const body = await resp.json().catch(() => ({} as any));
+        return { payoutsEnabled: !!body?.payouts_enabled };
+    } catch (e: any) {
+        console.log('sync-account network error', e);
+        return { payoutsEnabled: false };
+    }
+}
+
 //checks if user has an existing stripe connect account.
 const userHasStripeAccount = async (userId: string): Promise<boolean> => {
   const { data, error } = await supabase.from('profiles').select('stripe_account_id').eq('id', userId).single();
@@ -198,4 +229,4 @@ const userHasStripeAccount = async (userId: string): Promise<boolean> => {
   return !!data?.stripe_account_id;
 };
 
-export const stripe = { getKey, createBookingPayment, finalizeBooking, releaseHold, fetchStripeAccountId, fetchStripeAccountLink, userHasStripeAccount }
+export const stripe = { getKey, createBookingPayment, finalizeBooking, releaseHold, fetchStripeAccountId, fetchStripeAccountLink, syncAccount, userHasStripeAccount }

@@ -1,5 +1,5 @@
 import os
-from flask import Blueprint, jsonify, request, redirect
+from flask import Blueprint, jsonify, request
 from services.stripe_client import (
     publishableKey,
     create_booking_payment,
@@ -7,6 +7,7 @@ from services.stripe_client import (
     finalize_booking,
     createConnectAccount,
     createAccountLink,
+    sync_connect_account,
     handle_webhook,
 )
 from services.payouts import run_payout_sweep
@@ -61,14 +62,49 @@ def create_account_link():
     return createAccountLink(request.json['user_id'])
 
 
+# Simple interstitial that immediately bounces the in-app browser back to the
+# app via the deep link (nicer than a bare 302, and it renders past ngrok's free
+# warning page once the user taps through).
+def _deep_link_page(target: str, message: str = "Finishing up…"):
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0;url={target}">
+<title>Returning to SpotOn…</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding-top:20vh;color:#1E7D46;">
+<p style="font-size:18px;">{message}</p>
+<a href="{target}" style="color:#1E7D46;">Tap here if you're not redirected</a>
+<script>window.location.replace("{target}");</script>
+</body></html>"""
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 @stripe_bp.route('/stripe/onboarding-complete', methods=['GET'])
 def onboarding_return():
-    return redirect("spoton://Homescreen")
+    # Backstop for the account.updated webhook: if the seller returned with
+    # payouts enabled, release their pending reservations now even if the webhook
+    # was missed. Best-effort — never block the redirect back into the app.
+    user_id = request.args.get("user_id")
+    if user_id:
+        try:
+            sync_connect_account(user_id)
+        except Exception as err:  # noqa: BLE001
+            print(f"[stripe] onboarding-complete sync failed for {user_id}: {err}")
+    return _deep_link_page("spoton://Homescreen")
 
 
 @stripe_bp.route('/stripe/onboarding-expired', methods=['GET'])
 def onboarding_expired():
-    return redirect("spoton://Homescreen")
+    return _deep_link_page("spoton://Homescreen")
+
+
+# Client-invoked backstop: the app calls this after the onboarding browser closes
+# so payouts sync immediately even if the webhook and the return redirect were
+# both missed (idempotent with account.updated).
+@stripe_bp.route('/stripe/sync-account', methods=['POST'])
+def sync_account_route():
+    data = request.json or {}
+    return sync_connect_account(data.get("user_id"))
 
 
 # Stripe -> SpotOn events: payment_intent.succeeded, account.updated, etc.

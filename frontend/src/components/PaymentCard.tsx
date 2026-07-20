@@ -47,27 +47,29 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
     const insets = useSafeAreaInsets();
     const [submitting, setSubmitting] = useState<boolean>(false);
 
-    // "Slot is being checked out by someone else" card popup.
-    const [showUnavailable, setShowUnavailable] = useState<boolean>(false);
-    const [unavailableMsg, setUnavailableMsg] = useState<string>('');
+    // Bottom-card popup (slot unavailable, can't reserve own listing, etc.).
+    const [showCardPopup, setShowCardPopup] = useState<boolean>(false);
+    const [popupTitle, setPopupTitle] = useState<string>('');
+    const [popupBody, setPopupBody] = useState<string>('');
     const popupAnim = useRef(new Animated.Value(SCREEN_H)).current;
     const backdropAnim = useRef(new Animated.Value(0)).current;
 
-    const openUnavailable = (message: string) => {
-        setUnavailableMsg(message);
+    const openCardPopup = (title: string, body: string) => {
+        setPopupTitle(title);
+        setPopupBody(body);
         popupAnim.setValue(SCREEN_H);
-        setShowUnavailable(true);
+        setShowCardPopup(true);
         Animated.parallel([
             Animated.spring(popupAnim, { toValue: 0, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
             Animated.timing(backdropAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
         ]).start();
     };
 
-    const closeUnavailable = () => {
+    const closeCardPopup = () => {
         Animated.parallel([
             Animated.spring(popupAnim, { toValue: SCREEN_H, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
             Animated.timing(backdropAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
-        ]).start(() => setShowUnavailable(false));
+        ]).start(() => setShowCardPopup(false));
     };
 
     const handleReserve = async () => {
@@ -79,6 +81,11 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
                 Alert.alert('Sign in required', 'No active user session. Please sign in again.');
+                return;
+            }
+
+            if (user.id === listerId) {
+                openCardPopup("Can't reserve", "This is your own listing. You can't reserve it.");
                 return;
             }
 
@@ -95,7 +102,7 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             });
 
             if (result.status === 'unavailable') {
-                openUnavailable(result.message);
+                openCardPopup('Spot in checkout', result.message);
                 return;
             }
             if (result.status === 'error') {
@@ -165,10 +172,10 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
                 <Text style={styles.text}>{ submitting ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
             </TouchableOpacity>
 
-            {/* Slot-in-checkout card — same design/animation as the rate popups. */}
-            <Modal visible={showUnavailable} transparent animationType="none" onRequestClose={closeUnavailable}>
+            {/* Bottom card popup — same design/animation as the create-listing rate popups. */}
+            <Modal visible={showCardPopup} transparent animationType="none" onRequestClose={closeCardPopup}>
                 <Animated.View style={[styles.popupBackdrop, { opacity: backdropAnim }]}>
-                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeUnavailable} />
+                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeCardPopup} />
                 </Animated.View>
 
                 <Animated.View
@@ -191,15 +198,15 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
                     />
 
                     <Text style={[styles.popupTitle, { fontSize: W * 0.055, marginBottom: W * 0.03, marginTop: W * 0.005 }]}>
-                        Spot in checkout
+                        {popupTitle}
                     </Text>
                     <Text style={[styles.popupBody, { fontSize: W * 0.036, lineHeight: W * 0.052, marginBottom: W * 0.055 }]}>
-                        {unavailableMsg || "Someone's checking out this spot right now. If they don't finish in a few minutes, it'll open back up — hang tight and try again."}
+                        {popupBody}
                     </Text>
 
                     <TouchableOpacity
                         style={[styles.popupButton, { height: W * 0.12, borderRadius: W * 0.06 }]}
-                        onPress={withLightHaptic(closeUnavailable)}
+                        onPress={withLightHaptic(closeCardPopup)}
                         activeOpacity={0.8}
                     >
                         <Text style={[styles.popupButtonText, { fontSize: W * 0.04 }]}>Got it</Text>

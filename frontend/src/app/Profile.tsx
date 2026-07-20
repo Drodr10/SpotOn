@@ -146,7 +146,10 @@ export default function ProfilePage() {
   }, []);
 
   const loadActiveReservations = async (userId: string) => {
-    const data = await api.getActiveReservations(userId);
+    // Only reservations that have actually started belong on this card —
+    // scheduled-but-not-started reservations live on the Homescreen banner
+    // and the "Upcoming Reservations" section instead.
+    const data = await api.getInProgressReservations(userId);
     setActiveReservations(data ?? []);
   };
 
@@ -280,8 +283,11 @@ export default function ProfilePage() {
       const onboardingLink = await stripe.fetchStripeAccountLink(claims.sub);
 
       if (onboardingLink) {
-        WebBrowser.openBrowserAsync(onboardingLink);
-      } 
+        await WebBrowser.openBrowserAsync(onboardingLink);
+        // Backstop the webhook: sync payout status from Stripe on return.
+        await stripe.syncAccount(claims.sub);
+        await loadProfile();
+      }
     }
     catch (err) {
       console.log("Error starting onboarding process: " + err);

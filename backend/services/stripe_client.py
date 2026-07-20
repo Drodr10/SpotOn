@@ -80,6 +80,9 @@ def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
         return jsonify({"error": "Listing not found"}), 404
     owner_id = listing.get("owner_id")
 
+    if renter_id == owner_id:
+        return jsonify({"error": "You can't reserve your own listing.", "code": "self_booking"}), 400
+
     try:
         breakdown = calculate_final_price(listing, start_time, end_time)
     except PricingError as pe:
@@ -199,7 +202,9 @@ def createAccountLink(user_id: str):
         if not account_id:
             return jsonify({"error": "Stripe account ID not found for this user. Please create an account first."}), 404
 
-        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete"
+        # Carry the user id back so onboarding-complete can sync payouts even if
+        # the account.updated webhook was missed or failed.
+        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete?user_id={user_id}"
         refresh_url = f"https://{backendUrl}/api/stripe/onboarding-expired"
 
         account_link = stripe.AccountLink.create(
@@ -230,12 +235,20 @@ def handle_webhook(payload: bytes, sig_header: str):
     event_type = event["type"]
     obj = event["data"]["object"]
 
-    if event_type == "payment_intent.succeeded":
-        _on_payment_succeeded(obj)
-    elif event_type == "account.updated":
-        _on_account_updated(obj)
-    elif event_type in ("transfer.created", "charge.refunded"):
-        print(f"[stripe] {event_type}: {obj.get('id')}")  # bookkeeping / logs
+    # A handler crash must never 500 the webhook — Stripe would keep retrying and
+    # (for account.updated) the seller would stay un-enabled. Swallow + log so the
+    # endpoint always ACKs 200; the onboarding-complete backstop covers misses.
+    try:
+        if event_type == "payment_intent.succeeded":
+            _on_payment_succeeded(obj)
+        elif event_type == "account.updated":
+            _on_account_updated(obj)
+        elif event_type in ("transfer.created", "charge.refunded"):
+            oid = _to_plain_dict(obj).get("id") if not isinstance(obj, dict) else obj.get("id")
+            print(f"[stripe] {event_type}: {oid}")  # bookkeeping / logs
+    except Exception as err:  # noqa: BLE001
+        print(f"[stripe] webhook handler for {event_type} crashed: {err}")
+        traceback.print_exc()
 
     return jsonify({"received": True}), 200
 
@@ -395,12 +408,67 @@ def finalize_booking(payment_intent_id: str):
     return jsonify({"reservationId": outcome["reservation_id"]}), 200
 
 
-def _on_account_updated(account: dict):
-    account_id = account.get("id")
-    if account.get("payouts_enabled"):
+def _on_account_updated(account):
+    """
+    Webhook path for Connect account changes. The event object is a StripeObject
+    whose `.get` can raise AttributeError in some SDK versions (same bug already
+    fixed for PaymentIntents) — flatten to a plain dict before reading fields, and
+    never let this bubble up as a 500 (the endpoint must ACK so Stripe stops
+    retrying; the onboarding-complete backstop covers any miss).
+    """
+    try:
+        acct = _to_plain_dict(account) if not isinstance(account, dict) else account
+        account_id = acct.get("id")
+        if not account_id:
+            print("[stripe] account.updated missing account id; skipping")
+            return
+        if acct.get("payouts_enabled"):
+            moved = release_pending_for_account(account_id)
+            print(f"[stripe] account {account_id} payouts_enabled -> released {moved} transfer(s)")
+        else:
+            supabase.table("profiles").update({"payouts_enabled": False}).eq(
+                "stripe_account_id", account_id
+            ).execute()
+    except Exception as err:  # noqa: BLE001 — never 500 the webhook endpoint
+        print(f"[stripe] _on_account_updated crashed: {err}")
+        traceback.print_exc()
+
+
+def sync_connect_account(user_id: str):
+    """
+    Backstop for the account.updated webhook (mirrors finalize_booking): when the
+    seller returns from hosted onboarding, pull their Connect account straight
+    from Stripe and, if payouts are now enabled, release their payout_ready
+    reservations. Idempotent with the webhook — whichever runs first wins.
+    """
+    stripe.api_key = secretKey
+    if not user_id:
+        return jsonify({"error": "Missing user_id"}), 400
+
+    try:
+        profile = (
+            supabase.table("profiles").select("stripe_account_id").eq("id", user_id).single().execute().data
+        )
+    except Exception as err:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"profile_lookup_failed: {err}"}), 500
+
+    account_id = (profile or {}).get("stripe_account_id")
+    if not account_id:
+        return jsonify({"payouts_enabled": False, "released": 0}), 200
+
+    try:
+        account = stripe.Account.retrieve(account_id)
+    except Exception as err:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"account_retrieve_failed: {err}"}), 502
+
+    acct = _to_plain_dict(account) if not isinstance(account, dict) else account
+    if acct.get("payouts_enabled"):
         moved = release_pending_for_account(account_id)
-        print(f"[stripe] account {account_id} payouts_enabled -> released {moved} transfer(s)")
-    else:
-        supabase.table("profiles").update({"payouts_enabled": False}).eq(
-            "stripe_account_id", account_id
-        ).execute()
+        print(f"[stripe] sync: account {account_id} payouts_enabled -> released {moved} transfer(s)")
+        return jsonify({"payouts_enabled": True, "released": moved}), 200
+
+    # Not enabled yet — keep the flag accurate but leave reservations pending.
+    supabase.table("profiles").update({"payouts_enabled": False}).eq("id", user_id).execute()
+    return jsonify({"payouts_enabled": False, "released": 0}), 200

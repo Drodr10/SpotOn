@@ -156,15 +156,22 @@ def release_pending_for_account(account_id: str) -> int:
     Marks the profile enabled and transfers every one of their payout_ready
     reservations. Returns the number of transfers made.
     """
-    profile = (
-        supabase.table("profiles")
-        .select("id, stripe_account_id, expo_push_token")
-        .eq("stripe_account_id", account_id)
-        .single()
-        .execute()
-        .data
-    )
+    # .single() raises when 0 rows match (e.g. account not tied to any profile).
+    # Never let that throw — log and treat it as "nothing to release".
+    try:
+        profile = (
+            supabase.table("profiles")
+            .select("id, stripe_account_id, expo_push_token")
+            .eq("stripe_account_id", account_id)
+            .single()
+            .execute()
+            .data
+        )
+    except Exception as err:  # noqa: BLE001
+        print(f"[payouts] release_pending_for_account: profile lookup failed for {account_id}: {err}")
+        return 0
     if not profile:
+        print(f"[payouts] no profile for stripe account {account_id}; nothing to release")
         return 0
 
     supabase.table("profiles").update({"payouts_enabled": True}).eq(

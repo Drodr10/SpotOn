@@ -25,6 +25,7 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
+import { type TimerData, formatRemaining } from '../utils/timeFormat';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
@@ -140,29 +141,6 @@ function RollingText({ text, style }: { text: string; style: any }) {
       ))}
     </View>
   );
-}
-
-// ─── Timer data ───────────────────────────────────────────────────────────────
-type TimerData =
-  | { mode: 'months'; months: number }
-  | { mode: 'weeks';  weeks: number }
-  | { mode: 'days';   days: number; hours: number }
-  | { mode: 'hours';  hours: number; mins: number }
-  | { mode: 'mins';   mins: number; secs: number };
-
-function formatRemaining(ms: number): TimerData {
-  if (ms <= 0) return { mode: 'mins', mins: 0, secs: 0 };
-  const totalSecs   = Math.floor(ms / 1000);
-  const totalMins   = Math.floor(totalSecs / 60);
-  const totalHrs    = Math.floor(totalMins / 60);
-  const totalDays   = Math.floor(totalHrs / 24);
-  const totalWks    = Math.floor(totalDays / 7);
-  const totalMonths = Math.floor(totalWks / 4);
-  if (totalMonths >= 1) return { mode: 'months', months: totalMonths };
-  if (totalWks    >= 1) return { mode: 'weeks',  weeks: totalWks };
-  if (totalDays   >= 1) return { mode: 'days',   days: totalDays, hours: totalHrs % 24 };
-  if (totalHrs    >= 1) return { mode: 'hours',  hours: totalHrs, mins: totalMins % 60 };
-  return { mode: 'mins', mins: totalMins, secs: totalSecs % 60 };
 }
 
 // ─── Timer content ────────────────────────────────────────────────────────────
@@ -333,7 +311,7 @@ export default function MenuBar() {
       if (cancelled) return;
       setAvatarUrl((profileRow?.avatar_url as string | null) ?? null);
 
-      const res = await api.getActiveReservation(user.id);
+      const res = await api.getInProgressReservation(user.id);
       if (cancelled) return;
       if (res?.endTime) setEndTime(new Date(res.endTime));
       else setEndTime(null);
