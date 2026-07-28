@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   Image,
   ImageBackground,
   TouchableOpacity,
@@ -15,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser'
 
@@ -25,6 +25,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { api, type ActiveReservation } from '@/src/utils/api';
 import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
+import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 import logoAsset from '@/assets/images/spotonlogo.png';
 import penIcon from '@/assets/images/penicon.png';
@@ -297,7 +298,7 @@ export default function ProfilePage() {
     }
   }
 
-  if (!user) return <SafeAreaView style={styles.safeArea} />;
+  if (!user) return <SafeAreaView style={styles.safeArea} edges={['top']} />;
 
   const memberSince = user.created_at
     ? new Date(user.created_at).toLocaleString('default', {
@@ -307,7 +308,7 @@ export default function ProfilePage() {
     : '';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -316,6 +317,7 @@ export default function ProfilePage() {
           ref={scrollRef}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps='handled'
+          showsVerticalScrollIndicator={false}
         >
           {/* Header: Profile pill + Logout square */}
           <View style={styles.header}>
@@ -537,7 +539,9 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: H_PAD,
     paddingTop: screenWidth * 0.02,
-    paddingBottom: screenWidth * 0.5,
+    // Extra bottom pad so the last cards can scroll clear of the floating MenuBar,
+    // while the page itself extends edge-to-edge underneath it.
+    paddingBottom: MENU_BAR_HEIGHT + screenWidth * 0.1,
     gap: SECTION_GAP,
   },
 

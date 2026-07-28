@@ -45,57 +45,22 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <SafeAreaProvider>
         <View style={{ flex: 1, position: "relative" }}>
-          <Stack screenOptions={{ headerShown: false }}>
+          <Stack screenOptions={{ headerShown: false, animation: 'none' }}>
             <Stack.Screen name="index" />
-            <Stack.Screen name="Intro" options={{ animation: 'fade' }} />
-            <Stack.Screen name="SignIn" options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="Onboarding" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Intro" />
+            <Stack.Screen name="SignIn" />
+            <Stack.Screen name="Onboarding" />
             <Stack.Screen name="QuickSearch" />
-            <Stack.Screen
-              name="Homescreen"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
+            <Stack.Screen name="Homescreen" />
             <Stack.Screen name="search" />
             <Stack.Screen name="CreateListing" />
-            <Stack.Screen
-              name="CreateListing2"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
-            <Stack.Screen
-              name="Messages"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
+            <Stack.Screen name="CreateListing2" />
+            <Stack.Screen name="Messages" />
             <Stack.Screen name="Chat" />
-            <Stack.Screen
-              name="Profile"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
-            <Stack.Screen
-              name="RegisterVehicle"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
-            <Stack.Screen
-              name="PreviousReservations"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
-            <Stack.Screen
-              name="YourSpots"
-              options={({ route }: any) => ({
-                animation: (route.params as any)?.animation ?? "slide_from_right",
-              })}
-            />
+            <Stack.Screen name="Profile" />
+            <Stack.Screen name="RegisterVehicle" />
+            <Stack.Screen name="PreviousReservations" />
+            <Stack.Screen name="YourSpots" />
           </Stack>
           <MenuBar />
         </View>
