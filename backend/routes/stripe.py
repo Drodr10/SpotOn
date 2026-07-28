@@ -11,6 +11,7 @@ from services.stripe_client import (
     handle_webhook,
 )
 from services.payouts import run_payout_sweep
+from services.notifications import run_notification_sweep
 
 stripe_bp = Blueprint('stripe', __name__)
 
@@ -121,3 +122,11 @@ def run_sweep():
     if not expected or request.headers.get("X-Sweep-Secret") != expected:
         return jsonify({"error": "unauthorized"}), 401
     return jsonify(run_payout_sweep()), 200
+
+
+@stripe_bp.route('/stripe/run-notification-sweep', methods=['POST'])
+def run_notifications():
+    expected = os.getenv("SWEEP_SECRET")
+    if not expected or request.headers.get("X-Sweep-Secret") != expected:
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(run_notification_sweep()), 200

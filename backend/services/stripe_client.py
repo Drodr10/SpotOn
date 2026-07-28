@@ -8,6 +8,7 @@ from pathlib import Path
 
 from services.supabase_client import supabase
 from services.payouts import _parse_ts, release_pending_for_account
+from services.notifications import send_booking_notifications
 from utils.pricing import calculate_final_price, PricingError
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
@@ -355,6 +356,11 @@ def _finalize_reservation_from_pi(pi) -> dict:
         rid = row.get("reservation_id")
         if not rid:
             return {"error": "rpc_no_reservation_id"}
+        try:
+            sent = send_booking_notifications(str(rid))
+            print(f"[stripe] booking notifications for reservation {rid}: {sent}")
+        except Exception as err:  # noqa: BLE001
+            print(f"[stripe] booking notification failed for reservation {rid}: {err}")
         return {"reservation_id": rid}
     except Exception as err:  # noqa: BLE001 — never let this bubble to Flask as a 500
         print(f"[stripe] _finalize_reservation_from_pi crashed: {err}")

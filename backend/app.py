@@ -25,14 +25,16 @@ CORS(app)
 def _start_sweep_scheduler():
     from apscheduler.schedulers.background import BackgroundScheduler
     from services.payouts import run_payout_sweep
+    from services.notifications import run_notification_sweep
 
     interval = int(os.getenv("SWEEP_INTERVAL_SECONDS", "900"))
 
     def _job():
         with app.app_context():
             try:
-                summary = run_payout_sweep()
-                print(f"[sweep] {summary}")
+                payout_summary = run_payout_sweep()
+                notification_summary = run_notification_sweep()
+                print(f"[sweep] payouts={payout_summary} notifications={notification_summary}")
             except Exception as err:  # noqa: BLE001
                 print(f"[sweep] error: {err}")
 
