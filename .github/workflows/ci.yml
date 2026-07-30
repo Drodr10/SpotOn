@@ -47,9 +47,20 @@ jobs:
       # failure would otherwise surface as a wall of unrelated collection errors.
       # This step is also what catches an interpreter too old for the syntax in
       # use — the failure that cost an evening before .python-version existed.
+      #
+      # The placeholders are required, not laziness: services/supabase_client.py
+      # calls create_client() at MODULE level, so importing anything under
+      # backend/ without credentials raises "supabase_url is required". They are
+      # obvious fakes and reach no network — nothing in this job makes a request.
+      # (Worth fixing properly one day by constructing the client lazily, so the
+      # package can be imported by tests, linters and type checkers without
+      # secrets at all. Tracked as a follow-up rather than done here.)
       - name: Import the Flask app
         run: python -c "import app"
         working-directory: backend
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_KEY: ci-placeholder-not-a-real-key
 
       # Integration tests that need a live backend SKIP with a reason rather than
       # passing vacuously; -rs prints those reasons so an all-skipped suite can
