@@ -27,10 +27,12 @@ type CardProps = {
 }
 
 export default function EditableProfileCard({ name, setName, rating }: CardProps) {
-  if (!setName || !rating) {
-    return null;
-  }
-
+  // Hooks must run before any early return: React matches them up by call
+  // ORDER across renders, so a return that skips them makes one render call
+  // three hooks and the next call none, which throws "rendered fewer hooks
+  // than expected" and unmounts the card. Reachable today — `!rating` is true
+  // for a rating of 0, i.e. every brand-new user, so the component bailed out
+  // early and then crashed as soon as a real rating arrived.
   const inputArea = useRef<TextInput>(null);
 
   const [editing, setEditing] = useState(false);
@@ -40,6 +42,14 @@ export default function EditableProfileCard({ name, setName, rating }: CardProps
       inputArea.current?.focus();
     }
   }, [editing]);
+
+  // Same condition as before, just moved below the hooks so rendering is
+  // unchanged. NOTE: `!rating` also hides the card for a legitimate 0 rating —
+  // left as-is because whether a new user should see their own card is a
+  // product call, not a lint fix.
+  if (!setName || !rating) {
+    return null;
+  }
 
   const editUsername = () => {
     setEditing(!editing);
