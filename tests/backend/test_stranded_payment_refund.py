@@ -314,4 +314,62 @@ def test_finalize_is_honest_when_the_refund_itself_fails(stripe_client, monkeypa
 
     assert status == 409
     assert body["refunded"] is False
-    assert "Contact support" in body["message"]
+    assert "contact support" in body["message"].lower()
+
+
+# ── no SQLSTATE may ever reach a renter's screen ───────────────────────────────
+# A customer read "db_P0001: Daily bookings not supported for this listing" in a
+# dialog, because finalize's catch-all formats DB failures as
+# 'db_<SQLSTATE>: <SQLERRM>' and the UI displayed that string directly.
+
+@pytest.mark.parametrize("error", [
+    "db_P0001: No rates available for this listing",
+    "db_P0001: Listing not found",
+    "db_23505: duplicate key value violates unique constraint \"reservations_pkey\"",
+    "db_23P01: conflicting key value violates exclusion constraint \"no_overlap\"",
+    "slot_unavailable",
+    "missing_metadata: vehicle_id",
+    "db_error: connection reset by peer",
+    "rpc_empty_response",
+])
+def test_no_response_message_leaks_a_sqlstate_or_internals(stripe_client, monkeypatch, error):
+    body, status, _ = _finalize_with(stripe_client, monkeypatch, error)
+
+    assert status == 409
+    message = body["message"]
+    assert "db_" not in message, f"raw error string leaked into the message: {message}"
+    assert "SQLSTATE" not in message
+    assert "constraint" not in message.lower(), "Postgres internals must not be shown"
+    assert message[0].isupper() and message.rstrip().endswith((".", "!")), \
+        f"not a presentable sentence: {message!r}"
+    # The raw string is still available for logs and support, just not for display.
+    assert body["detail"] == error
+
+
+def test_our_own_raise_text_is_surfaced_because_it_is_human(stripe_client, monkeypatch):
+    """P0001 means 'a trigger of ours raised', and that text is written by us for
+    people — so it is worth showing, unlike constraint internals."""
+    body, _, _ = _finalize_with(
+        stripe_client, monkeypatch, "db_P0001: No rates available for this listing")
+
+    assert body["message"].startswith("No rates available for this listing.")
+
+
+def test_conflict_becomes_plain_english_not_constraint_names(stripe_client, monkeypatch):
+    body, _, _ = _finalize_with(
+        stripe_client, monkeypatch,
+        'db_23P01: conflicting key value violates exclusion constraint "no_overlap"')
+
+    assert body["message"].startswith("That spot was just booked by someone else.")
+
+
+def test_retryable_message_does_not_alarm_or_invite_a_second_payment(stripe_client, monkeypatch):
+    """The payment stands and the webhook will finish the booking, so the renter
+    must not be told they were refunded, nor nudged into paying twice."""
+    body, _, refunds = _finalize_with(
+        stripe_client, monkeypatch, "db_error: connection reset by peer")
+
+    assert refunds == []
+    message = body["message"].lower()
+    assert "refund" not in message
+    assert "don't pay again" in message or "do not pay again" in message

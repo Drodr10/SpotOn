@@ -139,6 +139,52 @@ def _refund_stranded_payment(payment_intent_id: str, reason: str) -> str:
         return "refund_failed"
 
 
+# Raw SQLSTATE strings must never reach a renter's screen. finalize's catch-all
+# formats DB failures as 'db_<SQLSTATE>: <SQLERRM>', which is how a customer ended
+# up reading "db_P0001: Daily bookings not supported for this listing" in a dialog.
+# P0001 is merely "a trigger of ours raised" — the text after it IS ours and is
+# human, so it can be surfaced; class-23 messages are Postgres internals about
+# constraint names and never can be.
+_OUR_RAISE = re.compile(r"^db_P0001:\s*(.+)$", re.S)
+_CONSTRAINT_VIOLATION = re.compile(r"^db_23[0-9A-Z]{3}:")
+
+
+def _finalize_reason(error: str) -> str:
+    """One clause naming what went wrong, in words a renter understands."""
+    if not error:
+        return "We could not create your reservation."
+    if error.startswith("slot_unavailable") or _CONSTRAINT_VIOLATION.match(error):
+        return "That spot was just booked by someone else."
+    if error.startswith("missing_metadata"):
+        return "We lost track of this booking's details."
+    ours = _OUR_RAISE.match(error)
+    if ours:
+        reason = ours.group(1).strip()
+        return reason if reason.endswith(".") else reason + "."
+    return "We could not create your reservation."
+
+
+def _finalize_user_message(error: str, *, refunded: bool | None) -> str:
+    """The whole message shown to the renter.
+
+    refunded=None means the failure is RETRYABLE: the payment stands and the
+    webhook will finish the booking, so telling the user anything alarming (or
+    inviting them to pay again) would be wrong.
+    """
+    if refunded is None:
+        return (
+            "Your payment went through and we're still confirming this booking. "
+            "It should appear in your reservations shortly — please don't pay again."
+        )
+    reason = _finalize_reason(error)
+    if refunded:
+        return f"{reason} You have not been charged — the payment was refunded."
+    return (
+        f"{reason} We could not issue the refund automatically, so please contact "
+        "support and we'll return the payment."
+    )
+
+
 def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
                            start_time: str, end_time: str):
     """
@@ -506,24 +552,25 @@ def finalize_booking(payment_intent_id: str):
 
     if outcome.get("error"):
         error = outcome["error"]
-        # 409 signals "payment fine, reservation could not be created". For a
-        # TERMINAL failure the money goes back automatically and the client is
-        # told so, instead of being sent to support with an error code.
+        # 409 signals "payment fine, reservation could not be created". Every
+        # branch returns a `message` fit to display and keeps the raw string in
+        # `detail` for logs and support — the UI should never render a SQLSTATE.
         if _is_terminal_finalize_error(error):
             disposition = _refund_stranded_payment(pi.get("id"), error)
             refunded = disposition in ("refunded", "already_refunded")
             return jsonify({
-                "error": error,
+                "detail": error,
                 "refunded": refunded,
                 "refund_status": disposition,
-                "message": (
-                    "You have not been charged — the payment was refunded."
-                    if refunded else
-                    "Your reservation could not be created and the automatic refund "
-                    "failed. Contact support with this message."
-                ),
+                "message": _finalize_user_message(error, refunded=refunded),
             }), 409
-        return jsonify({"error": error, "refunded": False, "refund_status": "retryable"}), 409
+        # Retryable: the webhook will finish this booking, so the payment stands.
+        return jsonify({
+            "detail": error,
+            "refunded": False,
+            "refund_status": "retryable",
+            "message": _finalize_user_message(error, refunded=None),
+        }), 409
     return jsonify({"reservationId": outcome["reservation_id"]}), 200
 
 
