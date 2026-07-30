@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import traceback
 import stripe
 from flask import jsonify
@@ -56,6 +57,88 @@ def _sheet_response(payment_intent_client_secret, customer_session_secret, custo
 HOLD_TTL_MINUTES = 5
 
 
+def _reservation_validation_error(listing_id: str, start_time: str, end_time: str):
+    """Ask the DATABASE whether this reservation may exist — before charging.
+
+    Calls the same reservation_validation_error() that the BEFORE INSERT trigger
+    raises, so this pre-charge check cannot drift from the enforcement. That
+    drift is precisely what charged a renter $331.20 for a booking the trigger
+    then refused (see migration 20260730005125).
+
+    Returns the reason string, or None when the booking is allowed. Failure to
+    REACH the check also returns None, deliberately: the trigger is still the
+    backstop, and refusing every booking because a speculative query failed
+    would be worse than falling through to it.
+    """
+    try:
+        result = supabase.rpc("reservation_validation_error", {
+            "p_listing_id": listing_id,
+            "p_start_time": start_time,
+            "p_end_time": end_time,
+        }).execute()
+    except Exception as err:  # noqa: BLE001
+        print(f"[stripe] pre-charge validation unavailable for {listing_id}: {err}")
+        return None
+    reason = getattr(result, "data", None)
+    if isinstance(reason, list):
+        reason = reason[0] if reason else None
+    if isinstance(reason, dict):  # some client versions wrap scalar returns
+        reason = next(iter(reason.values()), None)
+    return reason or None
+
+
+# SQLSTATEs that mean "this reservation can never be created", as opposed to
+# "try again later". P0001 is a deliberate RAISE from our own triggers (a
+# business rule); class 23 are integrity violations (unique, FK, exclusion).
+# Both are terminal, so a payment already captured against one must be refunded
+# rather than left for someone to notice in a log. Anything else — a dropped
+# connection, an empty RPC response, an unhandled crash — may succeed on the
+# webhook's retry, and refunding it would cancel a booking about to work.
+_TERMINAL_ERROR_PREFIXES = ("slot_unavailable", "missing_metadata")
+
+
+def _is_terminal_finalize_error(message: str) -> bool:
+    if not message:
+        return False
+    if message.startswith(_TERMINAL_ERROR_PREFIXES):
+        return True
+    # SQLSTATEs are 5 alphanumeric chars, not 5 digits: class 23 includes 23505
+    # (unique), 23503 (FK) AND 23P01 (exclusion — the double-booking one), so a
+    # \d{3} tail silently missed exactly the case that matters most here.
+    return bool(re.match(r"^db_(P0001|23[0-9A-Z]{3}):", message))
+
+
+def _refund_stranded_payment(payment_intent_id: str, reason: str) -> str:
+    """Refund a captured payment whose reservation could not be created.
+
+    The renter's money must not depend on someone reading a log line. Idempotent
+    two ways: an existing refund short-circuits, and the create call carries an
+    idempotency key, so the client path and the webhook path racing each other
+    cannot double-refund.
+
+    Stripe's refund `reason` enum has no "our bug" member; requested_by_customer
+    is the conventional choice for a merchant-initiated make-good, and the real
+    cause rides in metadata for reconciliation.
+    """
+    if not payment_intent_id:
+        return "no_payment_intent"
+    try:
+        existing = stripe.Refund.list(payment_intent=payment_intent_id, limit=1)
+        if getattr(existing, "data", None):
+            return "already_refunded"
+        stripe.Refund.create(
+            payment_intent=payment_intent_id,
+            reason="requested_by_customer",
+            metadata={"spoton_refund_cause": str(reason)[:400]},
+            idempotency_key=f"spoton-stranded-{payment_intent_id}",
+        )
+        return "refunded"
+    except Exception as err:  # noqa: BLE001 — the original failure still wins
+        print(f"[stripe] REFUND FAILED for {payment_intent_id} ({reason}): {err}")
+        traceback.print_exc()
+        return "refund_failed"
+
+
 def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
                            start_time: str, end_time: str):
     """
@@ -83,6 +166,13 @@ def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
 
     if renter_id == owner_id:
         return jsonify({"error": "You can't reserve your own listing.", "code": "self_booking"}), 400
+
+    # Refuse anything the DB would refuse, BEFORE any money moves. Same function
+    # the insert trigger enforces, so a rule can never reject a booking only
+    # after the renter's card has been charged.
+    blocked = _reservation_validation_error(listing_id, start_time, end_time)
+    if blocked:
+        return jsonify({"error": blocked, "code": "invalid_booking"}), 400
 
     try:
         breakdown = calculate_final_price(listing, start_time, end_time)
@@ -371,13 +461,19 @@ def _finalize_reservation_from_pi(pi) -> dict:
 def _on_payment_succeeded(pi: dict):
     """Webhook path — reliable backstop that creates the reservation on payment."""
     outcome = _finalize_reservation_from_pi(pi)
-    if outcome.get("error") == "missing_metadata":
-        print(f"[stripe] payment {pi['id']} missing booking metadata; skipping finalize")
-    elif outcome.get("error"):
-        # Refund-on-conflict intentionally deferred: log loudly so a
-        # charged-but-unbooked payment is visible until it's built out.
-        print(f"[stripe] WARNING payment {pi['id']} succeeded but reservation "
-              f"not created ({outcome['error']}); needs manual review")
+    error = outcome.get("error")
+    if error and _is_terminal_finalize_error(error):
+        # Terminal: the reservation can never be created, so the capture must not
+        # stand. Refund instead of leaving it for manual review (this is the
+        # "refund-on-conflict" that used to be deferred here).
+        disposition = _refund_stranded_payment(pi.get("id"), error)
+        print(f"[stripe] payment {pi.get('id')} could not be booked ({error}) "
+              f"-> refund {disposition}")
+    elif error:
+        # Non-terminal: may succeed on a later retry. Refunding here would cancel
+        # a booking that is about to work, so stay loud instead.
+        print(f"[stripe] WARNING payment {pi.get('id')} succeeded but reservation "
+              f"not created ({error}); retryable — needs review if it persists")
     else:
         print(f"[stripe] payment succeeded for PI {pi['id']} -> reservation {outcome['reservation_id']} (held)")
 
@@ -409,8 +505,25 @@ def finalize_booking(payment_intent_id: str):
         return jsonify({"error": f"finalize_unhandled: {e}"}), 500
 
     if outcome.get("error"):
-        # 409 signals "payment fine, reservation could not be created" — the client shows the message.
-        return jsonify({"error": outcome["error"]}), 409
+        error = outcome["error"]
+        # 409 signals "payment fine, reservation could not be created". For a
+        # TERMINAL failure the money goes back automatically and the client is
+        # told so, instead of being sent to support with an error code.
+        if _is_terminal_finalize_error(error):
+            disposition = _refund_stranded_payment(pi.get("id"), error)
+            refunded = disposition in ("refunded", "already_refunded")
+            return jsonify({
+                "error": error,
+                "refunded": refunded,
+                "refund_status": disposition,
+                "message": (
+                    "You have not been charged — the payment was refunded."
+                    if refunded else
+                    "Your reservation could not be created and the automatic refund "
+                    "failed. Contact support with this message."
+                ),
+            }), 409
+        return jsonify({"error": error, "refunded": False, "refund_status": "retryable"}), 409
     return jsonify({"reservationId": outcome["reservation_id"]}), 200
 
 
