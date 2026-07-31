@@ -1,5 +1,6 @@
 import os
 from flask import Blueprint, jsonify, request
+from services.auth import token_required
 from services.stripe_client import (
     publishableKey,
     create_booking_payment,
@@ -25,13 +26,14 @@ def getKey():
 # Atomically reserve the slot and start a platform-held payment for a booking.
 # Funds are held on SpotOn's balance and transferred to the seller later.
 @stripe_bp.route('/stripe/create-booking-payment', methods=['POST'])
-def create_booking_payment_route():
+@token_required
+def create_booking_payment_route(current_user_id):
     data = request.json or {}
-    required = ("listing_id", "renter_id", "vehicle_id", "start_time", "end_time")
+    required = ("listing_id", "vehicle_id", "start_time", "end_time")
     if not all(data.get(k) for k in required):
         return jsonify({"error": f"Missing required fields: {', '.join(required)}"}), 400
     return create_booking_payment(
-        data["listing_id"], data["renter_id"], data["vehicle_id"],
+        data["listing_id"], current_user_id, data["vehicle_id"],
         data["start_time"], data["end_time"],
     )
 
@@ -54,14 +56,16 @@ def finalize_booking_route():
 
 # Onboarding: create the seller's Express connected account (lazily, at payout setup).
 @stripe_bp.route('/stripe/create-connect-account', methods=['POST'])
-def create_connect_account():
-    return createConnectAccount(request.json['user_id'])
+@token_required
+def create_connect_account(current_user_id):
+    return createConnectAccount(current_user_id)
 
 
 # Onboarding: hosted Stripe onboarding link for the seller to finish KYC/bank setup.
 @stripe_bp.route('/stripe/create-account-link', methods=['POST'])
-def create_account_link():
-    return createAccountLink(request.json['user_id'])
+@token_required
+def create_account_link(current_user_id):
+    return createAccountLink(current_user_id)
 
 
 # Simple interstitial that immediately bounces the in-app browser back to the
@@ -104,9 +108,9 @@ def onboarding_expired():
 # so payouts sync immediately even if the webhook and the return redirect were
 # both missed (idempotent with account.updated).
 @stripe_bp.route('/stripe/sync-account', methods=['POST'])
-def sync_account_route():
-    data = request.json or {}
-    return sync_connect_account(data.get("user_id"))
+@token_required
+def sync_account_route(current_user_id):
+    return sync_connect_account(current_user_id)
 
 
 # Stripe -> SpotOn events: payment_intent.succeeded, account.updated, etc.

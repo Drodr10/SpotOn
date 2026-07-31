@@ -10,7 +10,6 @@ export interface StripePaymentSheetParams {
 
 export interface BookingPaymentArgs {
     listing_id: string;
-    renter_id: string;
     vehicle_id: string;
     start_time: string; // ISO 8601
     end_time: string;   // ISO 8601
@@ -130,8 +129,13 @@ const releaseHold = async (holdId: string | null | undefined): Promise<void> => 
     }
 }
 
-const fetchStripeAccountId = async (user_id: string): Promise<string | null> => {
+const fetchStripeAccountId = async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
+    const user_id = session?.user?.id;
+    if (!user_id) {
+        console.log("User not authenticated to fetch stripe account ID");
+        return null;
+    }
 
     console.log(`Attempting to create stripe account for user ${user_id}...`)
 
@@ -141,9 +145,7 @@ const fetchStripeAccountId = async (user_id: string): Promise<string | null> => 
             "Content-Type": "application/json",
             "ngrok-skip-browser-warning": "true",
             "Authorization": `Bearer ${session?.access_token}`
-        },
-
-        body: JSON.stringify({ user_id })
+        }
     });
 
     if (!resp.ok) { 
@@ -163,8 +165,13 @@ const fetchStripeAccountId = async (user_id: string): Promise<string | null> => 
     return account_id;
 }
 
-const fetchStripeAccountLink = async (user_id: string): Promise<string | null> => {
+const fetchStripeAccountLink = async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
+    const user_id = session?.user?.id;
+    if (!user_id) {
+        console.log("User not authenticated to fetch stripe account link");
+        return null;
+    }
 
     const resp = await fetch(`${API_IP}/stripe/create-account-link`, {
         method: "POST",
@@ -172,9 +179,7 @@ const fetchStripeAccountLink = async (user_id: string): Promise<string | null> =
             "Content-Type": "application/json",
             "ngrok-skip-browser-warning": "true",
             "Authorization": `Bearer ${session?.access_token}`
-        },
-        
-        body: JSON.stringify({ user_id })
+        }
     });
 
     if (!resp.ok) {
@@ -193,8 +198,13 @@ const fetchStripeAccountLink = async (user_id: string): Promise<string | null> =
  * account.updated webhook was missed. Idempotent; best-effort.
  * Returns whether payouts are enabled so the UI can refresh accordingly.
  */
-const syncAccount = async (user_id: string): Promise<{ payoutsEnabled: boolean }> => {
+const syncAccount = async (): Promise<{ payoutsEnabled: boolean }> => {
     const { data: { session } } = await supabase.auth.getSession();
+    const user_id = session?.user?.id;
+    if (!user_id) {
+        console.log("User not authenticated to sync account");
+        return { payoutsEnabled: false };
+    }
     try {
         const resp = await fetch(`${API_IP}/stripe/sync-account`, {
             method: "POST",
@@ -202,8 +212,7 @@ const syncAccount = async (user_id: string): Promise<{ payoutsEnabled: boolean }
                 "Content-Type": "application/json",
                 "ngrok-skip-browser-warning": "true",
                 "Authorization": `Bearer ${session?.access_token}`,
-            },
-            body: JSON.stringify({ user_id }),
+            }
         });
         if (!resp.ok) {
             console.log(`sync-account failed (${resp.status})`);
