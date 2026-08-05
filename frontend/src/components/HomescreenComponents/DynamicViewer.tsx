@@ -115,51 +115,42 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
   const fetchListings = async (lat: number, lng: number) => {
     setLoading(true);
 
-    const baseSelect = supabase
-      .from('listings')
-      .select(
-        'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
-      )
-      .eq('is_active', true)
-      .not('photo_url', 'is', null);
+    // Home uses get_visible_listings(FALSE): excludes not-yet-live listings, expired
+    // listings, and anything with a live conflict at now() (confirmed reservation
+    // or unexpired hold). Geo filtering stays client-side to preserve current
+    // "near me / else closest" behavior.
+    const { data: visibleData, error: visibleError } = await supabase.rpc(
+      'get_visible_listings',
+      { p_include_upcoming: false, p_include_active_reserved: false },
+    );
 
-    const mapRows = (data: any[]): NearbyListing[] =>
-      data
-        .filter((l: any) => l.photo_url && l.photo_url.trim() !== '')
+    if (visibleError) {
+      console.error('[DynamicViewer] get_visible_listings error:', visibleError);
+      setListings([]);
+      onFallback?.(false);
+      setLoading(false);
+      return;
+    }
+
+    const withPhoto = (visibleData ?? []).filter(
+      (l: any) => l.photo_url && String(l.photo_url).trim() !== '',
+    );
+
+    const mapRows = (rows: any[]): NearbyListing[] =>
+      rows
         .map((l: any) => ({
           ...l,
           distance: haversineMiles(lat, lng, l.latitude, l.longitude),
         }))
         .sort((a: NearbyListing, b: NearbyListing) => a.distance - b.distance);
 
-    const latDelta = 0.09;
-    const lngDelta = 0.09 / Math.cos((lat * Math.PI) / 180);
-
-    const { data: nearbyData, error: nearbyError } = await baseSelect
-      .gte('latitude', lat - latDelta)
-      .lte('latitude', lat + latDelta)
-      .gte('longitude', lng - lngDelta)
-      .lte('longitude', lng + lngDelta);
-
-    let resolved: NearbyListing[] = [];
+    const allDecorated = mapRows(withPhoto);
+    let resolved: NearbyListing[] = allDecorated.filter((l) => l.distance <= 5);
     let isFallback = false;
 
-    if (!nearbyError && nearbyData) {
-      resolved = mapRows(nearbyData).filter((l) => l.distance <= 5);
-    }
-
-    if (resolved.length === 0) {
-      const { data: allData, error: allError } = await supabase
-        .from('listings')
-        .select(
-          'id, address, latitude, longitude, price_per_hour, hourly_rate, daily_rate, weekly_rate, monthly_rate, photo_url',
-        )
-        .eq('is_active', true)
-        .not('photo_url', 'is', null);
-      if (!allError && allData && allData.length > 0) {
-        resolved = mapRows(allData);
-        isFallback = true;
-      }
+    if (resolved.length === 0 && allDecorated.length > 0) {
+      resolved = allDecorated;
+      isFallback = true;
     }
 
     setListings(resolved);

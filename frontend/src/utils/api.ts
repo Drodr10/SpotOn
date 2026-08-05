@@ -157,6 +157,94 @@ const getActiveReservation = async (userId: string) => {
     return { listingData: first.listingData, endTime: first.end_time };
 };
 
+const hydrateReservationRows = async (rows: {
+    id: string;
+    listing_id: string;
+    start_time: string;
+    end_time: string;
+    total_price: number | null;
+    status: string | null;
+}[]): Promise<ActiveReservation[]> => {
+    const results: ActiveReservation[] = [];
+    for (const r of rows) {
+        const { listing, unavailable } = await fetchListingForReservation(r.listing_id);
+        results.push({
+            id:                  r.id,
+            listingData:         listing,
+            start_time:          new Date(r.start_time),
+            end_time:            new Date(r.end_time),
+            total_price:         r.total_price,
+            status:              r.status,
+            listingUnavailable:  unavailable,
+            vehicleSummary:      null,
+        });
+    }
+    return results;
+};
+
+/**
+ * Reservations that have started but not yet ended (start_time <= now < end_time).
+ * Soonest-ending first. Drives the MenuBar countdown timer — unlike
+ * `getActiveReservations`, this excludes reservations that haven't started yet.
+ */
+const getInProgressReservations = async (userId: string): Promise<ActiveReservation[] | null> => {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('id, listing_id, start_time, end_time, total_price, status')
+        .eq('renter_id', userId)
+        .lte('start_time', now)
+        .gt('end_time', now)
+        .order('end_time', { ascending: true });
+
+    if (error) {
+        console.warn('[getInProgressReservations] query error', error);
+        return null;
+    }
+    if (!data || data.length === 0) return [];
+    return hydrateReservationRows(data);
+};
+
+/**
+ * Soonest-ending in-progress reservation, or null if none. Use this (not
+ * `getActiveReservation`) anywhere that should only reflect a reservation
+ * that has actually started.
+ */
+const getInProgressReservation = async (userId: string) => {
+    const list = await getInProgressReservations(userId);
+    if (!list || list.length === 0) return null;
+    const first = list[0];
+    return { listingData: first.listingData, endTime: first.end_time };
+};
+
+/**
+ * Reservations that have not started yet (start_time > now). Soonest-starting
+ * first. Drives the Homescreen "reservation in ..." banner.
+ */
+const getUpcomingReservations = async (userId: string): Promise<ActiveReservation[] | null> => {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('id, listing_id, start_time, end_time, total_price, status')
+        .eq('renter_id', userId)
+        .gt('start_time', now)
+        .order('start_time', { ascending: true });
+
+    if (error) {
+        console.warn('[getUpcomingReservations] query error', error);
+        return null;
+    }
+    if (!data || data.length === 0) return [];
+    return hydrateReservationRows(data);
+};
+
+/** Soonest-starting upcoming reservation, or null if none. */
+const getUpcomingReservation = async (userId: string): Promise<ActiveReservation | null> => {
+    const list = await getUpcomingReservations(userId);
+    if (!list || list.length === 0) return null;
+    return list[0];
+};
+
 /**
  * Full reservation history for the user (active + past), newest first.
  */
@@ -257,10 +345,47 @@ const getOwnerActiveBookings = async (ownerId: string): Promise<ActiveReservatio
     return results;
 };
 
+/**
+ * Total money a seller has earned but not yet been paid (funds held on the
+ * platform balance), summed from reservations in 'held' or 'payout_ready'.
+ * Drives the "You have $X waiting — set up payouts" home-screen banner.
+ */
+const getPendingPayout = async (ownerId: string): Promise<{ total: number; count: number }> => {
+    const { data: ownerListings, error: listingError } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('owner_id', ownerId);
+
+    if (listingError) {
+        console.warn('[getPendingPayout] listings query error', listingError);
+        return { total: 0, count: 0 };
+    }
+    const listingIds = (ownerListings ?? []).map((l: { id: string }) => l.id);
+    if (listingIds.length === 0) return { total: 0, count: 0 };
+
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('host_payout, payout_status')
+        .in('listing_id', listingIds)
+        .in('payout_status', ['held', 'payout_ready']);
+
+    if (error || !data) {
+        console.warn('[getPendingPayout] reservations query error', error);
+        return { total: 0, count: 0 };
+    }
+    const total = data.reduce((sum: number, r: { host_payout: number | null }) => sum + Number(r.host_payout ?? 0), 0);
+    return { total, count: data.length };
+};
+
 export const api = {
     reserveSpot,
     getActiveReservation,
     getActiveReservations,
+    getInProgressReservation,
+    getInProgressReservations,
+    getUpcomingReservation,
+    getUpcomingReservations,
     getReservations,
     getOwnerActiveBookings,
+    getPendingPayout,
 };

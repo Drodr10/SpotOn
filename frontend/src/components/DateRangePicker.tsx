@@ -57,6 +57,17 @@ export interface DateRangePickerProps {
    * current pick and `endDate` is always null. Defaults to false (range mode).
    */
   singleSelect?: boolean;
+  /**
+   * Earliest date the user may pick. Any calendar cell strictly before this
+   * date's local calendar day is greyed out and unpressable; month navigation
+   * past this bound is still allowed so the user can see context.
+   */
+  minDate?: Date | null;
+  /**
+   * Latest date the user may pick. Cells strictly after this date's local
+   * calendar day are greyed out and unpressable.
+   */
+  maxDate?: Date | null;
   /** @deprecated No longer applied — card style uses fixed solid-black fill. */
   popupOpacity?: number;
   /** @deprecated No longer applied — card side margins are fixed. */
@@ -73,9 +84,22 @@ export default function DateRangePicker({
   confirmLabel = 'Confirm',
   confirmDisabled = false,
   singleSelect = false,
+  minDate = null,
+  maxDate = null,
   onClose,
   onConfirm,
 }: DateRangePickerProps) {
+  // Compare by calendar day only — ignoring time-of-day — so a 3:30 PM minDate
+  // still permits picking that same day.
+  const dayOnly = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const minDay = minDate ? dayOnly(minDate) : null;
+  const maxDay = maxDate ? dayOnly(maxDate) : null;
+  const isDayDisabled = (year: number, month: number, day: number) => {
+    const t = dayOnly(new Date(year, month, day));
+    if (minDay !== null && t < minDay) return true;
+    if (maxDay !== null && t > maxDay) return true;
+    return false;
+  };
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SLIDE_OUT_DISTANCE)).current;
 
@@ -110,6 +134,31 @@ export default function DateRangePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // When the picker becomes visible, jump the calendar to a month that
+  // actually contains at least one selectable day (so the user isn't staring
+  // at an entirely-greyed grid).
+  useEffect(() => {
+    if (!visible) return;
+    const initialCandidate =
+      initialStart ??
+      (minDate && minDate.getTime() > Date.now() ? minDate : new Date());
+    let y = initialCandidate.getFullYear();
+    let m = initialCandidate.getMonth();
+    if (minDate) {
+      const minY = minDate.getFullYear();
+      const minM = minDate.getMonth();
+      if (y < minY || (y === minY && m < minM)) { y = minY; m = minM; }
+    }
+    if (maxDate) {
+      const maxY = maxDate.getFullYear();
+      const maxM = maxDate.getMonth();
+      if (y > maxY || (y === maxY && m > maxM)) { y = maxY; m = maxM; }
+    }
+    setCalendarYear(y);
+    setCalendarMonth(m);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
   const cells = useMemo<(number | null)[]>(() => {
     const daysInMonth = getDaysInMonth(calendarYear, calendarMonth);
     const firstDay = getFirstDayOfMonth(calendarYear, calendarMonth);
@@ -120,6 +169,7 @@ export default function DateRangePicker({
   }, [calendarYear, calendarMonth]);
 
   const handleDayPress = (day: number) => {
+    if (isDayDisabled(calendarYear, calendarMonth, day)) return;
     const selected = new Date(calendarYear, calendarMonth, day);
     if (singleSelect) {
       setStartDate(selected);
@@ -234,6 +284,12 @@ export default function DateRangePicker({
             );
           }
           const sel = isDaySelected(day);
+          const disabled = isDayDisabled(calendarYear, calendarMonth, day);
+          // "Available" = inside the allowed window and not currently selected.
+          // Gets a subtle pill so the user can see at a glance which days are
+          // pressable — bounded by the listing's availability window.
+          const availableHint =
+            !disabled && !sel && (minDay !== null || maxDay !== null);
           return (
             <TouchableOpacity
               key={`day-${day}`}
@@ -244,18 +300,23 @@ export default function DateRangePicker({
                   ? styles.cellSelected
                   : sel === 'range'
                   ? styles.cellRange
+                  : availableHint
+                  ? styles.cellAvailable
                   : null,
               ]}
               onPress={() => {
+                if (disabled) return;
                 triggerLightHaptic();
                 handleDayPress(day);
               }}
-              activeOpacity={0.7}
+              disabled={disabled}
+              activeOpacity={disabled ? 1 : 0.7}
             >
               <Text
                 style={[
                   styles.dayText,
                   (sel === 'start' || sel === 'end') && styles.dayTextSelected,
+                  disabled && styles.dayTextDisabled,
                 ]}
               >
                 {day}
@@ -383,6 +444,7 @@ const styles = StyleSheet.create({
   },
   cellSelected: { backgroundColor: '#fff' },
   cellRange: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  cellAvailable: { backgroundColor: 'rgba(255,255,255,0.08)' },
   dayText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: 13,
@@ -391,6 +453,9 @@ const styles = StyleSheet.create({
   dayTextSelected: {
     fontFamily: CustomFonts.SwitzerSemibold,
     color: '#000',
+  },
+  dayTextDisabled: {
+    color: 'rgba(255,255,255,0.18)',
   },
 
   // ── Range hint ─────────────────────────────────────────────────────────────

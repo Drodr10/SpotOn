@@ -46,7 +46,6 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 
 // ─── Web Browser ──────────────────────────────────────────────────────────────
-import * as WebBrowser from 'expo-web-browser';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
@@ -72,7 +71,6 @@ import dailyTagAsset from '@/assets/images/DailyTag.png';
 import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
 
 // Stripe
-import { stripe } from '../utils/stripe';
 
 // ─── Sizing ───────────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
@@ -150,7 +148,8 @@ export default function CreateListing2() {
 
   // ── Daily / Monthly rate popups ────────────────────────────────────────────
   const [userId, setUserId] = useState<string | null>(null);
-  const [stripeEnabled, setStripeEnabled] = useState(false);
+  // Always enabled — Stripe onboarding is no longer required to create a listing.
+  const [stripeEnabled] = useState(true);
   const [showDailyPopup, setShowDailyPopup] = useState(false);
   const [dailyEnabled, setDailyEnabled] = useState(true);
   const [dailyRateAccepted, setDailyRateAccepted] = useState(false);
@@ -196,6 +195,8 @@ export default function CreateListing2() {
   };
 
   useEffect(() => {
+    // Listing creation is zero-friction: no Stripe account required. Sellers set
+    // up payouts later, after they've earned money (deferred onboarding).
     const initialize = async () => {
       const {
         data: { user },
@@ -207,44 +208,10 @@ export default function CreateListing2() {
         return;
       }
       setUserId(user.id);
-
-      const hasStripeAccount = await stripe.userHasStripeAccount(user.id);
-      if (!hasStripeAccount) {
-        Alert.alert(
-          'Set Up Payouts',
-          'To list a spot and receive payments, you need to set up a Stripe account with us. It only takes a few minutes.',
-          [
-            { text: 'Not Now', style: 'cancel', onPress: () => router.back() },
-            { text: 'Set Up Now', onPress: () => handleSetupPayouts(user.id) },
-          ],
-          { cancelable: false }
-        );
-      }
-      else setStripeEnabled(true);
     };
 
     initialize();
   }, []);
-
-  const handleSetupPayouts = async (currentUserId: string) : Promise<void> => {
-    try {
-      const accountId = await stripe.fetchStripeAccountId(currentUserId);
-      if (!accountId) {
-        Alert.alert('Error', 'Could not create a payments account. Please try again later.');
-        return;
-      }
-      const accountLinkUrl = await stripe.fetchStripeAccountLink(currentUserId);
-      if (!accountLinkUrl) {
-        Alert.alert('Error', 'Could not generate an onboarding link. Please try again.');
-        return;
-      }
-      await WebBrowser.openBrowserAsync(accountLinkUrl);
-      router.back();
-    } catch (error: any) {
-      console.error('Stripe onboarding failed:', error);
-      Alert.alert('Onboarding Error', error.message || 'An unexpected error occurred.');
-    }
-  };
 
   useEffect(() => {
     if (showCameraPopup) openPopup(cameraPopupAnim);
@@ -412,7 +379,11 @@ export default function CreateListing2() {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (dateRange?: { start: Date | null; end: Date | null }) => {
+    // Calendar's onConfirm calls setStartDate/setEndDate + handleSubmit synchronously,
+    // so this render still sees the old state. Prefer the freshly-picked dates.
+    const chosenStart = dateRange?.start ?? startDate;
+    const chosenEnd = dateRange?.end ?? endDate;
     if (periodType === 0 && pricePerHour <= 0) {
       Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
       return;
@@ -474,6 +445,8 @@ export default function CreateListing2() {
         ...ratePayload,
         is_active: true,
         photo_url: photoUrl,
+        available_from: chosenStart ? chosenStart.toISOString() : null,
+        available_until: chosenEnd ? chosenEnd.toISOString() : null,
       });
 
       if (error) throw new Error(error.message);
@@ -692,7 +665,7 @@ export default function CreateListing2() {
       onConfirm={(start, end) => {
         setStartDate(start);
         setEndDate(end);
-        handleSubmit();
+        handleSubmit({ start, end });
       }}
     />
   );

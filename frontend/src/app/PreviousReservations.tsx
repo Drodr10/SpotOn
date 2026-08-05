@@ -1,6 +1,7 @@
 /**
- * PreviousReservations — Renter reservation history. Lists past reservations
- * (end_time < now) in a vertical list using the ReservationInfoCard.
+ * PreviousReservations — Renter reservation history. Lists upcoming/current
+ * reservations (end_time >= now) and past reservations (end_time < now),
+ * each in a vertical list using the ReservationInfoCard.
  */
 
 import { useEffect, useState } from 'react';
@@ -31,27 +32,41 @@ const SECTION_GAP = screenWidth * 0.05;
 const TITLE_SIZE = screenWidth * 0.07;
 const LOGO_SIZE = screenWidth * 0.12;
 
+function formatStartsIn(startTime: Date): string {
+  const diff = startTime.getTime() - Date.now();
+  if (diff <= 0) return 'Starting now.';
+  const days = Math.floor(diff / 86_400_000);
+  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
+  const mins = Math.floor((diff % 3_600_000) / 60_000);
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (days === 0 && hours === 0) parts.push(`${mins} min`);
+  return `Starts in ${parts.join(' ')}.`;
+}
+
 export default function PreviousReservations() {
-  const [items, setItems] = useState<ActiveReservation[] | null>(null);
-  const [activeBookings, setActiveBookings] = useState<ActiveReservation[] | null>(null);
+  const [upcoming, setUpcoming] = useState<ActiveReservation[] | null>(null);
+  const [past, setPast] = useState<ActiveReservation[] | null>(null);
 
   useEffect(() => {
     (async () => {
       const { data: claimsResp } = await supabase.auth.getClaims();
       if (!claimsResp) {
-        setItems([]);
-        setActiveBookings([]);
+        setUpcoming([]);
+        setPast([]);
         return;
       }
       const userId = claimsResp.claims.sub;
 
       const list = await api.getReservations(userId);
       const now = Date.now();
-      const past = (list ?? []).filter((r) => r.end_time.getTime() < now);
-      setItems(past);
-
-      const bookings = await api.getOwnerActiveBookings(userId);
-      setActiveBookings(bookings ?? []);
+      const notExpired = (list ?? [])
+        .filter((r) => r.end_time.getTime() >= now)
+        .sort((a, b) => a.start_time.getTime() - b.start_time.getTime());
+      const expired = (list ?? []).filter((r) => r.end_time.getTime() < now);
+      setUpcoming(notExpired);
+      setPast(expired);
     })();
   }, []);
 
@@ -69,29 +84,26 @@ export default function PreviousReservations() {
           <Image source={logoAsset} style={styles.logo} resizeMode='contain' />
         </View>
 
-        <Text style={styles.title}>Previous Reservations</Text>
+        <Text style={styles.title}>Your Reservations</Text>
 
-        {/* Active bookings on the user's listings — owner-facing section. */}
-        <Text style={styles.sectionLabel}>Active Bookings</Text>
-        {activeBookings === null ? (
-          <ActivityIndicator color='#000' />
-        ) : activeBookings.length === 0 ? (
-          <Text style={styles.emptyText}>No active bookings on your spots.</Text>
+        <Text style={styles.sectionLabel}>Upcoming Reservations</Text>
+        {upcoming === null ? (
+          <ActivityIndicator color='#000' style={{ marginTop: SECTION_GAP }} />
+        ) : upcoming.length === 0 ? (
+          <Text style={styles.emptyText}>You have no upcoming reservations.</Text>
         ) : (
           <View style={styles.list}>
-            {activeBookings.map((b) => {
-              const vehicleLine = b.vehicleSummary
-                ? `Vehicle: ${b.vehicleSummary.color} ${b.vehicleSummary.make} ${b.vehicleSummary.model}${b.vehicleSummary.licensePlate ? ` • ${b.vehicleSummary.licensePlate}` : ''}`
-                : undefined;
+            {upcoming.map((r) => {
+              const inProgress = r.start_time.getTime() <= Date.now();
               return (
                 <ReservationInfoCard
-                  key={b.id}
-                  address={b.listingData.address}
-                  endTime={b.end_time}
-                  totalPrice={b.total_price}
-                  photoUrl={b.listingData.photo_url}
+                  key={r.id}
+                  address={r.listingData.address}
+                  endTime={r.end_time}
+                  totalPrice={r.total_price}
+                  photoUrl={r.listingData.photo_url}
                   variant='current'
-                  secondaryLineOverride={vehicleLine}
+                  secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time)}
                   width={screenWidth - H_PAD * 2}
                 />
               );
@@ -100,13 +112,13 @@ export default function PreviousReservations() {
         )}
 
         <Text style={styles.sectionLabel}>Past Reservations</Text>
-        {items === null ? (
+        {past === null ? (
           <ActivityIndicator color='#000' style={{ marginTop: SECTION_GAP }} />
-        ) : items.length === 0 ? (
+        ) : past.length === 0 ? (
           <Text style={styles.emptyText}>You haven’t completed a reservation yet.</Text>
         ) : (
           <View style={styles.list}>
-            {items.map((r) => (
+            {past.map((r) => (
               <ReservationInfoCard
                 key={r.id}
                 address={r.listingData.address}

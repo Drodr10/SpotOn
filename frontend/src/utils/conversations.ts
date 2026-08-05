@@ -22,18 +22,22 @@ export async function findOrCreateConversation(
   renterId: string,
   ownerId: string,
 ): Promise<ConversationLookupResult> {
-  const { data: existing, error: findError } = await supabase
+  // Tolerate legacy duplicates: older code created one conversation per
+  // reservation, so a (renter, owner) pair can have several rows. Take the
+  // earliest instead of erroring on multiple.
+  const { data: existingRows, error: findError } = await supabase
     .from('conversations')
     .select('id')
     .eq('renter_id', renterId)
     .eq('owner_id', ownerId)
-    .maybeSingle();
+    .order('updated_at', { ascending: true })
+    .limit(1);
 
   if (findError) throw new Error(findError.message);
 
   let conversationId: string;
-  if (existing) {
-    conversationId = existing.id;
+  if (existingRows && existingRows.length > 0) {
+    conversationId = existingRows[0].id;
   } else {
     const { data: created, error: insertError } = await supabase
       .from('conversations')

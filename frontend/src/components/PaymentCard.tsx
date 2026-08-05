@@ -1,21 +1,28 @@
-import { useEffect, useState } from 'react'
-import { 
-    View, 
+import { useRef, useState } from 'react'
+import {
+    View,
     Text,
     StyleSheet,
     TouchableOpacity,
-    Alert
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    Image,
+    Modal,
 } from 'react-native'
 import { router } from 'expo-router'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import {  useStripe } from "@stripe/stripe-react-native"
 import { stripe } from "../utils/stripe"
-import type { StripePaymentSheetParams } from '../utils/stripe'
-import { api } from "../utils/api"
 
 import { supabase } from '@/src/utils/supabase';
-import { triggerLightHaptic } from '@/src/utils/haptics';
-import { JwtPayload } from '@supabase/supabase-js';
+import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { CustomFonts } from '../constants/theme';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 
 type PaymentProps = {
     listingId: string;
@@ -37,114 +44,175 @@ type PaymentProps = {
 
 export default function PaymentCard ({ listingId, listerId, price, hours, vehicleId, startTime, endTime, disabled: externalDisabled, onPaymentSuccess } : PaymentProps) {
     const { initPaymentSheet, presentPaymentSheet } = useStripe();
-    const [loading, setLoading] = useState<boolean>(true);
-    const [claims, setClaims] = useState<JwtPayload>();
-    const startMs = startTime?.getTime();
-    const endMs = endTime?.getTime();
-    
-    const initializePaymentSheet = async () => {
-        if (externalDisabled) return;
-        setLoading(true);
-        const {
-            paymentIntent,
-            customerSessionClientSecret,
-            customer,
-        } : StripePaymentSheetParams | any
-        = await stripe.fetchPaymentSheetParams(price, listerId);
+    const insets = useSafeAreaInsets();
+    const [submitting, setSubmitting] = useState<boolean>(false);
 
-        const { error } = await initPaymentSheet({
-            merchantDisplayName: "SpotOn",
-            customerId: customer,
-            customerSessionClientSecret: customerSessionClientSecret,
-            paymentIntentClientSecret: paymentIntent,
-            allowsDelayedPaymentMethods: true,
-            returnURL: 'spoton://stripe-redirect',
-            defaultBillingDetails: {
-                name: "Diego Rodriguez"
-            }
-        });
+    // Bottom-card popup (slot unavailable, can't reserve own listing, etc.).
+    const [showCardPopup, setShowCardPopup] = useState<boolean>(false);
+    const [popupTitle, setPopupTitle] = useState<string>('');
+    const [popupBody, setPopupBody] = useState<string>('');
+    const popupAnim = useRef(new Animated.Value(SCREEN_H)).current;
+    const backdropAnim = useRef(new Animated.Value(0)).current;
 
-        if(!error)
-            setLoading(false);
-        else {
-            setLoading(false);
-            Alert.alert(`Error: ${error.code}`, error.message);
-        }
-    }
+    const openCardPopup = (title: string, body: string) => {
+        setPopupTitle(title);
+        setPopupBody(body);
+        popupAnim.setValue(SCREEN_H);
+        setShowCardPopup(true);
+        Animated.parallel([
+            Animated.spring(popupAnim, { toValue: 0, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
+            Animated.timing(backdropAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        ]).start();
+    };
 
-    const openPaymentSheet = async () => {
+    const closeCardPopup = () => {
+        Animated.parallel([
+            Animated.spring(popupAnim, { toValue: SCREEN_H, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
+            Animated.timing(backdropAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
+        ]).start(() => setShowCardPopup(false));
+    };
+
+    const handleReserve = async () => {
+        if (submitting || externalDisabled || !vehicleId) return;
         triggerLightHaptic();
-        const { error } = await presentPaymentSheet();
+        setSubmitting(true);
 
-        if (error) {
-            if (error.code !== 'Canceled') {
-                Alert.alert(`Error: ${error.code}`, error.message);
-            }
-            return;
-        }
-
-        if (!claims?.sub) {
-            Alert.alert('Reservation Error', 'No active user session. Please sign in again.');
-            return;
-        }
-        if (!vehicleId) {
-            Alert.alert('Vehicle Required', 'Select a vehicle before checking out.');
-            return;
-        }
-
-        const reservationStart = startMs ?? Date.now();
-        const reservationEnd = endMs ?? reservationStart + 3600 * hours * 1000;
         try {
-            await api.reserveSpot(listingId, price, claims.sub, vehicleId, reservationStart, reservationEnd);
-        } catch (e: any) {
-            console.error('[PaymentCard] reservation insert failed', e);
-            Alert.alert('Reservation Error', e?.message ?? 'Could not save your reservation. Please contact support.');
-            return;
-        }
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                Alert.alert('Sign in required', 'No active user session. Please sign in again.');
+                return;
+            }
 
-        Alert.alert('Payment Successful');
-        if (onPaymentSuccess) {
-            onPaymentSuccess({ listingId, price, hours });
-        } else {
-            router.push('./Homescreen');
+            if (user.id === listerId) {
+                openCardPopup("Can't reserve", "This is your own listing. You can't reserve it.");
+                return;
+            }
+
+            const reservationStart = startTime?.getTime() ?? Date.now();
+            const reservationEnd = endTime?.getTime() ?? reservationStart + 3600 * hours * 1000;
+
+            // 1) Acquire the slot hold + create the PaymentIntent.
+            const result = await stripe.createBookingPayment({
+                listing_id: listingId,
+                renter_id: user.id,
+                vehicle_id: vehicleId,
+                start_time: new Date(reservationStart).toISOString(),
+                end_time: new Date(reservationEnd).toISOString(),
+            });
+
+            if (result.status === 'unavailable') {
+                openCardPopup('Spot in checkout', result.message);
+                return;
+            }
+            if (result.status === 'error') {
+                Alert.alert('Booking failed', result.message);
+                return;
+            }
+
+            const { params } = result;
+
+            // 2) Prepare the Stripe sheet.
+            const { error: initError } = await initPaymentSheet({
+                merchantDisplayName: "SpotOn",
+                customerId: params.customer,
+                customerSessionClientSecret: params.customerSessionClientSecret,
+                paymentIntentClientSecret: params.paymentIntent,
+                allowsDelayedPaymentMethods: true,
+                returnURL: 'spoton://stripe-redirect',
+            });
+            if (initError) {
+                await stripe.releaseHold(params.holdId);
+                Alert.alert(`Error: ${initError.code}`, initError.message);
+                return;
+            }
+
+            // 3) Present it. Backing out releases the hold immediately.
+            const { error: payError } = await presentPaymentSheet();
+            if (payError) {
+                await stripe.releaseHold(params.holdId);
+                if (payError.code !== 'Canceled') {
+                    Alert.alert(`Error: ${payError.code}`, payError.message);
+                }
+                return;
+            }
+
+            // 4) Paid. Finalize immediately (creates the reservation + releases
+            //    the hold) so it exists before we land in chat; the webhook is an
+            //    idempotent backstop. If finalize fails, DO NOT navigate to chat —
+            //    the reservation doesn't exist yet and we need the user to see it.
+            const finalized = await stripe.finalizeBooking(params.paymentIntent);
+            if (!finalized.ok) {
+                Alert.alert(
+                    'Payment succeeded, booking not confirmed',
+                    `${finalized.message ?? 'unknown error'}\n\nYour card was charged but the reservation could not be created. Please contact support with this message before rebooking.`,
+                );
+                return;
+            }
+            if (onPaymentSuccess) {
+                onPaymentSuccess({ listingId, price, hours });
+            } else {
+                router.push('./Homescreen');
+            }
+        } finally {
+            setSubmitting(false);
         }
     }
 
-    useEffect(() => {
-        const timeout = setTimeout(() => {
-            initializePaymentSheet();
-        }, 500);
-        return () => clearTimeout(timeout);
-    }, [price, hours, startMs, endMs]);
-    
-    useEffect(() => {
-        supabase.auth.getClaims().then(async (resp) => {
-        const {data, error} = resp;
-
-        if (error || !data) {
-            console.log("Error in finding matching user ID: " + (error ? error : "Data error"));
-            return;
-        }
-        setClaims(data.claims);
-        const { data: profileData, error: profileError } =  await supabase.from('profiles').select('*').eq('id', data.claims.sub).single();
-
-        if (profileError || !profileData) {
-            console.log("Error in retriving user profile data: " + (profileError ? profileError : "Data error"));
-            return;
-        }
-        });
-  }, []);
-    
+    const disabled = submitting || !!externalDisabled || !vehicleId;
+    const W = Dimensions.get('window').width;
 
     return (
         <View style={styles.container}>
             <TouchableOpacity
-                disabled={loading || !!externalDisabled || !vehicleId}
-                onPress={openPaymentSheet}
-                style={[styles.button, (loading || externalDisabled || !vehicleId) && styles.buttonDisabled]}
+                disabled={disabled}
+                onPress={handleReserve}
+                style={[styles.button, disabled && styles.buttonDisabled]}
             >
-                <Text style={styles.text}>{ loading ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
+                <Text style={styles.text}>{ submitting ? "Loading..." : `Reserve For $${price.toFixed(2)}` }</Text>
             </TouchableOpacity>
+
+            {/* Bottom card popup — same design/animation as the create-listing rate popups. */}
+            <Modal visible={showCardPopup} transparent animationType="none" onRequestClose={closeCardPopup}>
+                <Animated.View style={[styles.popupBackdrop, { opacity: backdropAnim }]}>
+                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeCardPopup} />
+                </Animated.View>
+
+                <Animated.View
+                    style={[
+                        styles.popupCard,
+                        {
+                            bottom: W * 0.05 + insets.bottom,
+                            paddingTop: W * 0.055,
+                            paddingBottom: W * 0.045,
+                            paddingHorizontal: W * 0.06,
+                            borderRadius: W * 0.07,
+                            transform: [{ translateY: popupAnim }],
+                        },
+                    ]}
+                >
+                    <Image
+                        source={spotonLogoCircle}
+                        style={[styles.popupLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+                        resizeMode="contain"
+                    />
+
+                    <Text style={[styles.popupTitle, { fontSize: W * 0.055, marginBottom: W * 0.03, marginTop: W * 0.005 }]}>
+                        {popupTitle}
+                    </Text>
+                    <Text style={[styles.popupBody, { fontSize: W * 0.036, lineHeight: W * 0.052, marginBottom: W * 0.055 }]}>
+                        {popupBody}
+                    </Text>
+
+                    <TouchableOpacity
+                        style={[styles.popupButton, { height: W * 0.12, borderRadius: W * 0.06 }]}
+                        onPress={withLightHaptic(closeCardPopup)}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={[styles.popupButtonText, { fontSize: W * 0.04 }]}>Got it</Text>
+                    </TouchableOpacity>
+                </Animated.View>
+            </Modal>
         </View>
     );
 }
@@ -176,5 +244,45 @@ const styles = StyleSheet.create({
             color: "#ffffff",
             fontSize: 20,
             fontWeight: "bold",
-        }
+        },
+
+        // ── Slot-in-checkout popup (mirrors the create-listing rate popups) ──
+        popupBackdrop: {
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+        },
+        popupCard: {
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            backgroundColor: '#000',
+            zIndex: 20,
+            elevation: 12,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.35,
+            shadowRadius: 16,
+        },
+        popupLogo: {
+            position: 'absolute',
+            opacity: 0.9,
+            zIndex: 1,
+        },
+        popupTitle: {
+            fontFamily: CustomFonts.BevellierMedium,
+            color: '#fff',
+        },
+        popupBody: {
+            fontFamily: CustomFonts.SwitzerLight,
+            color: 'rgba(255,255,255,0.75)',
+        },
+        popupButton: {
+            backgroundColor: 'rgba(255,255,255,0.12)',
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        popupButtonText: {
+            fontFamily: CustomFonts.SwitzerSemibold,
+            color: '#fff',
+        },
     });

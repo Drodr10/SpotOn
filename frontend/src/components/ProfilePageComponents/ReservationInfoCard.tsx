@@ -2,7 +2,7 @@
  * ReservationInfoCard — Figma 493:9
  *
  * Compact reservation card used on the Profile page and the new
- * Previous Reservations / Your Current Spots screens. The price pill and the
+ * Your Reservations / Your Seller Account screens. The price pill and the
  * navigation-arrow circle both use the aura_gradient asset as their
  * background instead of the legacy yellow fill.
  */
@@ -71,6 +71,21 @@ function formatPastDate(d: Date): string {
   });
 }
 
+function formatPastTime(d: Date): string {
+  return d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatPastDateRange(start: Date, end: Date): string {
+  const sameDay = start.toDateString() === end.toDateString();
+  if (sameDay) {
+    return `${formatPastDate(start)} • ${formatPastTime(start)} - ${formatPastTime(end)}`;
+  }
+  return `${formatPastDate(start)} ${formatPastTime(start)} - ${formatPastDate(end)} ${formatPastTime(end)}`;
+}
+
 function openMaps(address: string) {
   const encoded = encodeURIComponent(address);
   const url = Platform.select({
@@ -123,7 +138,7 @@ export default function ReservationInfoCard({
     (variant === 'current'
       ? timeLeft
       : variant === 'past' && startTime && endTime
-        ? `${formatPastDate(startTime)} – ${formatPastDate(endTime)}`
+        ? formatPastDateRange(startTime, endTime)
         : '');
 
   return (

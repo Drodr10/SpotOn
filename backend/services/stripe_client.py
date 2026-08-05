@@ -1,103 +1,211 @@
 import os
+import json
+import traceback
 import stripe
 from flask import jsonify
 from dotenv import load_dotenv
 from pathlib import Path
+
 from services.supabase_client import supabase
+from services.payouts import _parse_ts, release_pending_for_account
+from services.notifications import send_booking_notifications
+from utils.pricing import calculate_final_price, PricingError
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY")
 secretKey = os.getenv("STRIPE_SECRET_KEY")
 backendUrl = os.getenv("BACKEND_URL")
+webhookSecret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-def generatePaymentSheet(price: float, listerId: str):
-    stripe.api_key = secretKey
-    
-    print(f"Attempting to create payment sheet")
-    customer = stripe.Customer.create()
+# Rate columns we hand to the pricing engine (incl. legacy fallback).
+_RATE_COLS = "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
 
-    listerStripeConnectId = supabase.table("profiles").select("stripe_account_id").eq("id", listerId).execute().data[0]["stripe_account_id"]
+_PAYABLE_PI_STATES = {
+    "requires_payment_method",
+    "requires_confirmation",
+    "requires_action",
+    "processing",
+}
 
-    customer_session = stripe.CustomerSession.create(
-        customer=customer.id,
-        components={
-            "payment_element": {
-                "enabled": True,
-            }
-        },
+
+def _to_cents(value) -> int:
+    from decimal import Decimal, ROUND_HALF_UP
+    cents = (Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return int(cents)
+
+
+def _fresh_customer_session(customer_id: str):
+    return stripe.CustomerSession.create(
+        customer=customer_id,
+        components={"payment_element": {"enabled": True}},
     )
 
-    priceInCents = int(price * 100)
-    applicationFeeAmount = int(priceInCents * 0.15)
 
-    payment_intent = stripe.PaymentIntent.create(
-        amount=priceInCents,
-        currency="usd",
-        customer=customer.id,
-        automatic_payment_methods={
-            "enabled": True,
-        },
-        application_fee_amount=applicationFeeAmount,
-        transfer_data={
-            'destination': listerStripeConnectId,
-        }
+def _sheet_response(payment_intent_client_secret, customer_session_secret, customer_id, hold_id=None):
+    return jsonify(
+        paymentIntent=payment_intent_client_secret,
+        customerSessionClientSecret=customer_session_secret,
+        customer=customer_id,
+        holdId=hold_id,
+        publishableKey=publishableKey,
     )
-    
-    return jsonify(paymentIntent=payment_intent.client_secret,
-                   customerSessionClientSecret=customer_session.client_secret,
-                   customer=customer.id,
-                   publishableKey=publishableKey)
 
-def createConnectAccount(user_id: str):
+
+# Minutes a Reserve-press hold stays valid before the sweep frees the slot.
+HOLD_TTL_MINUTES = 5
+
+
+def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
+                           start_time: str, end_time: str):
+    """
+    Hold-and-confirm checkout. Called when the renter presses Reserve.
+
+    1. Acquire a short-lived hold on the slot (reservation_holds). If another
+       renter is already checking out an overlapping slot — or it's already
+       booked — this returns 409 {code: slot_unavailable} and no PaymentIntent
+       is created.
+    2. Create a platform-held PaymentIntent carrying the booking details in
+       metadata. The real reservation row is NOT created here — it is created by
+       the payment_intent.succeeded webhook (finalize_paid_reservation), so an
+       abandoned checkout never leaves a reservation behind. The hold self-expires
+       via the sweep after HOLD_TTL_MINUTES.
+    """
     stripe.api_key = secretKey
-    print(f"Attempting to create Stripe Connect account for user {user_id}")
+
+    # ── Price + owner (authoritative, server-side) ──────────────────────────
+    listing = (
+        supabase.table("listings").select(_RATE_COLS).eq("id", listing_id).single().execute().data
+    )
+    if not listing:
+        return jsonify({"error": "Listing not found"}), 404
+    owner_id = listing.get("owner_id")
+
+    if renter_id == owner_id:
+        return jsonify({"error": "You can't reserve your own listing.", "code": "self_booking"}), 400
 
     try:
-        profile_data = supabase.table("profiles").select("email, stripe_account_id").eq("id", user_id).single().execute().data
+        breakdown = calculate_final_price(listing, start_time, end_time)
+    except PricingError as pe:
+        return jsonify({"error": str(pe)}), 400
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Pricing error: {str(e)}"}), 500
 
+    total_cents = _to_cents(breakdown["total"])
+
+    # ── Acquire the slot hold (atomic, per-listing serialized) ──────────────
+    try:
+        hold_result = supabase.rpc("acquire_booking_hold", {
+            "p_listing_id": listing_id,
+            "p_renter_id": renter_id,
+            "p_vehicle_id": vehicle_id,
+            "p_start_time": start_time,
+            "p_end_time": end_time,
+            "p_ttl_minutes": HOLD_TTL_MINUTES,
+        }).execute()
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+    hold_row = hold_result.data[0] if hold_result.data else {}
+    if hold_row.get("error_message") == "slot_unavailable":
+        return jsonify({
+            "error": "This spot is being booked right now. Try again in a few minutes.",
+            "code": "slot_unavailable",
+        }), 409
+    hold_id = hold_row.get("hold_id")
+    if not hold_id:
+        return jsonify({"error": "Could not hold this slot"}), 500
+
+    # ── Platform-held PaymentIntent (reservation created later, on success) ──
+    try:
+        customer = stripe.Customer.create()
+        session = _fresh_customer_session(customer.id)
+        payment_intent = stripe.PaymentIntent.create(
+            amount=total_cents,
+            currency="usd",
+            customer=customer.id,
+            automatic_payment_methods={"enabled": True},
+            metadata={
+                "hold_id": str(hold_id),
+                "listing_id": str(listing_id),
+                "renter_id": str(renter_id),
+                "vehicle_id": str(vehicle_id),
+                "seller_id": str(owner_id),
+                "start_time": start_time,
+                "end_time": end_time,
+                "total_price": str(breakdown["total"]),
+                "platform_fee": str(breakdown["platform_fee"]),
+                "host_payout": str(breakdown["host_payout"]),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        # Free the hold so the slot isn't stuck until TTL if setup failed.
+        _delete_hold(hold_id)
+        return jsonify({"error": f"Payment setup failed: {str(e)}"}), 500
+
+    return _sheet_response(payment_intent.client_secret, session.client_secret, customer.id, hold_id)
+
+
+def _delete_hold(hold_id: str):
+    try:
+        supabase.table("reservation_holds").delete().eq("id", hold_id).execute()
+    except Exception as err:  # noqa: BLE001
+        print(f"[stripe] failed to delete hold {hold_id}: {err}")
+
+
+def release_booking_hold(hold_id: str):
+    """Free a hold immediately (e.g. the renter dismissed the payment sheet)."""
+    if hold_id:
+        _delete_hold(hold_id)
+    return jsonify({"released": True}), 200
+
+
+def createConnectAccount(user_id: str):
+    """Create the seller's Express connected account (transfers capability only)."""
+    stripe.api_key = secretKey
+    try:
+        profile_data = (
+            supabase.table("profiles").select("email, stripe_account_id").eq("id", user_id).single().execute().data
+        )
         if not profile_data:
-            print(f"User profile not found for user {user_id}")
-            return jsonify({ "error": "User profile not found" }), 404
-
+            return jsonify({"error": "User profile not found"}), 404
         if profile_data.get("stripe_account_id"):
-            # Account already exists
-            print(f"Stripe account already exists for user {user_id}: {profile_data['stripe_account_id']}")
-            return jsonify({ "account_id": profile_data["stripe_account_id"] })
+            return jsonify({"account_id": profile_data["stripe_account_id"]})
 
         user_email = profile_data.get("email")
         if not user_email:
-            return jsonify({ "error": "User email not found in profile" }), 400
+            return jsonify({"error": "User email not found in profile"}), 400
 
         account = stripe.Account.create(
             type="express",
             country="US",
             email=user_email,
-            capabilities={
-                "card_payments": {"requested": True},
-                "transfers": {"requested": True},
-            },
+            capabilities={"transfers": {"requested": True}},
         )
-        print(f"Account created successfully for {user_email}: {account.id}")
-
-        return jsonify({ "account_id": account.id })
-
-    except Exception as err:
+        # Persist immediately so we never orphan an account if the client drops.
+        supabase.table("profiles").update(
+            {"stripe_account_id": account.id}
+        ).eq("id", user_id).execute()
+        return jsonify({"account_id": account.id})
+    except Exception as err:  # noqa: BLE001
         print(f"Error creating Stripe Connect account: {str(err)}")
-        return jsonify({'error': str(err)}), 500
+        return jsonify({"error": str(err)}), 500
+
 
 def createAccountLink(user_id: str):
+    """Generate a hosted Stripe onboarding link for the seller's account."""
     stripe.api_key = secretKey
-
     try:
-        profile_data = supabase.table("profiles").select("stripe_account_id").eq("id", user_id).single().execute().data
+        profile_data = (
+            supabase.table("profiles").select("stripe_account_id").eq("id", user_id).single().execute().data
+        )
         account_id = profile_data.get("stripe_account_id") if profile_data else None
-
         if not account_id:
-            print(f"Stripe account ID not found for user {user_id}")
-            return jsonify({ "error": "Stripe account ID not found for this user. Please create an account first." }), 404
+            return jsonify({"error": "Stripe account ID not found for this user. Please create an account first."}), 404
 
-        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete"
+        # Carry the user id back so onboarding-complete can sync payouts even if
+        # the account.updated webhook was missed or failed.
+        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete?user_id={user_id}"
         refresh_url = f"https://{backendUrl}/api/stripe/onboarding-expired"
 
         account_link = stripe.AccountLink.create(
@@ -106,9 +214,269 @@ def createAccountLink(user_id: str):
             return_url=return_url,
             type="account_onboarding",
         )
-        print(f"Account link generated for user {user_id}: {account_link.url}")
-        return jsonify({ "account_link_url": account_link.url})
-
-    except Exception as err:
+        return jsonify({"account_link_url": account_link.url})
+    except Exception as err:  # noqa: BLE001
         print(f"Error creating account link: {str(err)}")
-        return jsonify({ "error": str(err) }), 500
+        return jsonify({"error": str(err)}), 500
+
+def onboardingComplete(user_id: str):
+    supabase.table("profiles").update({"payouts_enabled": True}).eq("id", user_id).execute()
+
+# ── Webhooks ────────────────────────────────────────────────────────────────
+def handle_webhook(payload: bytes, sig_header: str):
+    stripe.api_key = secretKey
+    try:
+        if webhookSecret:
+            event = stripe.Webhook.construct_event(payload, sig_header, webhookSecret)
+        else:
+            # Dev fallback only — set STRIPE_WEBHOOK_SECRET in production.
+            print("[stripe] WARNING: STRIPE_WEBHOOK_SECRET unset; skipping signature check")
+            event = json.loads(payload)
+    except (ValueError, stripe.error.SignatureVerificationError) as err:
+        return jsonify({"error": f"Webhook verification failed: {str(err)}"}), 400
+
+    event_type = event["type"]
+    obj = event["data"]["object"]
+
+    # A handler crash must never 500 the webhook — Stripe would keep retrying and
+    # (for account.updated) the seller would stay un-enabled. Swallow + log so the
+    # endpoint always ACKs 200; the onboarding-complete backstop covers misses.
+    try:
+        if event_type == "payment_intent.succeeded":
+            _on_payment_succeeded(obj)
+        elif event_type == "account.updated":
+            _on_account_updated(obj)
+        elif event_type in ("transfer.created", "charge.refunded"):
+            oid = _to_plain_dict(obj).get("id") if not isinstance(obj, dict) else obj.get("id")
+            print(f"[stripe] {event_type}: {oid}")  # bookkeeping / logs
+    except Exception as err:  # noqa: BLE001
+        print(f"[stripe] webhook handler for {event_type} crashed: {err}")
+        traceback.print_exc()
+
+    return jsonify({"received": True}), 200
+
+
+def _to_plain_dict(obj):
+    """
+    Normalize a Stripe StripeObject (or nested StripeObject) into plain dicts.
+    Needed because in some Stripe SDK versions, StripeObject.__getattr__ treats
+    method names like `.get` as key lookups and raises AttributeError. Working
+    with a plain dict sidesteps that entirely.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    # stripe.util.convert_to_dict exists across versions; fall back to
+    # `to_dict_recursive` / `to_dict` / json round-trip.
+    for meth in ("to_dict_recursive", "to_dict"):
+        fn = getattr(obj, meth, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:  # noqa: BLE001
+                pass
+    try:
+        return json.loads(str(obj))
+    except Exception:  # noqa: BLE001
+        try:
+            return dict(obj)
+        except Exception:  # noqa: BLE001
+            return obj
+
+
+def _num(value, default=0.0) -> float:
+    """Coerce metadata (which Stripe stores as strings) to a real number."""
+    if value is None or value == "":
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _finalize_reservation_from_pi(pi) -> dict:
+    """
+    Create the real reservation from a succeeded PaymentIntent's metadata
+    (set in create_booking_payment). Idempotent on the PaymentIntent id, so it's
+    safe to run from BOTH the webhook and the client's post-payment call. The
+    renter's hold is released by finalize_paid_reservation.
+
+    Returns {"reservation_id": str} on success or {"error": str}.
+    """
+    try:
+        # Stripe's StripeObject shadows dict methods like .get in some SDK
+        # versions — flatten to a plain dict first so downstream code is safe.
+        pi_dict = _to_plain_dict(pi) if not isinstance(pi, dict) else pi
+        md = pi_dict.get("metadata") or {}
+        if not isinstance(md, dict):
+            md = _to_plain_dict(md) or {}
+        raw_charge = pi_dict.get("latest_charge")
+        if isinstance(raw_charge, dict):
+            charge = raw_charge.get("id")
+        else:
+            charge = raw_charge  # str id, or None
+        pi_id = pi_dict.get("id")
+
+        required = ("listing_id", "renter_id", "vehicle_id", "start_time", "end_time")
+        missing = [k for k in required if not md.get(k)]
+        if missing:
+            return {"error": f"missing_metadata: {','.join(missing)}"}
+
+        params = {
+            "p_listing_id": str(md["listing_id"]),
+            "p_renter_id": str(md["renter_id"]),
+            "p_vehicle_id": str(md["vehicle_id"]),
+            "p_start_time": str(md["start_time"]),
+            "p_end_time": str(md["end_time"]),
+            "p_total_price": _num(md.get("total_price")),
+            "p_platform_fee": _num(md.get("platform_fee")),
+            "p_host_payout": _num(md.get("host_payout")),
+            "p_payment_intent": str(pi_id),
+            "p_charge_id": str(charge) if charge else None,
+        }
+
+        try:
+            result = supabase.rpc("finalize_paid_reservation", params).execute()
+        except Exception as err:  # noqa: BLE001
+            print(f"[stripe] finalize_paid_reservation RPC raised: {err}")
+            traceback.print_exc()
+            return {"error": f"db_error: {err}"}
+
+        data = getattr(result, "data", None)
+        print(f"[stripe] finalize_paid_reservation returned data={data!r}")
+
+        if not data:
+            return {"error": "rpc_empty_response"}
+
+        # RETURNS TABLE → list of rows; occasionally scalar depending on client.
+        row = data[0] if isinstance(data, list) else data
+        if not isinstance(row, dict):
+            return {"error": f"rpc_unexpected_shape: {type(row).__name__}"}
+
+        if row.get("error_message"):
+            return {"error": row["error_message"]}
+
+        rid = row.get("reservation_id")
+        if not rid:
+            return {"error": "rpc_no_reservation_id"}
+        try:
+            sent = send_booking_notifications(str(rid))
+            print(f"[stripe] booking notifications for reservation {rid}: {sent}")
+        except Exception as err:  # noqa: BLE001
+            print(f"[stripe] booking notification failed for reservation {rid}: {err}")
+        return {"reservation_id": rid}
+    except Exception as err:  # noqa: BLE001 — never let this bubble to Flask as a 500
+        print(f"[stripe] _finalize_reservation_from_pi crashed: {err}")
+        traceback.print_exc()
+        return {"error": f"finalize_crashed: {err}"}
+
+
+def _on_payment_succeeded(pi: dict):
+    """Webhook path — reliable backstop that creates the reservation on payment."""
+    outcome = _finalize_reservation_from_pi(pi)
+    if outcome.get("error") == "missing_metadata":
+        print(f"[stripe] payment {pi['id']} missing booking metadata; skipping finalize")
+    elif outcome.get("error"):
+        # Refund-on-conflict intentionally deferred: log loudly so a
+        # charged-but-unbooked payment is visible until it's built out.
+        print(f"[stripe] WARNING payment {pi['id']} succeeded but reservation "
+              f"not created ({outcome['error']}); needs manual review")
+    else:
+        print(f"[stripe] payment succeeded for PI {pi['id']} -> reservation {outcome['reservation_id']} (held)")
+
+
+def finalize_booking(payment_intent_id: str):
+    """
+    Client-invoked finalize, called the instant the payment sheet returns
+    success. Confirms the PaymentIntent really succeeded, then creates the
+    reservation. Idempotent with the webhook — whichever runs first wins, the
+    other is a no-op. Makes booking work even if `stripe listen` isn't forwarding.
+    """
+    stripe.api_key = secretKey
+    if not payment_intent_id:
+        return jsonify({"error": "Missing payment_intent_id"}), 400
+    try:
+        pi_obj = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["latest_charge"])
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"Could not retrieve payment: {e}"}), 502
+
+    pi = _to_plain_dict(pi_obj) if not isinstance(pi_obj, dict) else pi_obj
+    if pi.get("status") != "succeeded":
+        return jsonify({"error": "Payment not completed", "status": pi.get("status")}), 409
+
+    try:
+        outcome = _finalize_reservation_from_pi(pi)
+    except Exception as e:  # noqa: BLE001 — belt-and-suspenders so nothing becomes an HTML 500
+        traceback.print_exc()
+        return jsonify({"error": f"finalize_unhandled: {e}"}), 500
+
+    if outcome.get("error"):
+        # 409 signals "payment fine, reservation could not be created" — the client shows the message.
+        return jsonify({"error": outcome["error"]}), 409
+    return jsonify({"reservationId": outcome["reservation_id"]}), 200
+
+
+def _on_account_updated(account):
+    """
+    Webhook path for Connect account changes. The event object is a StripeObject
+    whose `.get` can raise AttributeError in some SDK versions (same bug already
+    fixed for PaymentIntents) — flatten to a plain dict before reading fields, and
+    never let this bubble up as a 500 (the endpoint must ACK so Stripe stops
+    retrying; the onboarding-complete backstop covers any miss).
+    """
+    try:
+        acct = _to_plain_dict(account) if not isinstance(account, dict) else account
+        account_id = acct.get("id")
+        if not account_id:
+            print("[stripe] account.updated missing account id; skipping")
+            return
+        if acct.get("payouts_enabled"):
+            moved = release_pending_for_account(account_id)
+            print(f"[stripe] account {account_id} payouts_enabled -> released {moved} transfer(s)")
+        else:
+            supabase.table("profiles").update({"payouts_enabled": False}).eq(
+                "stripe_account_id", account_id
+            ).execute()
+    except Exception as err:  # noqa: BLE001 — never 500 the webhook endpoint
+        print(f"[stripe] _on_account_updated crashed: {err}")
+        traceback.print_exc()
+
+
+def sync_connect_account(user_id: str):
+    """
+    Backstop for the account.updated webhook (mirrors finalize_booking): when the
+    seller returns from hosted onboarding, pull their Connect account straight
+    from Stripe and, if payouts are now enabled, release their payout_ready
+    reservations. Idempotent with the webhook — whichever runs first wins.
+    """
+    stripe.api_key = secretKey
+    if not user_id:
+        return jsonify({"error": "Missing user_id"}), 400
+
+    try:
+        profile = (
+            supabase.table("profiles").select("stripe_account_id").eq("id", user_id).single().execute().data
+        )
+    except Exception as err:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"profile_lookup_failed: {err}"}), 500
+
+    account_id = (profile or {}).get("stripe_account_id")
+    if not account_id:
+        return jsonify({"payouts_enabled": False, "released": 0}), 200
+
+    try:
+        account = stripe.Account.retrieve(account_id)
+    except Exception as err:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": f"account_retrieve_failed: {err}"}), 502
+
+    acct = _to_plain_dict(account) if not isinstance(account, dict) else account
+    if acct.get("payouts_enabled"):
+        moved = release_pending_for_account(account_id)
+        print(f"[stripe] sync: account {account_id} payouts_enabled -> released {moved} transfer(s)")
+        return jsonify({"payouts_enabled": True, "released": moved}), 200
+
+    # Not enabled yet — keep the flag accurate but leave reservations pending.
+    supabase.table("profiles").update({"payouts_enabled": False}).eq("id", user_id).execute()
+    return jsonify({"payouts_enabled": False, "released": 0}), 200

@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   Image,
   ImageBackground,
   TouchableOpacity,
@@ -15,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser'
 
@@ -25,6 +25,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { api, type ActiveReservation } from '@/src/utils/api';
 import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
+import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 import logoAsset from '@/assets/images/spotonlogo.png';
 import penIcon from '@/assets/images/penicon.png';
@@ -146,7 +147,10 @@ export default function ProfilePage() {
   }, []);
 
   const loadActiveReservations = async (userId: string) => {
-    const data = await api.getActiveReservations(userId);
+    // Only reservations that have actually started belong on this card —
+    // scheduled-but-not-started reservations live on the Homescreen banner
+    // and the "Upcoming Reservations" section instead.
+    const data = await api.getInProgressReservations(userId);
     setActiveReservations(data ?? []);
   };
 
@@ -280,8 +284,11 @@ export default function ProfilePage() {
       const onboardingLink = await stripe.fetchStripeAccountLink(claims.sub);
 
       if (onboardingLink) {
-        WebBrowser.openBrowserAsync(onboardingLink);
-      } 
+        await WebBrowser.openBrowserAsync(onboardingLink);
+        // Backstop the webhook: sync payout status from Stripe on return.
+        await stripe.syncAccount(claims.sub);
+        await loadProfile();
+      }
     }
     catch (err) {
       console.log("Error starting onboarding process: " + err);
@@ -291,7 +298,7 @@ export default function ProfilePage() {
     }
   }
 
-  if (!user) return <SafeAreaView style={styles.safeArea} />;
+  if (!user) return <SafeAreaView style={styles.safeArea} edges={['top']} />;
 
   const memberSince = user.created_at
     ? new Date(user.created_at).toLocaleString('default', {
@@ -301,7 +308,7 @@ export default function ProfilePage() {
     : '';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -310,6 +317,7 @@ export default function ProfilePage() {
           ref={scrollRef}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps='handled'
+          showsVerticalScrollIndicator={false}
         >
           {/* Header: Profile pill + Logout square */}
           <View style={styles.header}>
@@ -465,23 +473,23 @@ export default function ProfilePage() {
             <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
-          {/* Previous Reservations banner — opens history page */}
+          {/* Your Reservations banner — opens history page */}
           <TouchableOpacity
             style={styles.banner}
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./PreviousReservations'))}
           >
-            <Text style={styles.bannerText}>Previous{'\n'}Reservations</Text>
+            <Text style={styles.bannerText}>Your{'\n'}Reservations</Text>
             <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
-          {/* Your Current Spots banner — opens spots/bookings page */}
+          {/* Your Seller Account banner — opens spots/bookings page */}
           <TouchableOpacity
             style={styles.banner}
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./YourSpots'))}
           >
-            <Text style={styles.bannerText}>Your{'\n'}Current Spots</Text>
+            <Text style={styles.bannerText}>Your Seller{'\n'}Account</Text>
             <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
@@ -531,7 +539,9 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: H_PAD,
     paddingTop: screenWidth * 0.02,
-    paddingBottom: screenWidth * 0.5,
+    // Extra bottom pad so the last cards can scroll clear of the floating MenuBar,
+    // while the page itself extends edge-to-edge underneath it.
+    paddingBottom: MENU_BAR_HEIGHT + screenWidth * 0.1,
     gap: SECTION_GAP,
   },
 

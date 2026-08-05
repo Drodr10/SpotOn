@@ -11,6 +11,7 @@ import {
   Dimensions,
   Easing,
   Image,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -23,8 +24,8 @@ import * as Haptics from 'expo-haptics';
 
 import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
-import { stripe } from '../utils/stripe';
 import { CustomFonts } from '../constants/theme';
+import { type TimerData, formatRemaining } from '../utils/timeFormat';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
@@ -32,6 +33,7 @@ import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
 import messagesBlack from '../../assets/images/menubar/messages_black.png';
 import addWhite from '../../assets/images/menubar/add_white.png';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ▼▼▼ SIZE CONTROLS ▼▼▼
@@ -141,29 +143,6 @@ function RollingText({ text, style }: { text: string; style: any }) {
   );
 }
 
-// ─── Timer data ───────────────────────────────────────────────────────────────
-type TimerData =
-  | { mode: 'months'; months: number }
-  | { mode: 'weeks';  weeks: number }
-  | { mode: 'days';   days: number; hours: number }
-  | { mode: 'hours';  hours: number; mins: number }
-  | { mode: 'mins';   mins: number; secs: number };
-
-function formatRemaining(ms: number): TimerData {
-  if (ms <= 0) return { mode: 'mins', mins: 0, secs: 0 };
-  const totalSecs   = Math.floor(ms / 1000);
-  const totalMins   = Math.floor(totalSecs / 60);
-  const totalHrs    = Math.floor(totalMins / 60);
-  const totalDays   = Math.floor(totalHrs / 24);
-  const totalWks    = Math.floor(totalDays / 7);
-  const totalMonths = Math.floor(totalWks / 4);
-  if (totalMonths >= 1) return { mode: 'months', months: totalMonths };
-  if (totalWks    >= 1) return { mode: 'weeks',  weeks: totalWks };
-  if (totalDays   >= 1) return { mode: 'days',   days: totalDays, hours: totalHrs % 24 };
-  if (totalHrs    >= 1) return { mode: 'hours',  hours: totalHrs, mins: totalMins % 60 };
-  return { mode: 'mins', mins: totalMins, secs: totalSecs % 60 };
-}
-
 // ─── Timer content ────────────────────────────────────────────────────────────
 function TimerContent({ timer, barH }: { timer: TimerData; barH: number }) {
   const large: any = {
@@ -257,6 +236,54 @@ export default function MenuBar() {
   const [now, setNow]             = useState<number>(Date.now());
   const [screenW, setScreenW]     = useState(Dimensions.get('window').width);
 
+  // ── Payout-info popup (shown when tapping + before entering the create flow) ──
+  const [showAddInfo, setShowAddInfo] = useState(false);
+  const addInfoAnim   = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  const addInfoBackdrop = useRef(new Animated.Value(0)).current;
+  // Slide direction to hand off to the create-listing route once the user continues.
+  const addInfoSlide  = useRef<'slide_from_left' | 'slide_from_right'>('slide_from_right');
+
+  const openAddInfo = (animation: 'slide_from_left' | 'slide_from_right') => {
+    addInfoSlide.current = animation;
+    addInfoAnim.setValue(Dimensions.get('window').height);
+    setShowAddInfo(true);
+    Animated.parallel([
+      // Spring to match the springy feel of the other card popups in the app.
+      Animated.spring(addInfoAnim, {
+        toValue: 0,
+        damping: 14,
+        stiffness: 130,
+        mass: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(addInfoBackdrop, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeAddInfo = (cb?: () => void) => {
+    Animated.parallel([
+      Animated.spring(addInfoAnim, {
+        toValue: Dimensions.get('window').height,
+        damping: 14,
+        stiffness: 130,
+        mass: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(addInfoBackdrop, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowAddInfo(false);
+      cb?.();
+    });
+  };
+
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', ({ window }) => setScreenW(window.width));
     return () => sub.remove();
@@ -284,7 +311,7 @@ export default function MenuBar() {
       if (cancelled) return;
       setAvatarUrl((profileRow?.avatar_url as string | null) ?? null);
 
-      const res = await api.getActiveReservation(user.id);
+      const res = await api.getInProgressReservation(user.id);
       if (cancelled) return;
       if (res?.endTime) setEndTime(new Date(res.endTime));
       else setEndTime(null);
@@ -386,18 +413,10 @@ export default function MenuBar() {
         return;
       }
 
-      const hasStripe = await stripe.userHasStripeAccount(session.user.id);
-      if (!hasStripe) {
-        Alert.alert(
-          'Payouts Not Set Up',
-          'Please set up payouts in your Profile before creating a listing.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Go to Profile', onPress: () => router.push({ pathname: '/Profile', params: { animation } } as any) },
-          ]
-        );
-        return;
-      }
+      // Zero-friction listing: no Stripe account required up front. Show a quick
+      // heads-up about deferred payout setup, then enter the create-listing flow.
+      openAddInfo(animation);
+      return;
     }
 
     if (key === 'profile')  router.push({ pathname: '/Profile',       params: { animation } } as any);
@@ -410,7 +429,10 @@ export default function MenuBar() {
 
   const addIconSize = Math.round(barH * ADD_ICON_RATIO);
 
+  const W = screenW;
+
   return (
+    <>
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: insets.bottom + BOTTOM_OFFSET }]}>
       <View style={styles.barRow}>
         {/* Main pill — profile, home, messages */}
@@ -528,6 +550,56 @@ export default function MenuBar() {
         </TouchableOpacity>
       </View>
     </View>
+
+    {/* Payout-info popup — slides up when tapping +, mirrors the create-listing
+        rate popups (black card, Continue button). */}
+    <Modal visible={showAddInfo} transparent animationType="none" onRequestClose={() => closeAddInfo()}>
+      <Animated.View style={[styles.addInfoBackdrop, { opacity: addInfoBackdrop }]}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => closeAddInfo()} />
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.addInfoCard,
+          {
+            bottom: W * 0.05 + insets.bottom,
+            paddingTop: W * 0.055,
+            paddingBottom: W * 0.045,
+            paddingHorizontal: W * 0.06,
+            borderRadius: W * 0.07,
+            transform: [{ translateY: addInfoAnim }],
+          },
+        ]}
+      >
+        <Image
+          source={spotonLogoCircle}
+          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+          resizeMode="contain"
+        />
+
+        <Text style={[styles.addInfoTitle, { fontSize: W * 0.055, marginBottom: W * 0.03, marginTop: W * 0.005 }]}>
+          List now, get paid later
+        </Text>
+        <Text style={[styles.addInfoBody, { fontSize: W * 0.036, lineHeight: W * 0.052, marginBottom: W * 0.055 }]}>
+          You can create your listing and start earning right away — no business account needed. When your first booking
+          comes in, we'll ask for a few quick payout details so your money goes straight to your bank.
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.addInfoContinue, { height: W * 0.12, borderRadius: W * 0.06 }]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            closeAddInfo(() =>
+              router.push({ pathname: '/CreateListing2', params: { animation: addInfoSlide.current } } as any)
+            );
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.addInfoContinueText, { fontSize: W * 0.04 }]}>Continue</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </Modal>
+    </>
   );
 }
 
@@ -584,5 +656,45 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 1,
     backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+
+  // ── Payout-info popup ────────────────────────────────────────────────────────
+  addInfoBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  addInfoCard: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: '#000',
+    zIndex: 20,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+  },
+  addInfoLogo: {
+    position: 'absolute',
+    opacity: 0.9,
+    zIndex: 1,
+  },
+  addInfoTitle: {
+    fontFamily: CustomFonts.BevellierMedium,
+    color: '#fff',
+  },
+  addInfoBody: {
+    fontFamily: CustomFonts.SwitzerLight,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  addInfoContinue: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addInfoContinueText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    color: '#fff',
   },
 });
