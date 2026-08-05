@@ -20,5 +20,14 @@ def update_profile(current_user_id, user_id):
         return jsonify({"error": "Forbidden: You can only update your own profile."}), 403
 
     data = request.json
-    response = supabase.table("profiles").update(data).eq("id", user_id).execute()
+    
+    # Whitelist of fields that can be updated by the user
+    allowed_fields = ['username', 'full_name', 'avatar_url']
+    
+    update_data = {key: data[key] for key in allowed_fields if key in data}
+
+    if not update_data:
+        return jsonify({"error": "No valid fields to update."}), 400
+
+    response = supabase.table("profiles").update(update_data).eq("id", user_id).execute()
     return jsonify(response.data), 200
