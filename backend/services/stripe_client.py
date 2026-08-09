@@ -36,9 +36,23 @@ def _to_cents(value) -> int:
 
 
 def _fresh_customer_session(customer_id: str):
+    # "mobile_payment_element", not "payment_element": the latter is the WEB
+    # Elements component. Handing a web-scoped CustomerSession secret to the
+    # mobile PaymentSheet makes its /v1/elements/sessions load fail, which the
+    # SDK surfaces only as the generic code "Failed" ("There was an unexpected
+    # error -- try again in a few seconds"). The real signal is in the device
+    # log: `mc_elements_session_load_failed`.
     return stripe.CustomerSession.create(
         customer=customer_id,
-        components={"payment_element": {"enabled": True}},
+        components={
+            "mobile_payment_element": {
+                "enabled": True,
+                "features": {
+                    "payment_method_save": "enabled",
+                    "payment_method_remove": "enabled",
+                },
+            }
+        },
     )
 
 
