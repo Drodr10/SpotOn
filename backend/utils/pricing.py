@@ -91,6 +91,11 @@ def _compute_daily_only(daily_rate: Decimal, dur_days: Decimal):
     return subtotal, None, 'daily', daily_rate, units
 
 
+def _fee_rate(tier: str) -> Decimal:
+    """Platform fee by tier: short stays 15%, long stays 7%."""
+    return Decimal('0.15') if tier in ('hourly', 'daily') else Decimal('0.07')
+
+
 def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str, Any]:
     start = _parse_iso8601(start_ts)
     end = _parse_iso8601(end_ts)
@@ -110,46 +115,52 @@ def calculate_final_price(listing: Dict[str, Any], start_ts, end_ts) -> Dict[str
     weekly_rate = _to_decimal(listing.get('weekly_rate'))
     monthly_rate = _to_decimal(listing.get('monthly_rate'))
 
-    line_items = None
-    subtotal = None
+    # ── Tier selection ─────────────────────────────────────────────────────────
+    # A tier is eligible when the STAY IS ACTUALLY THAT LONG. It used to be
+    # eligible when the RATE MERELY EXISTED, which is the entire bug: any listing
+    # with a weekly or monthly rate took the long-stay path, where `units` is
+    # floored at 1, so a short booking was billed a whole period. A $10/hr listing
+    # with a $500 monthly rate charged $535 for one hour; $3/hr with $50/week
+    # charged $53.50 for ten minutes. The hourly and daily branches below were
+    # unreachable for any such listing — which is why this never showed up as a
+    # wrong number in the common case, only as a wrong TIER.
+    #
+    # The duration thresholds and their precedence are unchanged from before, so
+    # a booking long enough to have qualified for a coarse tier still gets exactly
+    # the same price. This fix only stops SHORT bookings being captured.
+    eps = Decimal('0.000001')
 
-    # ── Weekly / monthly listings ──────────────────────────────────────────────
-    if weekly_rate is not None or monthly_rate is not None:
-        eps = Decimal('0.000001')
-        if monthly_rate is not None and (dur_weeks + eps >= Decimal(4) or weekly_rate is None):
-            tier = 'monthly'
-            units = dur_months if dur_months >= Decimal(1) else Decimal(1)
-            rate_used = monthly_rate
-        elif weekly_rate is not None:
-            tier = 'weekly'
-            units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
-            rate_used = weekly_rate
-        elif daily_rate is not None:
-            tier = 'daily'
-            units = dur_days if dur_days >= Decimal(1) else Decimal(1)
-            rate_used = daily_rate
-        elif hourly_rate is not None:
-            subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
-        else:
-            raise PricingError('No rates available for this listing')
+    coarse = None
+    if monthly_rate is not None and dur_weeks + eps >= Decimal(4):
+        m_units = dur_months if dur_months >= Decimal(1) else Decimal(1)
+        coarse = (monthly_rate * m_units, None, 'monthly', monthly_rate, m_units)
+    elif weekly_rate is not None and dur_days + eps >= Decimal(7):
+        w_units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
+        coarse = (weekly_rate * w_units, None, 'weekly', weekly_rate, w_units)
 
-        if subtotal is None:
-            subtotal = rate_used * units
-
-    # ── Hourly listings: use hourly rate as base, cap per day when daily_rate set ─
+    if coarse is not None:
+        subtotal, line_items, tier, rate_used, units = coarse
+    elif hourly_rate is not None:
+        # Folds in the daily rate, capping each full day at daily_rate.
+        subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(
+            hourly_rate, daily_rate, dur_hours)
+    elif daily_rate is not None:
+        subtotal, line_items, tier, rate_used, units = _compute_daily_only(daily_rate, dur_days)
+    elif weekly_rate is not None:
+        # Too short to qualify, but a week is the finest rate published for this
+        # listing, so it is what the booking costs.
+        w_units = dur_weeks if dur_weeks >= Decimal(1) else Decimal(1)
+        subtotal, line_items, tier, rate_used, units = (
+            weekly_rate * w_units, None, 'weekly', weekly_rate, w_units)
+    elif monthly_rate is not None:
+        m_units = dur_months if dur_months >= Decimal(1) else Decimal(1)
+        subtotal, line_items, tier, rate_used, units = (
+            monthly_rate * m_units, None, 'monthly', monthly_rate, m_units)
     else:
-        if hourly_rate is None and daily_rate is not None:
-            subtotal, line_items, tier, rate_used, units = _compute_daily_only(daily_rate, dur_days)
-        elif hourly_rate is None:
-            raise PricingError('No hourly rate available for this listing')
-        else:
-            subtotal, line_items, tier, rate_used, units = _compute_hourly_with_day_cap(hourly_rate, daily_rate, dur_hours)
+        raise PricingError('No rates available for this listing')
 
     # ── Fee ────────────────────────────────────────────────────────────────────
-    if tier in ('hourly', 'daily'):
-        fee_rate = Decimal('0.15')
-    else:
-        fee_rate = Decimal('0.07')
+    fee_rate = _fee_rate(tier)
 
     quant = Decimal('0.01')
     subtotal = subtotal.quantize(quant, rounding=ROUND_HALF_UP)
