@@ -1307,8 +1307,31 @@ function BookingView({
 }) {
   const router = useRouter();
 
-  // Mount-time anchor — minutes captured once, never drifts with wall clock.
+  // Mount-time anchor. Still frozen ON PURPOSE, but now only for Schedule mode,
+  // which borrows its minutes from it (see the booking-math memo below) — a
+  // scheduled start must not drift under the user while they pick an hour.
   const mountTime = useMemo(() => new Date(), []);
+
+  // "Now", re-derived on a timer. Current-mode bookings and the picker's floor
+  // read this instead of the frozen anchor.
+  //
+  // Both used to read mountTime, which was captured once and never refreshed.
+  // Everything downstream derived from it — the default hour, the earliest
+  // bookable instant, the summary line, the price — so they all stayed
+  // consistent with each other while drifting into the past together, which is
+  // exactly why nothing on screen ever looked wrong. Sit on the booking sheet
+  // for two minutes deciding and you booked a slot that started two minutes
+  // ago, paying for time already gone. The exposure had no upper bound: it was
+  // however long the screen stayed open.
+  //
+  // 15s is far below the smallest bookable unit, so the displayed time is never
+  // meaningfully stale, and one interval is cheap enough to leave running for
+  // the life of the screen.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Listings that are reserved right now / not yet started get a locked Current
   // tab and a Schedule mode pre-seeded to next-available. Computed once at mount
@@ -1320,9 +1343,12 @@ function BookingView({
     return `Not available currently, but you can schedule after ${formatSmartWhen(nextAvailableAt)}.`;
   }, [nextAvailableAt]);
 
-  // "Earliest bookable" anchor — replaces mountTime for start-time initialization
+  // "Earliest bookable" anchor — replaces `now` for start-time initialization
   // whenever the listing is currently locked (reserved / not-yet-started).
-  const earliestStart = unavailableNow ? nextAvailableAt! : mountTime;
+  // Reads the ticking `now` so the floor actually advances; when it was the
+  // frozen anchor, the picker's own lower bound went stale, which is why the UI
+  // could not stop you selecting a time that had already passed.
+  const earliestStart = unavailableNow ? nextAvailableAt! : now;
 
   // ─── Booking-mode state (Current is default per Figma) ───────────────────
   const [bookingMode, setBookingMode] = useState<'current' | 'schedule'>('current');
@@ -1485,16 +1511,20 @@ function BookingView({
   // ─── Derived booking math ───────────────────────────────────────────────
   const { startDateTime, endDateTime, hoursBooked } = useMemo(() => {
     if (bookingMode === 'current') {
-      const start = mountTime;
+      // Copy rather than hand out `now` itself: this is returned as
+      // startDateTime, and the schedule branch below mutates its own start with
+      // setHours — one careless edit away from corrupting the shared clock.
+      const start = new Date(now);
       const end = new Date(start.getTime() + currentHours * 3600 * 1000);
       return { startDateTime: start, endDateTime: end, hoursBooked: currentHours };
     }
-    // schedule
+    // schedule — minutes come from the FROZEN anchor, not the ticking clock, so
+    // a start the user picked stays put instead of creeping forward every 15s.
     const start = new Date(scheduleStart);
     start.setHours(startHour, mountTime.getMinutes(), 0, 0);
     const end = new Date(start.getTime() + (endHour - startHour) * 3600 * 1000);
     return { startDateTime: start, endDateTime: end, hoursBooked: endHour - startHour };
-  }, [bookingMode, currentHours, mountTime, scheduleStart, startHour, endHour]);
+  }, [bookingMode, currentHours, now, mountTime, scheduleStart, startHour, endHour]);
 
   // ─── Summary line ───────────────────────────────────────────────────────
   const sameDay =
