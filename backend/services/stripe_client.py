@@ -243,11 +243,19 @@ def create_booking_payment(listing_id: str, renter_id: str, vehicle_id: str,
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
     hold_row = hold_result.data[0] if hold_result.data else {}
-    if hold_row.get("error_message") == "slot_unavailable":
+    hold_error = hold_row.get("error_message")
+    if hold_error == "slot_unavailable":
         return jsonify({
             "error": "This spot is being booked right now. Try again in a few minutes.",
             "code": "slot_unavailable",
         }), 409
+    if hold_error:
+        # acquire_booking_hold now also refuses bookings outside the listing's
+        # availability window and ones starting in the past, and returns the
+        # reason as text. Surface it: falling through to the generic 500 below
+        # would tell the renter "Could not hold this slot" when the real answer
+        # is "this spot isn't available until March 3rd".
+        return jsonify({"error": hold_error, "code": "invalid_booking"}), 400
     hold_id = hold_row.get("hold_id")
     if not hold_id:
         return jsonify({"error": "Could not hold this slot"}), 500
