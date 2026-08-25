@@ -396,3 +396,46 @@ the change, so the strict trigger rejects it identically either way. It neither
 fixes nor worsens the charge-then-refund path.
 
 **None of these PRs fix §1.** Applying `0730` still outranks every merge here.
+
+---
+
+## 9. PostGIS: present, indexed, granted — and completely inert
+
+Surfaced by a Supabase advisor warning about `public.spatial_ref_sys`, then
+traced through history because the memory of building it was correct.
+
+`9d2d6c5` (2026-03-19) added real proximity search: a
+`listings.location geography(Point,4326)` column, a GiST index
+`idx_listings_location`, and `get_nearby_listings(user_lat, user_long,
+max_meters)` using `ST_DWithin` with `<->` distance ordering. `fcc137f` (#39,
+2026-04-20) then collapsed every migration into the single `remote_schema.sql`
+dump — which **kept all of it**. Column, index, function and its grants to
+`anon`/`authenticated` are all still in the schema today.
+
+What did not survive is anything using it:
+
+- **No caller.** Nothing in `frontend/src` or `backend/` references
+  `get_nearby_listings`. Distance is computed from `latitude`/`longitude`, with
+  geocoding via Nominatim.
+- **No data.** `backend/routes/listings.py` inserts only `latitude`,
+  `longitude`, `address` and `price_per_hour` — never `location`. Probed
+  2026-08-25: **all 22 listings have `location` NULL.**
+
+So `get_nearby_listings()` is live, granted to the client, and would return zero
+rows for every possible query — `ST_DWithin` against NULL yields NULL. Wiring
+the app to it without also populating the column would look like "no listings
+near you" rather than an error. Same silent-failure shape as the rest of this
+document.
+
+Two honest options, both deliberate and neither urgent:
+
+1. **Drop it.** Remove `get_nearby_listings`, `idx_listings_location`, the
+   `location` column and the `postgis` extension. The `spatial_ref_sys` advisor
+   error disappears with it, since that table only exists because PostGIS does.
+2. **Revive it.** Populate `location` on insert (a trigger from lat/long, plus a
+   one-off backfill) and call the function from search. Indexed radius queries
+   beat client-side distance maths as listings grow.
+
+Until one is chosen, `spatial_ref_sys` is safe to ignore: it holds map-projection
+reference data, no user data, and RLS cannot be enabled on it because the
+extension owns it.
