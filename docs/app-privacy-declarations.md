@@ -28,8 +28,14 @@ in `frontend/src/`, not from memory.
 | Contacts, browsing history, search history, health, ads data | No | — | — | Not collected in any form |
 | Crash data / diagnostics / analytics | No | — | — | No analytics or crash SDK is installed |
 
-**Tracking is "No" across the board.** There is no third-party analytics, advertising or
-attribution SDK in `package.json`, so no App Tracking Transparency prompt is needed.
+**Tracking is "No" across the board** as the app stands. No third-party analytics,
+advertising or attribution SDK is present, so no App Tracking Transparency prompt is
+needed. Re-check before each submission — adding one changes these answers *and* makes
+§7 of the privacy policy untrue:
+
+```bash
+grep -iE "sentry|analytics|amplitude|mixpanel|segment|firebase|facebook|appsflyer|branch|posthog|bugsnag" frontend/package.json
+```
 
 ### Purposes to select
 App Functionality for everything. Not Analytics, not Advertising, not Personalisation —
@@ -99,3 +105,5 @@ confirm with `grep -A1 UsageDescription frontend/ios/SpotOn/Info.plist`.
 - [ ] Add an in-app link to that URL — Play wants the policy reachable from inside the app
 - [ ] Fix the `Info.plist` keys and strings above
 - [ ] Fill both store forms using the table at the top
+- [ ] Decide who watches the deletion inbox, and write down the steps they run —
+      §8 promises completion within 30 days and nothing in the repo automates it
