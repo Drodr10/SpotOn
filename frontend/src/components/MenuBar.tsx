@@ -582,7 +582,7 @@ export default function MenuBar() {
         </Text>
         <Text style={[styles.addInfoBody, { fontSize: W * 0.036, lineHeight: W * 0.052, marginBottom: W * 0.055 }]}>
           You can create your listing and start earning right away — no business account needed. When your first booking
-          comes in, we'll ask for a few quick payout details so your money goes straight to your bank.
+          comes in, we&apos;ll ask for a few quick payout details so your money goes straight to your bank.
         </Text>
 
         <TouchableOpacity
