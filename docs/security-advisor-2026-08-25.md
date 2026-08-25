@@ -21,8 +21,24 @@ This came in with `20260603002952`, the migration recovered from the remote
 history — it had never been reviewed, because it had never been in the repo.
 
 ### 2. Leaked password protection is off — `auth_leaked_password_protection`
+### — BLOCKED: Pro plan only
 
-One toggle in the dashboard. Checks new passwords against HaveIBeenPwned. Free.
+Supabase's docs confirm it: "Leaked password protection is available on the Pro
+Plan and above." The dashboard refuses the toggle on Hobby. Not worth $25/month
+on its own — revisit if the project moves to Pro for other reasons.
+
+What is available meanwhile, in Auth settings, and worth setting now:
+
+- **Minimum password length.** Raise it from the default 6. The docs are silent
+  on plan gating for this one, so check whether the field is editable.
+- **Required character classes** (digits, upper, lower, symbols), same caveat.
+- **OAuth providers.** Google and Apple sign-in remove passwords from the threat
+  model entirely for anyone who uses them. Worth noting for a different reason
+  too: Apple's App Store rules require Sign in with Apple if you offer other
+  third-party sign-in options, so this may be on the launch path regardless.
+
+This was the lowest-value item of the five, and it is now the only one with a
+price tag. Deprioritised rather than done.
 
 ### 3. `get_nearby_listings` is exposed, unsafe-ish, and dead
 
