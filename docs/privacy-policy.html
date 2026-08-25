@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How the SpotOn parking app collects, uses, shares and deletes personal information.">
+<title>SpotOn Privacy Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F1F0EC;
+    --surface:     #FFFFFF;
+    --surface-alt: #E7E5DF;
+    --ink:         #1A1C19;
+    --ink-soft:    #565B54;
+    --ink-faint:   #82877E;
+    --rule:        #D6D4CC;
+    --rule-strong: #B7B5AB;
+    --accent:      #1F5D48;
+    --accent-soft: #E0EDE7;
+    --warn:        #8A5A00;
+    --warn-soft:   #F8EED8;
+    --warn-rule:   #D9B771;
+    --code-bg:     #EAE8E2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #151714;
+      --surface:     #1D201C;
+      --surface-alt: #262A24;
+      --ink:         #E9EBE6;
+      --ink-soft:    #A6ABA1;
+      --ink-faint:   #7C8277;
+      --rule:        #313630;
+      --rule-strong: #464C44;
+      --accent:      #74C4A5;
+      --accent-soft: #172C24;
+      --warn:        #E0AF5E;
+      --warn-soft:   #2B2313;
+      --warn-rule:   #6A5220;
+      --code-bg:     #262A24;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #151714;
+    --surface:     #1D201C;
+    --surface-alt: #262A24;
+    --ink:         #E9EBE6;
+    --ink-soft:    #A6ABA1;
+    --ink-faint:   #7C8277;
+    --rule:        #313630;
+    --rule-strong: #464C44;
+    --accent:      #74C4A5;
+    --accent-soft: #172C24;
+    --warn:        #E0AF5E;
+    --warn-soft:   #2B2313;
+    --warn-rule:   #6A5220;
+    --code-bg:     #262A24;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+
+  h1, h2, h3 { font-family: 'Archivo', system-ui, sans-serif; text-wrap: balance; }
+  h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; margin: 0 0 .4rem; line-height: 1.15; }
+  h2 {
+    font-size: 1.28rem; font-weight: 600; letter-spacing: -.01em;
+    margin: 3rem 0 .9rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+  }
+  h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .5rem; }
+  h3 { font-size: 1.02rem; font-weight: 600; margin: 1.9rem 0 .5rem; }
+  p, li { color: var(--ink-soft); }
+  p { margin: 0 0 1rem; }
+  strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  ul, ol { padding-left: 1.15rem; margin: 0 0 1rem; }
+  li { margin-bottom: .45rem; }
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .85em; background: var(--code-bg);
+    padding: .1em .35em; border-radius: 3px; color: var(--ink);
+  }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace; font-size: .72rem;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 .7rem;
+  }
+  .dates {
+    font-size: .88rem; color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; gap: .35rem 1.5rem; margin: 0 0 2rem;
+  }
+
+  .fill {
+    background: var(--warn-soft); color: var(--warn);
+    border-bottom: 2px solid var(--warn-rule);
+    font-family: 'IBM Plex Mono', monospace; font-size: .82em;
+    font-weight: 500; padding: .12em .4em; border-radius: 3px;
+  }
+
+  .todo {
+    background: var(--warn-soft); border: 2px solid var(--warn-rule);
+    border-radius: 8px; padding: 1.1rem 1.3rem; margin: 0 0 2.5rem;
+  }
+  .todo h2 {
+    margin: 0 0 .6rem; padding: 0; border: 0;
+    font-size: .95rem; color: var(--warn); letter-spacing: .04em; text-transform: uppercase;
+  }
+  .todo p, .todo li { color: var(--ink); font-size: .93rem; }
+  .todo p:last-child, .todo ol { margin-bottom: 0; }
+
+  .lede {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 1.3rem 1.5rem; margin: 0 0 1rem;
+  }
+  .lede p:last-child { margin-bottom: 0; }
+  .lede ul { margin-bottom: 0; }
+
+  .tablewrap { overflow-x: auto; margin: 0 0 1.4rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; min-width: 34rem; }
+  th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: 'IBM Plex Mono', monospace; font-size: .72rem; font-weight: 500;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint);
+    background: var(--surface-alt); white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td { color: var(--ink-soft); }
+  td:first-child { color: var(--ink); font-weight: 500; }
+
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: .9rem 1.2rem; border-radius: 0 8px 8px 0; margin: 0 0 1.4rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout p { color: var(--ink); }
+
+  .toc { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 1.2rem 1.5rem; margin: 0 0 1rem; }
+  .toc ol { margin: 0; padding-left: 1.3rem; columns: 2; column-gap: 2rem; }
+  .toc li { margin-bottom: .3rem; font-size: .92rem; break-inside: avoid; }
+  @media (max-width: 34rem) { .toc ol { columns: 1; } }
+
+  footer {
+    margin-top: 3.5rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+    font-size: .85rem; color: var(--ink-faint);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ─────────────────────────────────────────────────────────────────────────
+     DELETE THE <div class="todo"> BLOCK BELOW BEFORE PUBLISHING THIS PAGE.
+     It lists every placeholder that must be filled in first. The page is not
+     valid as a store-submitted privacy policy while any <span class="fill">
+     marker remains in it.
+     ───────────────────────────────────────────────────────────────────── -->
+<div class="todo">
+  <h2>Before this page goes live — delete this box</h2>
+  <p>Search the page for <code>class="fill"</code> and replace every one. In order of importance:</p>
+  <ol>
+    <li><strong>The deletion contact address.</strong> Google Play requires a working URL where someone who has <em>uninstalled</em> the app can start a deletion request. That is this page, and it only works if the address in §8 is real and monitored. This one blocks submission.</li>
+    <li><strong>Who publishes the app</strong> — the name you register with Apple and Google (§1). If there is no company, your own names are fine and honest.</li>
+    <li><strong>General contact address and the effective date</strong> (§1, header).</li>
+    <li><strong>Governing location</strong> (§11) — the state or country whose law applies.</li>
+  </ol>
+</div>
+
+<p class="eyebrow">SpotOn</p>
+<h1>Privacy Policy</h1>
+<div class="dates">
+  <span>Effective <span class="fill">[ DATE ]</span></span>
+  <span>Last updated <span class="fill">[ DATE ]</span></span>
+</div>
+
+<div class="lede">
+  <p><strong>The short version.</strong> SpotOn connects people who need to park with people who have a space to rent. To do that we hold your name and email, the vehicle you park, the spots you list, your bookings, and the messages you exchange with the other party.</p>
+  <p>We do not sell your information, we do not show you ads, and we do not use third-party analytics or tracking software. Card numbers never reach our servers — Stripe handles those. You can delete your account from inside the app.</p>
+  <p>The rest of this page is the detail behind those sentences.</p>
+</div>
+
+<div class="toc">
+  <ol>
+    <li><a href="#who">Who we are</a></li>
+    <li><a href="#collect">What we collect</a></li>
+    <li><a href="#permissions">Device permissions</a></li>
+    <li><a href="#use">How we use it</a></li>
+    <li><a href="#share">Who else sees it</a></li>
+    <li><a href="#payments">Payments and payouts</a></li>
+    <li><a href="#notdo">What we don't do</a></li>
+    <li><a href="#deletion">Keeping and deleting your data</a></li>
+    <li><a href="#rights">Your rights</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#legal">Age, changes and governing law</a></li>
+    <li><a href="#contact">Contact</a></li>
+  </ol>
+</div>
+
+<h2 id="who"><span class="num">1</span>Who we are</h2>
+<p>SpotOn is a mobile app for renting private parking spaces, published by <span class="fill">[ LEGAL NAME OR THE NAMES OF THE PEOPLE PUBLISHING IT ]</span> ("we", "us"). This policy covers the SpotOn iOS and Android apps and the servers behind them. It does not cover anything that happens off the platform between a renter and a host.</p>
+<p>For anything in this policy, write to <span class="fill">[ CONTACT EMAIL ]</span>.</p>
+
+<h2 id="collect"><span class="num">2</span>What we collect</h2>
+<p>Everything below is either something you type into the app or something the app produces as you use it. There is no hidden collection and no data bought from anyone else.</p>
+
+<h3>Your account</h3>
+<div class="tablewrap"><table>
+  <thead><tr><th>What</th><th>Where it comes from</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Name</td><td>You, at sign-up; editable in Profile</td><td>Shown to the other party in a booking</td></tr>
+    <tr><td>Email address</td><td>You, at sign-up</td><td>Sign-in, account confirmation, and account-related mail</td></tr>
+    <tr><td>Password</td><td>You</td><td>Stored only as a cryptographic hash by our authentication provider. We never see it and cannot recover it.</td></tr>
+    <tr><td>Profile photo</td><td>Optional; you choose it from your photo library</td><td>Shown on your profile</td></tr>
+    <tr><td>Rating</td><td>Produced by the platform</td><td>Trust between renters and hosts</td></tr>
+    <tr><td>Date you joined</td><td>Produced by the platform</td><td>Shown on your profile as "member since"</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Your vehicle</h3>
+<div class="tablewrap"><table>
+  <thead><tr><th>What</th><th>Where it comes from</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Make, model and colour</td><td>You, when you register a vehicle</td><td>So a host can identify the car in their space</td></tr>
+    <tr><td>Licence plate</td><td>You, when you register a vehicle</td><td>Same reason. See the note below — this one is worth reading.</td></tr>
+  </tbody>
+</table></div>
+<div class="callout">
+  <p><strong>About your licence plate.</strong> Around the app you normally see only the last four characters. But while you have a booking in progress at someone's spot, <strong>that host can see the full plate of the vehicle you booked with</strong> — they need it to tell your car apart from one that should not be there. No other user can see it, and the host's access ends with the booking. The full plate is deleted when you remove the vehicle or delete your account.</p>
+</div>
+
+<h3>If you list a parking space</h3>
+<div class="tablewrap"><table>
+  <thead><tr><th>What</th><th>Where it comes from</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>The address of the space</td><td>You type it, or drop a pin on the map</td><td>So renters can find and reach it</td></tr>
+    <tr><td>Its exact coordinates</td><td>Derived from the address, the pin, or your device location if you tap "use my location"</td><td>Distance and map search</td></tr>
+    <tr><td>Photos of the space</td><td>Your camera or photo library</td><td>Shown on the listing</td></tr>
+    <tr><td>Prices and availability</td><td>You</td><td>Shown on the listing; used to price a booking</td></tr>
+  </tbody>
+</table></div>
+<p>A listing is public inside the app. Anyone searching can see its address, its position on the map and its photos, so do not put anything in a listing photo or address you would not want other users to see.</p>
+
+<h3>Bookings and messages</h3>
+<div class="tablewrap"><table>
+  <thead><tr><th>What</th><th>Where it comes from</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Booking times, price, our service fee and the host's payout</td><td>Produced when you book</td><td>Running the booking; paying the host; support and disputes</td></tr>
+    <tr><td>Short-lived checkout holds</td><td>Produced when you start checking out</td><td>Stops two people paying for the same space at once. Expires on its own.</td></tr>
+    <tr><td>Messages between renter and host</td><td>You and the other party</td><td>Arranging access to the space</td></tr>
+    <tr><td>Payment references from Stripe</td><td>Stripe, when a payment succeeds</td><td>Matching a payment to a booking; refunds and disputes</td></tr>
+    <tr><td>A record of push notifications we sent you</td><td>Produced by the platform</td><td>So we do not send the same notification twice</td></tr>
+  </tbody>
+</table></div>
+<p>Messages are not end-to-end encrypted. They are stored on our servers and can be read by us if we have to investigate a report or a dispute.</p>
+
+<h2 id="permissions"><span class="num">3</span>Device permissions</h2>
+<p>The app asks for these when it first needs them, never at launch. You can refuse any of them and still use the app, with the limits described here, and you can change your mind later in your device settings.</p>
+<div class="tablewrap"><table>
+  <thead><tr><th>Permission</th><th>What it's for</th><th>If you say no</th></tr></thead>
+  <tbody>
+    <tr><td>Location, while using the app</td><td>Finding spots near you, and setting a listing's location when you tap "use my location"</td><td>Search still works — you type a place instead of using your current position</td></tr>
+    <tr><td>Camera</td><td>Taking a photo of a space you are listing</td><td>You can pick an existing photo instead</td></tr>
+    <tr><td>Photo library</td><td>Choosing a profile picture or a listing photo</td><td>Your profile keeps its default picture</td></tr>
+    <tr><td>Notifications</td><td>Booking confirmations, reminders and messages</td><td>You will need to open the app to see updates</td></tr>
+  </tbody>
+</table></div>
+<div class="callout">
+  <p><strong>On location specifically:</strong> the app only ever asks for location <em>while you are using it</em>. It does not track you in the background, and your device's position is not stored on our servers — it is used on your device to work out which nearby listings to show. What we do store is the fixed location of a parking space you choose to list, which is a property of the listing rather than a record of your movements.</p>
+</div>
+
+<h2 id="use"><span class="num">4</span>How we use it</h2>
+<p>We use what we collect to run the service, and for nothing else:</p>
+<ul>
+  <li>Creating your account and signing you in</li>
+  <li>Showing you parking spaces near where you are looking</li>
+  <li>Taking payment, calculating our fee, and paying hosts</li>
+  <li>Letting a renter and a host identify each other, the vehicle and the space</li>
+  <li>Sending booking notifications and account email</li>
+  <li>Investigating problems, disputes, fraud and abuse</li>
+  <li>Meeting our legal and tax obligations</li>
+</ul>
+<p>We do not use your information to build advertising profiles, and we do not make automated decisions about you that have a legal or similarly significant effect.</p>
+
+<h2 id="share"><span class="num">5</span>Who else sees it</h2>
+
+<h3>Other people using SpotOn</h3>
+<ul>
+  <li><strong>A host you book with</strong> sees your name, your vehicle's make, model, colour and full licence plate for the duration of the booking, the booking times, and your messages.</li>
+  <li><strong>A renter who books your space</strong> sees your name, the space's address, photos and location, the booking, and your messages.</li>
+  <li><strong>Anyone searching</strong> sees your active listings, including the address and map position.</li>
+</ul>
+
+<h3>Companies that run parts of the service for us</h3>
+<p>These are service providers acting on our instructions, not parties we sell to. Each holds only what its job requires.</p>
+<div class="tablewrap"><table>
+  <thead><tr><th>Provider</th><th>What it does for us</th><th>What it receives</th></tr></thead>
+  <tbody>
+    <tr><td>Supabase</td><td>Database, sign-in, file storage</td><td>Everything in §2 that we store</td></tr>
+    <tr><td>Stripe</td><td>Payments and host payouts</td><td>Payment details, amounts, and host identity documents — see §6</td></tr>
+    <tr><td>Render</td><td>Hosting for our server</td><td>Data passing through the server as you use the app</td></tr>
+    <tr><td>Expo push service</td><td>Delivering push notifications</td><td>Your device's push token and the text of the notification</td></tr>
+    <tr><td>Apple and Google</td><td>Push delivery to your device; maps</td><td>Push tokens; map requests</td></tr>
+    <tr><td>OpenStreetMap / Nominatim</td><td>Turning a typed address into coordinates</td><td>The address text you search for or list</td></tr>
+  </tbody>
+</table></div>
+<p>We may also disclose information if the law requires it, or where we genuinely need to in order to protect someone's safety or to establish or defend a legal claim.</p>
+
+<h2 id="payments"><span class="num">6</span>Payments and payouts</h2>
+<p>Payments run through <a href="https://stripe.com/privacy" rel="noopener">Stripe</a>.</p>
+<p><strong>When you pay for parking,</strong> your card details go from your device to Stripe. They do not pass through our servers and we never hold them. What we keep is the amount, the time, and Stripe's reference for the payment, so a booking can be matched to a payment for refunds and disputes.</p>
+<p><strong>When you are paid as a host,</strong> Stripe has to verify who you are before it can send you money. It collects that information — which can include your date of birth, address, a government identifier such as an SSN or tax ID, and your bank details — <strong>directly, on its own screens.</strong> We never receive it. What we hold is Stripe's identifier for your account and whether payouts are switched on.</p>
+<p>Stripe is an independent controller of the information it collects this way, and handles it under its own privacy policy.</p>
+
+<h2 id="notdo"><span class="num">7</span>What we don't do</h2>
+<ul>
+  <li>We do not sell or rent personal information, and we do not share it for cross-context behavioural advertising.</li>
+  <li>We do not show ads in the app.</li>
+  <li>We do not embed third-party analytics, advertising or tracking software. There is no Facebook SDK, no Google Analytics and no crash-reporting tracker in the app.</li>
+  <li>We do not track your location in the background.</li>
+  <li>We do not store card numbers.</li>
+</ul>
+
+<h2 id="deletion"><span class="num">8</span>Keeping and deleting your data</h2>
+<p>We keep your information for as long as you have an account, and afterwards only as described here. We have not invented a retention period we could not honour: records tied to a payment are kept as long as we may need them for refunds, chargebacks, tax and legal obligations, and the rest goes when your account does.</p>
+
+<h3>Deleting your account in the app</h3>
+<p>Open <strong>Profile</strong>, scroll to the bottom, and tap <strong>Delete my account</strong>.</p>
+
+<h3>Deleting your account after uninstalling</h3>
+<p>If you no longer have the app installed, email <span class="fill">[ DELETION REQUEST EMAIL ]</span> from the address on your SpotOn account and ask us to delete it. We will confirm the request and complete it within 30 days.</p>
+
+<h3>What deletion actually does</h3>
+<p>We want to be exact about this, because "delete" does not mean every trace disappears — and it should not, because some of these records belong to the person you dealt with as much as to you.</p>
+<div class="tablewrap"><table>
+  <thead><tr><th>Removed outright</th><th>Kept</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>
+        Your name and email, replaced by a placeholder<br>
+        Your profile photo<br>
+        Your registered vehicles, <strong>including licence plates</strong><br>
+        Your push notification token<br>
+        Any checkout holds
+      </td>
+      <td>
+        Past bookings, and the messages in them<br>
+        Payment records and Stripe references<br>
+        Your listings, switched off so nothing new can be booked
+      </td>
+    </tr>
+  </tbody>
+</table></div>
+<p>Your sign-in is disabled immediately and the account cannot be used again. What remains carries a placeholder instead of your name, and is kept because a booking and a conversation are the other party's record too, and because payment history has to survive for disputes and tax.</p>
+
+<h3>When we cannot delete straight away</h3>
+<p>We will decline the request, and tell you why, if you still have obligations open:</p>
+<ul>
+  <li>a booking of yours that has not finished</li>
+  <li>a renter with an upcoming booking at a space you host</li>
+  <li>money we have not yet paid out to you</li>
+</ul>
+<p>Deleting in the middle of any of these would strand someone who paid for parking, or forfeit money you are owed. Once the booking ends or the payout lands, the deletion goes through.</p>
+
+<h2 id="rights"><span class="num">9</span>Your rights</h2>
+<p>Whoever and wherever you are, you can:</p>
+<ul>
+  <li><strong>See what we hold</strong> — most of it is visible in the app; ask us for the rest.</li>
+  <li><strong>Correct it</strong> — name, email, photo and vehicles are editable in the app.</li>
+  <li><strong>Delete it</strong> — see §8.</li>
+  <li><strong>Take it with you</strong> — ask and we will send you a machine-readable copy.</li>
+</ul>
+<p>Depending on where you live you may also have the right to object to or restrict certain processing, to withdraw consent you have given, and to complain to your data protection authority. If you are in California, note that we do not sell or share personal information as those terms are defined by the CCPA, and we will not treat you differently for exercising any right.</p>
+<p>To exercise any of these, write to <span class="fill">[ CONTACT EMAIL ]</span>. We may need to confirm you control the account's email address before we act.</p>
+
+<h2 id="security"><span class="num">10</span>Security</h2>
+<p>Traffic between the app and our servers is encrypted in transit. Access to the database is restricted per-user by row-level security, so one account's queries cannot reach another account's rows. Administrative keys are held only on the server and never shipped in the app. Passwords are stored as hashes by our authentication provider, not by us.</p>
+<p>No system is perfectly secure, and we will not pretend otherwise. If we discover a breach affecting your information we will notify you and the relevant authorities as the law requires.</p>
+
+<h2 id="legal"><span class="num">11</span>Age, changes and governing law</h2>
+<p><strong>Age.</strong> SpotOn is for adults. You must be 18 or older to have an account, because using it means entering into payment transactions. We do not knowingly collect information from children. If you believe a child has an account, tell us and we will remove it.</p>
+<p><strong>Where your data is held.</strong> Our providers store and process data in the United States. If you use SpotOn from elsewhere, your information will be transferred there.</p>
+<p><strong>Changes.</strong> If we change this policy we will update the date at the top, and for anything significant we will tell you in the app before it takes effect.</p>
+<p><strong>Governing law.</strong> This policy is governed by the laws of <span class="fill">[ STATE / COUNTRY ]</span>.</p>
+
+<h2 id="contact"><span class="num">12</span>Contact</h2>
+<p>Questions, requests, or anything in this policy that does not match what you see in the app: <span class="fill">[ CONTACT EMAIL ]</span>.</p>
+<p>If something here is wrong, we would rather hear about it than have it stand.</p>
+
+<footer>
+  SpotOn Privacy Policy · Effective <span class="fill">[ DATE ]</span>
+</footer>
+
+</div>
+</body>
+</html>
