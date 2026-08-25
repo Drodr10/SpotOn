@@ -1,3 +1,4 @@
+# Requires Python >= 3.12 (see .python-version and the README).
 flask
 flask-cors
 python-dotenv
