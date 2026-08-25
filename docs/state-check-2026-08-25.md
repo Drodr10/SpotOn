@@ -5,15 +5,34 @@ accurate except where noted. Local clone had not fetched since Aug 9.
 
 ---
 
-## 1. Headline: bookings are charged against a rule set nothing checks first
+## 1. RESOLVED 2026-08-25 — bookings were charged against a rule set nothing checked
+
+> **Fixed.** `20260730005125` was applied to the hosted database on 2026-08-25.
+> Verified read-only afterwards: `reservation_validation_error` answers on the
+> 3-arg signature, and `end_time must be after start_time` short-circuits before
+> the listing lookup — which only the new body does. End to end, on a real
+> hourly-only listing ($3/hr, no daily/weekly/monthly), bookings of 2h, 10h and
+> 8 days all now return ALLOWED. The 10h case is precisely the one that used to
+> be charged and then refused.
+>
+> The section below is kept as the record of what was wrong and why.
+
+### The original finding
 
 Two migrations are merged into `main` but **not applied to the hosted DB**.
 Both probed directly, not inferred.
 
 | Migration | In `main`? | Live? |
 |---|---|---|
-| `20260720120000_add_notification_events` | yes (since Jul) | **NO** |
-| `20260730005125_align_reservation_rate_validation` | **merged today** via #65 | **NO** |
+| `20260720120000_add_notification_events` | yes (since Jul) | ~~NO~~ **applied 2026-08-25** |
+| `20260730005125_align_reservation_rate_validation` | merged via #65 | ~~NO~~ **applied 2026-08-25** |
+
+**As of 2026-08-25 every migration in `supabase/migrations/` is live on the
+hosted database except `20260808120000` (PR #66, a no-op — RLS is already on)
+and `20260808140000` (PR #70, not yet merged).** Re-probed after applying:
+`notification_events`, `reservation_holds`, `get_visible_listings`,
+`listings.available_from/until`, `reservations.payout_status` and the three
+`profiles` columns all report PRESENT.
 
 `reservation_validation_error` does not exist live in *any* signature — both
 the 3-arg and 1-arg forms return `PGRST202 ... no matches found`.
@@ -230,12 +249,12 @@ matching the merge on Aug 5.
 
 ## 6. Suggested order
 
-1. **Apply `20260730005125` to the hosted DB.** This is the one that stops
+1. ~~**Apply `20260730005125` to the hosted DB.**~~ **DONE 2026-08-25.** This is the one that stops
    charging renters for bookings the trigger will refuse. It both installs
    `reservation_validation_error()` (restoring the pre-charge check) and
    replaces the strict May trigger with the tier-fallback rule — the two halves
    only work together, which is why the half-state in §1 is worse than either.
-2. **Apply `20260720120000`.** Unblocks every push notification. Independent of
+2. ~~**Apply `20260720120000`.**~~ **DONE 2026-08-25.** Unblocks every push notification. Independent of
    step 1; it has simply been waiting since July.
 3. **Ask Adrian what they saw**, before assuming. §2 argues the tier-mismatch
    trigger, and the timing fits — but they were at the keyboard and I was not.
