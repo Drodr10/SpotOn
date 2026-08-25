@@ -83,6 +83,14 @@ Not included: `20260808120000` (PR #66) and `20260808140000` (PR #70) are not
 merged to `main` yet, and `20260603002952` needs no repair because it is already
 recorded remotely.
 
+### Baseline completed 2026-08-25
+
+All eight were repaired and `supabase migration list` now shows every local
+migration recorded remotely. Six remote-only rows remain
+(`20260710051100`…`20260711053133`) — the superseded CLI-timestamped duplicates.
+**Leave them.** `db push` ignores remote-only entries, and reverting them would
+write to the tracking table purely for cosmetics while losing the audit trail.
+
 ### Step 2 — confirm, then use it normally
 
 ```bash

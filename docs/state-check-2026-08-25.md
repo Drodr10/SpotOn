@@ -362,10 +362,16 @@ function by `regprocedure`, which raises on its own if it is absent.
 **#66 — resolved: `relrowsecurity` is `true`.** RLS is already enabled on
 `public.reservations` in the hosted DB. So:
 
-- **#66 is a no-op in production.** `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
-  is idempotent and its `DO` guard will pass. Still worth merging — it records
-  the intent and fails loudly if the setting is ever reverted — but merging it
-  changes nothing and closes no hole.
+- **#66 is a no-op against production, but it is not pointless — merge it.**
+  `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` is idempotent and its `DO` guard
+  will pass, so applying it changes nothing today. What it changes is the
+  *repo*: traced on 2026-08-25, **nothing in `supabase/migrations/` enables RLS
+  on `reservations`** — not the base dump, not any merged migration, and not any
+  of the seven versions recovered from the remote history. Someone toggled it in
+  the dashboard between Aug 8 (when this PR's comment recorded it as off) and
+  Aug 25. Until #66 merges, a database rebuilt from this repo comes up with RLS
+  **off** on `reservations` — a security-relevant divergence from production.
+  #66 is the only thing that closes it.
 - **Its migration comment is now wrong and must be fixed before merge.** It
   states that anon "could read every reservation in the table... rewrite any
   booking's price and status, and DELETE bookings outright." Whatever was true
