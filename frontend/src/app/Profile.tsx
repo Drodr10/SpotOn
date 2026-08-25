@@ -110,6 +110,10 @@ export default function ProfilePage() {
   const nameInput = useRef<TextInput>(null);
   const emailInput = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
+  // A ref, not the state flag: the confirm dialog's callback closes over
+  // whatever `deletingAccount` was when the dialog opened, so two quick taps
+  // would open two dialogs that both see `false` and both fire a delete.
+  const deletingRef = useRef(false);
 
   const loadVehicles = async (ownerUserId: string) => {
     const { data, error } = await supabase
@@ -305,6 +309,8 @@ export default function ProfilePage() {
   // user before they commit — the backend anonymises and keeps the shared
   // transactional record rather than erasing the other party's history too.
   const runAccountDeletion = async () => {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
     setDeletingAccount(true);
     setErrorMessage('');
     try {
@@ -332,11 +338,13 @@ export default function ProfilePage() {
       }
       router.replace('/Intro');
     } finally {
+      deletingRef.current = false;
       setDeletingAccount(false);
     }
   };
 
   const confirmDeleteAccount = () => {
+    if (deletingRef.current) return;
     triggerLightHaptic();
     Alert.alert(
       'Delete your account?',
