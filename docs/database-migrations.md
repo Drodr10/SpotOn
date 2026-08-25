@@ -31,53 +31,64 @@ project is **not linked** yet — `supabase/.temp/` holds only `cli-latest`.
 
 ## Do NOT run `supabase db push` yet
 
-Because migrations were applied by hand, the database's migration history table
-is almost certainly empty. `db push` would therefore try to replay **everything
-from the beginning**, starting with `20260421001633_remote_schema.sql` — a
-5,999-line `supabase db pull` dump. Best case it errors; it is not something to
-find out on production.
+`supabase migration list` on 2026-08-25 showed three groups:
 
-The fix is to *baseline*: tell the database which migrations it already has,
-without executing them.
+- **5 matched** (through 2026-05-22) — tracked correctly on both sides.
+- **8 local-only** — everything from `20260705120000` on. Applied by hand
+  through the SQL editor, so the database never recorded them.
+- **7 remote-only** — `20260603002952`, `20260710051100`, `20260710054752`,
+  `20260710060732`, `20260711041350`, `20260711051430`, `20260711053133`.
 
-### Step 1 — link and look
+The remote-only group needed explaining, and the answer is mostly benign: six of
+those seven are the **same migrations as local files**, applied through the CLI
+in June/July and later re-created in the repo under hand-written timestamps.
+`20260710051100 add_deferred_payouts` is local `20260705120000`;
+`20260710054752 add_booking_holds` is local `20260710120000`, and so on. Their
+recorded SQL was recovered from `supabase_migrations.schema_migrations` and
+compared. `20260710060732` looked like a genuine extra fix (qualifying an
+ambiguous `expires_at`) but the local booking-holds file already carries it.
+
+**The seventh was a real gap.** `20260603002952 add_avatar_url_and_bucket` added
+`profiles.avatar_url`, created the public `avatars` storage bucket and four RLS
+policies on `storage.objects` — and existed nowhere in this repo, while five
+application files read `avatar_url`. A database rebuilt from `supabase/migrations/`
+would have had no avatars at all. It has been recovered from the remote history
+into `20260603002952_add_avatar_url_and_bucket.sql`, deliberately using the same
+version number so local and remote line up and it is never re-applied.
+
+### Step 1 — baseline the 8 local-only migrations
+
+Each was verified to be genuinely applied first, by checking that the objects it
+creates exist. Only then:
 
 ```bash
-supabase link --project-ref <ref>     # ref is in the dashboard URL
-supabase migration list               # local vs remote, side by side
+supabase migration repair --status applied 20260705120000
+supabase migration repair --status applied 20260710120000
+supabase migration repair --status applied 20260711120000
+supabase migration repair --status applied 20260712120000
+supabase migration repair --status applied 20260712140000
+supabase migration repair --status applied 20260720120000
+supabase migration repair --status applied 20260730005125
+supabase migration repair --status applied 20260825160000
 ```
 
-`migration list` prints which versions the remote has recorded. **Send that
-output before running anything else.** The repair list in step 2 depends
-entirely on what it says — if a teammate ever ran `db push`, some rows already
-exist and the list is different.
-
-### Step 2 — baseline (the one step to get right)
-
-For each migration that is genuinely already applied:
-
-```bash
-supabase migration repair --status applied <version>
-```
-
-This writes the tracking row without running the SQL.
+This writes the tracking rows without running any SQL.
 
 **Marking a version applied when it is not means `db push` skips it forever** —
 the same silent-gap failure this document exists to prevent, except now with a
-tracking table asserting everything is fine. Get the list from step 1, not from
-memory.
+tracking table asserting everything is fine. That is why the list above comes
+from a verification query, not from memory.
 
-Two migrations are *not* part of this: `20260808120000` (PR #66) and
-`20260808140000` (PR #70) are not merged to `main` yet.
+Not included: `20260808120000` (PR #66) and `20260808140000` (PR #70) are not
+merged to `main` yet, and `20260603002952` needs no repair because it is already
+recorded remotely.
 
-### Step 3 — from then on
+### Step 2 — confirm, then use it normally
 
 ```bash
-supabase db push
+supabase migration list   # every row should now show both columns
+supabase db push          # after merging anything that adds a migration
 ```
-
-Run it after merging anything that adds a migration. It becomes part of
-releasing, not a thing someone remembers.
 
 ## Checking migrations before they merge
 
