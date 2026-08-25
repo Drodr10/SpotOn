@@ -154,7 +154,13 @@ export default function ChatScreen() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+          const incoming = payload.new as Message;
+          // Our own messages are already on screen optimistically and their
+          // echo arrives here too, so dedupe by id rather than appending
+          // blindly — otherwise every message we send renders twice.
+          setMessages((prev) =>
+            prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming],
+          );
         },
       )
       .subscribe();
@@ -170,11 +176,48 @@ export default function ChatScreen() {
     const content = newMessage.trim();
     setNewMessage('');
 
-    await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      sender_id: currentUserId,
-      content,
-    });
+    // Show it immediately under a temporary id instead of waiting for the round
+    // trip. Sending used to leave the thread visibly unchanged, which reads as
+    // "it didn't go through" and gets the same message sent twice.
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        conversation_id: conversationId,
+        sender_id: currentUserId,
+        content,
+        sent_at: new Date().toISOString(),
+      },
+    ]);
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: currentUserId,
+        content,
+      })
+      .select()
+      .single();
+
+    // The insert result was previously discarded, so a failed send just
+    // disappeared. Take the optimistic row back out and give the user their
+    // text back so it isn't lost.
+    if (error || !data) {
+      console.warn('[Chat] send failed', error);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setNewMessage((cur) => (cur.length > 0 ? cur : content));
+      return;
+    }
+
+    // Swap the temporary row for the server one so its id is real. Also drop
+    // any copy the realtime subscription delivered in the meantime — whichever
+    // of the two arrives second must not add a duplicate.
+    setMessages((prev) => [
+      ...prev.filter((m) => m.id !== tempId && m.id !== data.id),
+      data as Message,
+    ]);
 
     await supabase
       .from('conversations')
