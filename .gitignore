@@ -41,6 +41,10 @@ app-example
 # generated native folders
 /ios
 /android
+# The app lives in frontend/, and the rules above anchor to the repo root,
+# so the native projects `expo prebuild` generates need their own entries.
+frontend/ios/
+frontend/android/
 
 # Python
 .venv
