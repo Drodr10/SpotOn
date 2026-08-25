@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from routes.listings import listings_bp
 from routes.reservations import reservations_bp
@@ -58,6 +58,15 @@ app.register_blueprint(profiles_bp, url_prefix='/api')
 app.register_blueprint(messages_bp, url_prefix='/api')
 app.register_blueprint(stripe_bp, url_prefix='/api')
 app.register_blueprint(vehicles_bp, url_prefix='/api')
+
+# ── Health check ─────────────────────────────────────────────────────────────
+# Liveness only: deliberately does NOT touch Supabase or Stripe. A health check
+# that depends on a third party turns their outage into a restart loop here,
+# because the host restarts the service as soon as this stops returning 200.
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
