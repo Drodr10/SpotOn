@@ -1,0 +1,161 @@
+# CI for SpotOn — closes #45.
+#
+# Why this exists, concretely: a test asserting the OLD pricing rule sat RED for
+# weeks with nobody looking, which is how pricing.calculate_final_price and the
+# validate_reservation_rate trigger drifted into disagreeing about which bookings
+# are legal. That disagreement charged a renter $331.20 for a reservation the
+# database then refused. A suite nobody runs is not a safety net.
+#
+# Every job below was run locally before this was committed, so it is green on
+# arrival — CI that fails the day it lands is CI everyone learns to ignore.
+#
+# Jobs are independent (no `needs:`) so one red job never hides another's result.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A new push to the same branch makes the previous run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Read from .python-version so CI tests the interpreter the project
+      # DECLARES, and there is exactly one place to change it. Testing a version
+      # nobody runs is worse than not testing: it was briefly pinned to 3.9
+      # here, which is EOL and which the code cannot even import on.
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      # The app must IMPORT before any test result means anything: an import-time
+      # failure would otherwise surface as a wall of unrelated collection errors.
+      # This step is also what catches an interpreter too old for the syntax in
+      # use — the failure that cost an evening before .python-version existed.
+      #
+      # The placeholders are required, not laziness: services/supabase_client.py
+      # calls create_client() at MODULE level, so importing anything under
+      # backend/ without credentials raises "supabase_url is required". They are
+      # obvious fakes and reach no network — nothing in this job makes a request.
+      # (Worth fixing properly one day by constructing the client lazily, so the
+      # package can be imported by tests, linters and type checkers without
+      # secrets at all. Tracked as a follow-up rather than done here.)
+      - name: Import the Flask app
+        run: python -c "import app"
+        working-directory: backend
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_KEY: ci-placeholder-not-a-real-key
+
+      # Integration tests that need a live backend SKIP with a reason rather than
+      # passing vacuously; -rs prints those reasons so an all-skipped suite can
+      # never be mistaken for a green one.
+      - name: Run tests
+        run: python -m pytest tests/ -v -rs
+
+  frontend:
+    name: frontend (lint + jest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` over `npm install`: it honours the lockfile exactly, so CI can
+      # never pass on a dependency tree a teammate's checkout won't get.
+      - name: Install dependencies
+        run: npm ci
+
+      # Blocking on ERRORS only. The 46 existing warnings stay visible but
+      # non-fatal — the alternative was shipping this job red, which teaches
+      # everyone to ignore it. Ratchet later with `-- --max-warnings N`,
+      # lowering N as the backlog clears.
+      - name: Lint
+        run: npm run lint
+
+      # --ci fails on missing snapshots instead of writing them;
+      # --passWithNoTests keeps the job honest if the suite is ever emptied
+      # (silence must not read as success).
+      - name: Jest
+        run: npm test -- --ci --passWithNoTests
+
+  migrations:
+    name: migrations (naming + order)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Timestamp order is not cosmetic. `supabase db push` refuses to insert a
+      # migration dated before one already applied ("found local migration files
+      # to be inserted before the last migration"), so two people authoring on
+      # separate branches can produce a pair that only breaks once BOTH are
+      # merged — on someone else's machine, days later. Catching it per-branch
+      # costs a second.
+      - name: Filenames are timestamp-ordered and unique
+        working-directory: supabase/migrations
+        run: |
+          ls *.sql | sort -c || {
+            echo "::error::migration filenames are not in timestamp order"; exit 1; }
+          dupes=$(ls *.sql | cut -d_ -f1 | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "::error::duplicate migration timestamps: $dupes"; exit 1
+          fi
+          echo "$(ls *.sql | wc -l | tr -d ' ') migrations, ordered and unique"
+
+      # Cheap structural smoke test: catches an unbalanced BEGIN/COMMIT or a
+      # stray $$ delimiter before it ever reaches a database.
+      - name: Migrations are structurally complete
+        working-directory: supabase/migrations
+        run: |
+          fail=0
+          for f in *.sql; do
+            begins=$(grep -ciE '^[[:space:]]*BEGIN[[:space:]]*;' "$f" || true)
+            commits=$(grep -ciE '^[[:space:]]*COMMIT[[:space:]]*;' "$f" || true)
+            if [ "$begins" -ne "$commits" ]; then
+              echo "::error file=supabase/migrations/$f::BEGIN/COMMIT mismatch ($begins/$commits)"
+              fail=1
+            fi
+            dollars=$(grep -o '[$][$]' "$f" | wc -l | tr -d ' ')
+            if [ $((dollars % 2)) -ne 0 ]; then
+              echo "::error file=supabase/migrations/$f::odd number of dollar-quote delimiters"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      # NOT DONE HERE, deliberately: actually APPLYING the migrations. The first
+      # one (20260421001633_remote_schema.sql) is a `supabase db pull` dump that
+      # references platform schemas and objects it never creates, so replaying it
+      # on a bare Postgres image does not work — attempted, and it dies on
+      # `schema "extensions" does not exist` plus a missing public.listing_images
+      # well before reaching any of our own SQL.
+      #
+      # The right way is the Supabase CLI, which is what we already run locally:
+      #     - uses: supabase/setup-cli@v1
+      #     - run: supabase db start     # applies every migration in order
+      # Worth adding, but it needs a real run to verify rather than a guess, so
+      # it is left as a follow-up instead of shipped untested. Until then the
+      # reservation rules are covered by tests/backend, which exercises the
+      # pricing engine and the pre-charge validation path.

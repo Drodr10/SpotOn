@@ -42,6 +42,21 @@ Campus parking is one of the biggest daily frustrations for college students. Sp
 git clone https://github.com/Drodr10/SpotOn.git
 ```
 
+> **Python 3.12+ required.** `notifications.py` and `payouts.py` use `str | None`
+> annotations (PEP 604), which are evaluated at import time — on an older
+> interpreter the Flask app fails to start with
+> `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'`, which
+> does not obviously mean "wrong Python version". macOS ships 3.9 as the system
+> `python3`, so `python3 -m venv .venv` on a stock Mac will NOT work. Use a
+> newer interpreter explicitly:
+>
+> ```bash
+> brew install python@3.12          # or pyenv install 3.12
+> python3.12 -m venv backend/.venv
+> ```
+>
+> The pinned version lives in `.python-version` (read by pyenv and by CI).
+
 2. **Frontend Setup:**
 ```bash
 cd frontend
