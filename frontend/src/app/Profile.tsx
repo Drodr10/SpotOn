@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -104,6 +105,7 @@ export default function ProfilePage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [payoutSetup, setPayoutSetup] = useState(false);
   const [stripeOnboardingLoading, setStripeOnboardingLoading] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const nameInput = useRef<TextInput>(null);
   const emailInput = useRef<TextInput>(null);
@@ -297,6 +299,58 @@ export default function ProfilePage() {
       setStripeOnboardingLoading(false); 
     }
   }
+
+  // App Store Guideline 5.1.1(v): an account created in the app must be
+  // deletable from inside it. What "delete" means here is spelled out for the
+  // user before they commit — the backend anonymises and keeps the shared
+  // transactional record rather than erasing the other party's history too.
+  const runAccountDeletion = async () => {
+    setDeletingAccount(true);
+    setErrorMessage('');
+    try {
+      const result = await api.deleteAccount();
+
+      if (result.status === 'blocked') {
+        Alert.alert("You can't delete your account yet", result.reasons.join('\n\n'));
+        return;
+      }
+      if (result.status === 'error') {
+        Alert.alert('Something went wrong', result.message);
+        return;
+      }
+
+      // Only past a confirmed success. Signing out any earlier would drop the
+      // token the request itself needs.
+      //
+      // scope 'local' because the server has just soft-deleted this user: a
+      // global sign-out calls the server on behalf of an account that no longer
+      // accepts calls, and would leave the session on the device.
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {
+        // The account is gone either way; never strand the user on this screen.
+      }
+      router.replace('/Intro');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    triggerLightHaptic();
+    Alert.alert(
+      'Delete your account?',
+      'This cannot be undone.\n\n' +
+        'Your name, email, photo and saved vehicles are removed, and your ' +
+        'listings stop accepting bookings.\n\n' +
+        'Past bookings and messages stay on record — they are the other ' +
+        "person's history too, and payment records have to be kept.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete account', style: 'destructive', onPress: runAccountDeletion },
+      ],
+    );
+  };
 
   if (!user) return <SafeAreaView style={styles.safeArea} edges={['top']} />;
 
@@ -526,6 +580,21 @@ export default function ProfilePage() {
             </TouchableOpacity>
           </View>
 
+          {/* Account deletion. Deliberately plain and at the end of the page:
+              Apple requires it be easy to find, not that it be prominent. */}
+          <TouchableOpacity
+            style={styles.deleteAccountButton}
+            onPress={confirmDeleteAccount}
+            disabled={deletingAccount}
+            activeOpacity={0.7}
+          >
+            {deletingAccount ? (
+              <ActivityIndicator color='rgba(200,0,0,0.9)' />
+            ) : (
+              <Text style={styles.deleteAccountText}>Delete my account</Text>
+            )}
+          </TouchableOpacity>
+
           {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
         </ScrollView>
@@ -748,6 +817,20 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   penIcon: { width: EDIT_ICON, height: EDIT_ICON },
+
+  deleteAccountButton: {
+    alignSelf: 'center',
+    paddingVertical: screenWidth * 0.03,
+    paddingHorizontal: screenWidth * 0.06,
+    minHeight: screenWidth * 0.11,
+    justifyContent: 'center',
+  },
+  deleteAccountText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.035,
+    color: 'rgba(200,0,0,0.9)',
+    textDecorationLine: 'underline',
+  },
 
   errorText: {
     color: 'rgba(200,0,0,1)',
