@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from services.supabase_client import supabase
 from utils.pricing import calculate_final_price, PricingError
+from services.auth import token_required
 
 reservations_bp = Blueprint('reservations', __name__)
 
@@ -61,26 +62,29 @@ def preview_price():
 
 
 @reservations_bp.route('/reservations/<user_id>', methods=['GET'])
-def get_reservations(user_id):
+@token_required
+def get_reservations(current_user_id, user_id):
+    if current_user_id != user_id:
+        return jsonify({"error": "Forbidden: You can only access your own reservations."}), 403
     response = supabase.table("reservations").select("*").eq("renter_id", user_id).execute()
     return jsonify(response.data), 200
 
 
 @reservations_bp.route('/reservations', methods=['POST'])
-def book_spot():
+@token_required
+def book_spot(current_user_id):
     data = request.json
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
     # Extract required fields
     listing_id = data.get("listing_id")
-    renter_id = data.get("renter_id")
     vehicle_id = data.get("vehicle_id")
     start_time = data.get("start_time")
     end_time = data.get("end_time")
 
     # Validate required fields (total_price must be computed server-side)
-    if not all([listing_id, renter_id, vehicle_id, start_time, end_time]):
+    if not all([listing_id, vehicle_id, start_time, end_time]):
         return jsonify({"error": "Missing required fields"}), 400
 
     # Ensure renter can only reserve with their own vehicle.
@@ -95,7 +99,7 @@ def book_spot():
         vehicle_row = vehicle_resp.data
         if not vehicle_row:
             return jsonify({"error": "Selected vehicle not found"}), 404
-        if vehicle_row.get("owner_user_id") != renter_id:
+        if vehicle_row.get("owner_user_id") != current_user_id:
             return jsonify({"error": "Selected vehicle does not belong to renter"}), 403
     except Exception:
         return jsonify({"error": "Selected vehicle not found"}), 404
@@ -129,7 +133,7 @@ def book_spot():
     try:
         result = supabase.rpc("create_reservation_with_conversation", {
             "p_listing_id": listing_id,
-            "p_renter_id": renter_id,
+            "p_renter_id": current_user_id,
             "p_owner_id": owner_id,
             "p_vehicle_id": vehicle_id,
             "p_start_time": start_time,

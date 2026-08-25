@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from services.supabase_client import supabase
+from services.auth import token_required
 
 listings_bp = Blueprint('listings', __name__)
 
@@ -35,19 +36,20 @@ def get_listing(listing_id):
     return jsonify(response.data[0]), 200
 
 @listings_bp.route('/listings', methods=['POST'])
-def create_listing():
+@token_required
+def create_listing(current_user_id):
     data = request.json
     
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    required = ['owner_id', 'address', 'latitude', 'longitude', 'price_per_hour']
+    required = ['address', 'latitude', 'longitude', 'price_per_hour']
     missing = [f for f in required if f not in data]
     if missing:
         return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
 
     listing = {
-        "owner_id": data["owner_id"],
+        "owner_id": current_user_id,
         "address": data["address"],
         "latitude": data["latitude"],
         "longitude": data["longitude"],
