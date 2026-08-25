@@ -377,6 +377,64 @@ const getPendingPayout = async (ownerId: string): Promise<{ total: number; count
     return { total, count: data.length };
 };
 
+export type AccountDeletionResult =
+    | { status: 'deleted' }
+    | { status: 'blocked'; reasons: string[] }
+    | { status: 'error'; message: string };
+
+/**
+ * Delete the signed-in user's account (App Store Guideline 5.1.1(v)).
+ *
+ * The user id comes from the session rather than an argument: the backend
+ * rejects a mismatch with 403 anyway, and a caller-supplied id is one more way
+ * to get it wrong on the one screen where being wrong is unrecoverable.
+ *
+ * Every non-200 is reported. `reserveSpot` above skips its server hook when the
+ * API is unreachable, which is harmless for a fire-and-forget side effect; doing
+ * that here would sign the user out and report success while the account still
+ * existed, so an unreachable API is an error, never a quiet no-op.
+ */
+const deleteAccount = async (): Promise<AccountDeletionResult> => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+        return { status: 'error', message: 'You appear to be signed out. Please sign in and try again.' };
+    }
+
+    // Read the host here rather than using the module-level API_IP, so the
+    // check and the URL can never disagree. Truthiness, not ??: an empty
+    // EXPO_PUBLIC_IP is unset for our purposes.
+    const host = process.env.EXPO_PUBLIC_IP;
+    if (!host) {
+        return { status: 'error', message: "Can't reach the server right now. Please try again later." };
+    }
+
+    let resp: Response;
+    try {
+        resp = await fetch(`https://${host}/api/profiles/${session.user.id}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                'ngrok-skip-browser-warning': 'true',
+            },
+        });
+    } catch (err: any) {
+        return { status: 'error', message: err?.message ?? 'Network request failed.' };
+    }
+
+    if (resp.status === 200) return { status: 'deleted' };
+
+    const body = await resp.json().catch(() => ({} as any));
+
+    // 409 is an outcome, not a failure: the request was valid, the account just
+    // is not deletable yet, and the reasons tell the user what to do about it.
+    if (resp.status === 409 && Array.isArray(body?.reasons) && body.reasons.length) {
+        return { status: 'blocked', reasons: body.reasons };
+    }
+
+    return { status: 'error', message: body?.error ?? `Request failed (${resp.status}).` };
+};
+
 export const api = {
     reserveSpot,
     getActiveReservation,
@@ -388,4 +446,5 @@ export const api = {
     getReservations,
     getOwnerActiveBookings,
     getPendingPayout,
+    deleteAccount,
 };
