@@ -221,6 +221,12 @@ export default function CreateListing2() {
     if (showCalendarPopup) openPopup(calendarPopupAnim);
   }, [showCalendarPopup]);
 
+  useEffect(() => {
+    if (scene === 2) {
+      handleCurrentLocation();
+    }
+  }, [scene]);
+
   // ── Price PanResponder ─────────────────────────────────────────────────────
   // Two separate refs so toggling Hourly↔Weekly preserves each value.
   // periodTypeRef mirrors state so the PanResponder (built once via useRef)
