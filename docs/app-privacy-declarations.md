@@ -102,7 +102,10 @@ confirm with `grep -A1 UsageDescription frontend/ios/SpotOn/Info.plist`.
 
 ## Still to do
 
-- [ ] Fill the 5 remaining placeholders in `site/privacy.html` — publisher name, effective date (×3), governing state. The contact address is done.
+- [ ] Set the effective date in `site/privacy.html` (3 places) — the only placeholder left
+- [ ] Confirm the §1 publisher name (currently Ehan Shah) matches the seller name on both
+      store listings — reviewers compare them, and whoever is named there is the party the
+      policy makes responsible
 - [ ] Host the page and get its URL (GitHub Pages off this repo is the cheap route)
 - [ ] Add an in-app link to that URL — Play wants the policy reachable from inside the app
 - [ ] Fix the `Info.plist` keys and strings above
