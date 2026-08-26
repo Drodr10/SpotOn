@@ -22,6 +22,7 @@ WHAT THESE DO NOT COVER
   bucket really drops them needs a live project.
 """
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,22 @@ class _FakeDB:
 
 
 def _install(monkeypatch, db):
+    # services/supabase_client.py calls create_client() at MODULE level, so
+    # importing account_deletion for real needs SUPABASE_URL/KEY in the
+    # environment. CI gives those to the import-check step but deliberately not
+    # to the test step, so a bare import here passes locally (where .env exists)
+    # and fails in CI with "supabase_url is required".
+    #
+    # Stub the module before importing, as the sibling tests do. Nothing is
+    # lost: _Router below replaces the client anyway, so the real one was only
+    # ever built to be thrown away.
+    stub = types.ModuleType("services.supabase_client")
+    stub.supabase = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "services.supabase_client", stub)
+    # Force a fresh import so the stub is what gets bound, even if an earlier
+    # test in the same session already imported the real thing.
+    monkeypatch.delitem(sys.modules, "services.account_deletion", raising=False)
+
     import services.account_deletion as mod
 
     class _Router:
