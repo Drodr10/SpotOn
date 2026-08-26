@@ -289,11 +289,34 @@ def _delete_hold(hold_id: str):
         print(f"[stripe] failed to delete hold {hold_id}: {err}")
 
 
-def release_booking_hold(hold_id: str):
-    """Free a hold immediately (e.g. the renter dismissed the payment sheet)."""
-    if hold_id:
-        _delete_hold(hold_id)
-    return jsonify({"released": True}), 200
+def release_booking_hold(hold_id: str, renter_id: str):
+    """Free a hold immediately (e.g. the renter dismissed the payment sheet).
+
+    Scoped to the caller. A hold_id on its own must never be enough to drop
+    someone else's slot mid-checkout, and filtering inside the DELETE rather
+    than reading the row first leaves no window between the check and the
+    delete — and no way to probe whether a given hold exists.
+    """
+    if not hold_id:
+        return jsonify({"released": False, "error": "Missing hold_id"}), 400
+    try:
+        deleted = (
+            supabase.table("reservation_holds")
+            .delete()
+            .eq("id", hold_id)
+            .eq("renter_id", renter_id)
+            .execute()
+            .data
+        ) or []
+    except Exception as err:  # noqa: BLE001 — the sweep expires it anyway
+        print(f"[stripe] failed to release hold {hold_id}: {err}")
+        return jsonify({"released": False}), 200
+
+    if not deleted:
+        # Either already gone (the sweep, or a double tap) or not this caller's.
+        # Both are non-events for the client; the log tells them apart.
+        print(f"[stripe] release-hold no-op: hold={hold_id} caller={renter_id}")
+    return jsonify({"released": bool(deleted)}), 200
 
 
 def createConnectAccount(user_id: str):
@@ -526,7 +549,7 @@ def _on_payment_succeeded(pi: dict):
         print(f"[stripe] payment succeeded for PI {pi['id']} -> reservation {outcome['reservation_id']} (held)")
 
 
-def finalize_booking(payment_intent_id: str):
+def finalize_booking(payment_intent_id: str, current_user_id: str):
     """
     Client-invoked finalize, called the instant the payment sheet returns
     success. Confirms the PaymentIntent really succeeded, then creates the
@@ -545,6 +568,25 @@ def finalize_booking(payment_intent_id: str):
     pi = _to_plain_dict(pi_obj) if not isinstance(pi_obj, dict) else pi_obj
     if pi.get("status") != "succeeded":
         return jsonify({"error": "Payment not completed", "status": pi.get("status")}), 409
+
+    # Only the renter who paid may finalize their own PaymentIntent.
+    #
+    # The renter_id compared here was written into the metadata by
+    # create_booking_payment from ITS authenticated caller, so this is a value
+    # the server set rather than one a client supplied — which is what makes it
+    # safe to trust. Stripe stores metadata as strings, hence the coercion.
+    #
+    # This must stay ABOVE _finalize_reservation_from_pi. Below it, a
+    # mismatched caller reaches _refund_stranded_payment and can refund a
+    # stranger's succeeded payment — worse than the hole it closes. The reply
+    # says nothing about the PI, so it cannot be used to probe for one.
+    md = pi.get("metadata") or {}
+    if not isinstance(md, dict):
+        md = _to_plain_dict(md) or {}
+    if str(md.get("renter_id", "")).strip() != str(current_user_id).strip():
+        print(f"[stripe] REFUSED finalize: PI {pi.get('id')} belongs to "
+              f"{md.get('renter_id')!r}, caller was {current_user_id!r}")
+        return jsonify({"error": "Forbidden"}), 403
 
     try:
         outcome = _finalize_reservation_from_pi(pi)
