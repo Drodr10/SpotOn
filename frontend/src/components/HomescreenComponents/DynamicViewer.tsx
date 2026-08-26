@@ -251,12 +251,6 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
             {priceStr}
             <Text style={[styles.unitText, { fontSize: FONT_UNIT }]}>{unitStr}</Text>
           </Text>
-          <View style={styles.distRow}>
-            <Ionicons name="walk" size={WALK_ICON} color="#fff" />
-            <Text style={[styles.distText, { fontSize: FONT_DIST }]}>
-              {item.distance.toFixed(1)}mi
-            </Text>
-          </View>
         </View>
 
         {/* Bottom pill — address + yellow navigation arrow */}
