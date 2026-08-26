@@ -53,8 +53,9 @@ the policy calls it out by name in §2.
 ## Google Play: the account-deletion URL
 
 Play requires a URL where someone who has **uninstalled** the app can start a deletion
-request. `site/privacy.html` §8 is that page, and it only works once the deletion
-email address in it is real and monitored. Submit the hosted URL of that page.
+request. `site/privacy.html` §8 is that page, and it names `team.spotonapp@gmail.com`
+as the channel. Submit the hosted URL of that page — and make sure someone is actually
+reading that inbox, because the page promises completion within 30 days.
 
 Apple's requirement is different and already met: deletion must be reachable **inside**
 the app (Profile → Delete my account, added in `db45523`).
@@ -101,7 +102,7 @@ confirm with `grep -A1 UsageDescription frontend/ios/SpotOn/Info.plist`.
 
 ## Still to do
 
-- [ ] Fill the placeholders in `site/privacy.html` — the deletion email blocks submission
+- [ ] Fill the 5 remaining placeholders in `site/privacy.html` — publisher name, effective date (×3), governing state. The contact address is done.
 - [ ] Host the page and get its URL (GitHub Pages off this repo is the cheap route)
 - [ ] Add an in-app link to that URL — Play wants the policy reachable from inside the app
 - [ ] Fix the `Info.plist` keys and strings above
