@@ -1,165 +1,177 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="How the SpotOn parking app collects, uses, shares and deletes personal information.">
-<title>SpotOn Privacy Policy</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpotOn — Privacy Policy</title>
+  <meta name="description" content="How the SpotOn parking app collects, uses, shares and deletes personal information.">
+  <link rel="icon" href="assets/spoton-logo.png">
 
-<style>
+  <!-- Self-contained on purpose. Everything except Fonts/ and assets/ lives in
+       this file, and those two paths are RELATIVE so that dropping privacy.html
+       into the root of the SpotOn-Website repo works with no edits — the
+       directories and filenames already exist there. Please don't "tidy" them
+       into absolute URLs; that is the one change that would break it. Type and
+       colour are lifted from hero.css so this page reads as part of the site. -->
+  <style>
+  /* ─── Fonts — the same four faces hero.css declares ──────── */
+  @font-face { font-family: 'Switzer'; src: url('Fonts/Switzer-Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer'; src: url('Fonts/Switzer-Semibold.ttf') format('truetype'); font-weight: 600; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer-Light'; src: url('Fonts/Switzer-Light.ttf') format('truetype'); font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer-Semibold'; src: url('Fonts/Switzer-Semibold.ttf') format('truetype'); font-style: normal; font-display: swap; }
+
   :root {
-    --ground:      #F1F0EC;
-    --surface:     #FFFFFF;
-    --surface-alt: #E7E5DF;
-    --ink:         #1A1C19;
-    --ink-soft:    #565B54;
-    --ink-faint:   #82877E;
-    --rule:        #D6D4CC;
-    --rule-strong: #B7B5AB;
-    --accent:      #1F5D48;
-    --accent-soft: #E0EDE7;
-    --warn:        #8A5A00;
-    --warn-soft:   #F8EED8;
-    --warn-rule:   #D9B771;
-    --code-bg:     #EAE8E2;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --ground:      #151714;
-      --surface:     #1D201C;
-      --surface-alt: #262A24;
-      --ink:         #E9EBE6;
-      --ink-soft:    #A6ABA1;
-      --ink-faint:   #7C8277;
-      --rule:        #313630;
-      --rule-strong: #464C44;
-      --accent:      #74C4A5;
-      --accent-soft: #172C24;
-      --warn:        #E0AF5E;
-      --warn-soft:   #2B2313;
-      --warn-rule:   #6A5220;
-      --code-bg:     #262A24;
-    }
-  }
-  :root[data-theme="dark"] {
-    --ground:      #151714;
-    --surface:     #1D201C;
-    --surface-alt: #262A24;
-    --ink:         #E9EBE6;
-    --ink-soft:    #A6ABA1;
-    --ink-faint:   #7C8277;
-    --rule:        #313630;
-    --rule-strong: #464C44;
-    --accent:      #74C4A5;
-    --accent-soft: #172C24;
-    --warn:        #E0AF5E;
-    --warn-soft:   #2B2313;
-    --warn-rule:   #6A5220;
-    --code-bg:     #262A24;
+    --ink:        #fff;
+    --ink-body:   rgba(255, 255, 255, 0.75);  /* hero.css .description */
+    --ink-faint:  rgba(255, 255, 255, 0.50);
+    --rule:       rgba(255, 255, 255, 0.12);
+    --rule-soft:  rgba(255, 255, 255, 0.07);
+    --surface:    rgba(255, 255, 255, 0.045);
+    --amber:      #F5C97B;                     /* the only hue on the page */
+    --amber-dim:  rgba(245, 201, 123, 0.10);
+    --amber-rule: rgba(245, 201, 123, 0.38);
+    --glow:       0 10px 24px rgba(255,255,255,0.24), 0 22px 44px rgba(255,255,255,0.18);
+    --bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
   body {
-    margin: 0;
-    background: var(--ground);
-    color: var(--ink);
-    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    font-size: 17px;
-    line-height: 1.65;
+    background: #000;
+    color: var(--ink-body);
+    font-family: 'Switzer', sans-serif;
+    font-weight: 300;
+    font-size: clamp(14px, 1.05vw, 17px);
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+  strong, b { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; color: var(--ink); }
 
-  h1, h2, h3 { font-family: 'Archivo', system-ui, sans-serif; text-wrap: balance; }
-  h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; margin: 0 0 .4rem; line-height: 1.15; }
-  h2 {
-    font-size: 1.28rem; font-weight: 600; letter-spacing: -.01em;
-    margin: 3rem 0 .9rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+  /* ─── Nav — mirrors hero.css .nav ────────────────────────── */
+  .nav {
+    display: flex; align-items: center; gap: 12px;
+    padding: clamp(20px, 3vh, 36px) clamp(20px, 4vw, 48px);
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--rule-soft);
+    animation: blurUp 0.9s ease-out 0.05s backwards;
   }
-  h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .5rem; }
-  h3 { font-size: 1.02rem; font-weight: 600; margin: 1.9rem 0 .5rem; }
-  p, li { color: var(--ink-soft); }
-  p { margin: 0 0 1rem; }
-  strong { color: var(--ink); font-weight: 600; }
-  a { color: var(--accent); text-underline-offset: 2px; }
-  ul, ol { padding-left: 1.15rem; margin: 0 0 1rem; }
-  li { margin-bottom: .45rem; }
-  code {
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
-    font-size: .85em; background: var(--code-bg);
-    padding: .1em .35em; border-radius: 3px; color: var(--ink);
+  .nav a { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+  .nav-icon {
+    width: clamp(26px, 2.4vw, 34px); height: clamp(26px, 2.4vw, 34px);
+    border-radius: 50%; object-fit: cover;
+    transition: box-shadow .55s var(--bounce), filter .55s var(--bounce);
   }
+  .nav-name {
+    font-family: 'Switzer-Light', sans-serif;
+    font-size: clamp(15px, 1.5vw, 20px); letter-spacing: -0.02em; color: var(--ink);
+    transition: text-shadow .55s var(--bounce);
+  }
+  .nav-name strong { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; }
+  .nav a:hover .nav-icon { filter: brightness(1.08); box-shadow: 0 22px 44px rgba(255,255,255,0.18); }
+  .nav a:hover .nav-name { text-shadow: var(--glow); }
+  .nav-tail { margin-left: auto; font-size: clamp(12px, 1vw, 14px); color: var(--ink-faint); letter-spacing: -0.01em; }
 
-  .eyebrow {
-    font-family: 'IBM Plex Mono', monospace; font-size: .72rem;
-    letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
-    margin: 0 0 .7rem;
-  }
-  .dates {
-    font-size: .88rem; color: var(--ink-faint);
-    display: flex; flex-wrap: wrap; gap: .35rem 1.5rem; margin: 0 0 2rem;
-  }
+  .wrap { max-width: 44rem; margin: 0 auto; padding: clamp(40px, 8vh, 88px) clamp(20px, 4vw, 48px) 8rem; }
 
-  .fill {
-    background: var(--warn-soft); color: var(--warn);
-    border-bottom: 2px solid var(--warn-rule);
-    font-family: 'IBM Plex Mono', monospace; font-size: .82em;
-    font-weight: 500; padding: .12em .4em; border-radius: 3px;
+  /* ─── Masthead — .tagline proportions ────────────────────── */
+  .masthead { animation: blurUp 1s ease-out 0.35s backwards; }
+  h1 {
+    font-size: clamp(30px, 4.2vw, 60px); font-weight: 300;
+    line-height: 1.06; letter-spacing: -0.025em; color: var(--ink);
+    text-wrap: balance; margin-bottom: .55rem;
   }
+  h1 em { font-family: 'Switzer-Semibold', sans-serif; font-style: normal; font-weight: normal; }
+  .dates { display: flex; flex-wrap: wrap; gap: .2rem 1.6rem; color: var(--ink-faint); font-size: .88em; margin-bottom: 2.6rem; }
 
-  .todo {
-    background: var(--warn-soft); border: 2px solid var(--warn-rule);
-    border-radius: 8px; padding: 1.1rem 1.3rem; margin: 0 0 2.5rem;
-  }
-  .todo h2 {
-    margin: 0 0 .6rem; padding: 0; border: 0;
-    font-size: .95rem; color: var(--warn); letter-spacing: .04em; text-transform: uppercase;
-  }
-  .todo p, .todo li { color: var(--ink); font-size: .93rem; }
-  .todo p:last-child, .todo ol { margin-bottom: 0; }
-
-  .lede {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
-    padding: 1.3rem 1.5rem; margin: 0 0 1rem;
-  }
+  .lede { animation: blurUp 1s ease-out 0.55s backwards; }
+  .lede p { margin-bottom: 1rem; }
   .lede p:last-child { margin-bottom: 0; }
-  .lede ul { margin-bottom: 0; }
 
-  .tablewrap { overflow-x: auto; margin: 0 0 1.4rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); }
-  table { border-collapse: collapse; width: 100%; font-size: .9rem; min-width: 34rem; }
-  th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
-  th {
-    font-family: 'IBM Plex Mono', monospace; font-size: .72rem; font-weight: 500;
-    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint);
-    background: var(--surface-alt); white-space: nowrap;
+  h2 {
+    font-size: clamp(19px, 1.9vw, 26px); font-weight: 300; letter-spacing: -0.022em;
+    line-height: 1.2; color: var(--ink); text-wrap: balance;
+    margin: 4rem 0 1rem; padding-top: 1.8rem; border-top: 1px solid var(--rule);
   }
+  h2 .num { color: var(--ink-faint); font-variant-numeric: tabular-nums; margin-right: .7rem; font-size: .8em; }
+  h3 { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; font-size: 1em; color: var(--ink); margin: 2.2rem 0 .6rem; letter-spacing: -0.01em; }
+
+  p { margin-bottom: 1rem; }
+  ul, ol { padding-left: 1.15rem; margin-bottom: 1rem; }
+  li { margin-bottom: .5rem; }
+  a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); transition: text-decoration-color .3s; }
+  a:hover { text-decoration-color: var(--ink); }
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: .84em; background: var(--surface); padding: .12em .4em; border-radius: 4px; color: var(--ink); }
+
+  /* ─── Table of contents ──────────────────────────────────── */
+  .toc { animation: blurUp 1s ease-out 0.75s backwards; margin: 2.6rem 0 0; }
+  .toc ol { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: .1rem 2rem; counter-reset: toc; }
+  .toc li { margin: 0; counter-increment: toc; }
+  .toc a { display: flex; gap: .7rem; padding: .42rem 0; text-decoration: none; color: var(--ink-body); border-bottom: 1px solid var(--rule-soft); transition: color .3s, padding-left .35s var(--bounce); font-size: .93em; }
+  .toc a::before { content: counter(toc); color: var(--ink-faint); font-variant-numeric: tabular-nums; min-width: 1.1em; }
+  .toc a:hover { color: var(--ink); padding-left: .35rem; }
+  @media (max-width: 34rem) { .toc ol { grid-template-columns: 1fr; } }
+
+  /* ─── Tables ─────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; margin-bottom: 1.6rem; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 32rem; font-size: .95em; }
+  th, td { text-align: left; padding: .8rem 1rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; color: var(--ink); font-size: .92em; letter-spacing: .01em; white-space: nowrap; }
   tr:last-child td { border-bottom: 0; }
-  td { color: var(--ink-soft); }
-  td:first-child { color: var(--ink); font-weight: 500; }
+  td:first-child { color: var(--ink); }
 
-  .callout {
-    border-left: 3px solid var(--accent); background: var(--accent-soft);
-    padding: .9rem 1.2rem; border-radius: 0 8px 8px 0; margin: 0 0 1.4rem;
-  }
+  /* ─── Callout ────────────────────────────────────────────── */
+  .callout { border: 1px solid var(--rule); border-radius: 14px; padding: 1.15rem 1.4rem; margin-bottom: 1.6rem; background: var(--surface); }
   .callout p:last-child { margin-bottom: 0; }
-  .callout p { color: var(--ink); }
 
-  .toc { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 1.2rem 1.5rem; margin: 0 0 1rem; }
-  .toc ol { margin: 0; padding-left: 1.3rem; columns: 2; column-gap: 2rem; }
-  .toc li { margin-bottom: .3rem; font-size: .92rem; break-inside: avoid; }
-  @media (max-width: 34rem) { .toc ol { columns: 1; } }
+  /* ─── Placeholders and the pre-publish notice ────────────── */
+  .fill { color: var(--amber); background: var(--amber-dim); border-bottom: 1px solid var(--amber-rule); padding: .1em .4em; border-radius: 4px; font-size: .92em; white-space: nowrap; }
+  .todo { border: 1px solid var(--amber-rule); background: var(--amber-dim); border-radius: 14px; padding: 1.3rem 1.5rem; margin-bottom: 3rem; }
+  .todo h2 { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; font-size: .95em; color: var(--amber); margin: 0 0 .7rem; padding: 0; border: 0; letter-spacing: .02em; }
+  .todo ol { margin-bottom: 0; }
+  .todo li { color: var(--ink-body); }
 
-  footer {
-    margin-top: 3.5rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
-    font-size: .85rem; color: var(--ink-faint);
+  /* ─── Pill button — hero.css .dl-btn ─────────────────────── */
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; color: #000; border-radius: 999px;
+    padding: clamp(11px, 1.2vh, 15px) clamp(18px, 1.8vw, 28px);
+    font-family: 'Switzer', sans-serif; font-weight: 300;
+    font-size: clamp(13px, .95vw, 15px); letter-spacing: -0.01em;
+    text-decoration: none; white-space: nowrap; width: fit-content;
+    transition: transform .55s var(--bounce), box-shadow .55s var(--bounce);
+    will-change: transform;
   }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-</style>
+  .pill:hover { transform: translateY(-7px) scale(1.04); box-shadow: 0 22px 44px rgba(255,255,255,0.18); }
+  .pill:active { transform: translateY(-2px) scale(1.01); transition-duration: .2s; }
+  .pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  footer { margin-top: 4.5rem; padding-top: 1.8rem; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 1.4rem; align-items: center; justify-content: space-between; color: var(--ink-faint); font-size: .88em; }
+
+  @keyframes blurUp {
+    from { opacity: 0; filter: blur(12px); transform: translateY(12px); }
+    to   { opacity: 1; filter: none;       transform: translateY(0); }
+  }
+  /* This page is a long read, not a one-screen hero — honour the setting. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+    .pill:hover { transform: none; }
+  }
+  :focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 4px; }
+  </style>
 </head>
 <body>
+
+<nav class="nav">
+  <a href="https://spot-on.software/">
+    <img class="nav-icon" src="assets/spoton-logo.png" alt="">
+    <span class="nav-name"><strong>Spot</strong>On</span>
+  </a>
+  <span class="nav-tail">Privacy</span>
+</nav>
+
 <div class="wrap">
 
 <!-- ─────────────────────────────────────────────────────────────────────────
@@ -173,17 +185,18 @@
   <p>Search the page for <code>class="fill"</code> and replace every one. In order of importance:</p>
   <ol>
     <li><strong>The deletion contact address.</strong> Google Play requires a working URL where someone who has <em>uninstalled</em> the app can start a deletion request. That is this page, and it only works if the address in §8 is real and monitored. This one blocks submission.</li>
-    <li><strong>Who publishes the app</strong> — the name you register with Apple and Google (§1). If there is no company, your own names are fine and honest.</li>
+    <li><strong>Who publishes the app</strong> — the name registered with Apple and Google (§1). If there is no company, our own names are fine and honest.</li>
     <li><strong>General contact address and the effective date</strong> (§1, header).</li>
     <li><strong>Governing location</strong> (§11) — the state or country whose law applies.</li>
   </ol>
 </div>
 
-<p class="eyebrow">SpotOn</p>
-<h1>Privacy Policy</h1>
-<div class="dates">
-  <span>Effective <span class="fill">[ DATE ]</span></span>
-  <span>Last updated <span class="fill">[ DATE ]</span></span>
+<div class="masthead">
+  <h1>Privacy <em>Policy</em></h1>
+  <div class="dates">
+    <span>Effective <span class="fill">[ DATE ]</span></span>
+    <span>Last updated <span class="fill">[ DATE ]</span></span>
+  </div>
 </div>
 
 <div class="lede">
@@ -204,16 +217,16 @@
     <li><a href="#deletion">Keeping and deleting your data</a></li>
     <li><a href="#rights">Your rights</a></li>
     <li><a href="#security">Security</a></li>
-    <li><a href="#legal">Age, changes and governing law</a></li>
+    <li><a href="#legal">Age, changes, governing law</a></li>
     <li><a href="#contact">Contact</a></li>
   </ol>
 </div>
 
-<h2 id="who"><span class="num">1</span>Who we are</h2>
+<h2 id="who"><span class="num">01</span>Who we are</h2>
 <p>SpotOn is a mobile app for renting private parking spaces, published by <span class="fill">[ LEGAL NAME OR THE NAMES OF THE PEOPLE PUBLISHING IT ]</span> ("we", "us"). This policy covers the SpotOn iOS and Android apps and the servers behind them. It does not cover anything that happens off the platform between a renter and a host.</p>
 <p>For anything in this policy, write to <span class="fill">[ CONTACT EMAIL ]</span>.</p>
 
-<h2 id="collect"><span class="num">2</span>What we collect</h2>
+<h2 id="collect"><span class="num">02</span>What we collect</h2>
 <p>Everything below is either something you type into the app or something the app produces as you use it. There is no hidden collection and no data bought from anyone else.</p>
 
 <h3>Your account</h3>
@@ -266,7 +279,7 @@
 </table></div>
 <p>Messages are not end-to-end encrypted. They are stored on our servers and can be read by us if we have to investigate a report or a dispute.</p>
 
-<h2 id="permissions"><span class="num">3</span>Device permissions</h2>
+<h2 id="permissions"><span class="num">03</span>Device permissions</h2>
 <p>The app asks for these when it first needs them, never at launch. You can refuse any of them and still use the app, with the limits described here, and you can change your mind later in your device settings.</p>
 <div class="tablewrap"><table>
   <thead><tr><th>Permission</th><th>What it's for</th><th>If you say no</th></tr></thead>
@@ -281,7 +294,7 @@
   <p><strong>On location specifically:</strong> the app only ever asks for location <em>while you are using it</em>. It does not track you in the background, and your device's position is not stored on our servers — it is used on your device to work out which nearby listings to show. What we do store is the fixed location of a parking space you choose to list, which is a property of the listing rather than a record of your movements.</p>
 </div>
 
-<h2 id="use"><span class="num">4</span>How we use it</h2>
+<h2 id="use"><span class="num">04</span>How we use it</h2>
 <p>We use what we collect to run the service, and for nothing else:</p>
 <ul>
   <li>Creating your account and signing you in</li>
@@ -294,7 +307,7 @@
 </ul>
 <p>We do not use your information to build advertising profiles, and we do not make automated decisions about you that have a legal or similarly significant effect.</p>
 
-<h2 id="share"><span class="num">5</span>Who else sees it</h2>
+<h2 id="share"><span class="num">05</span>Who else sees it</h2>
 
 <h3>Other people using SpotOn</h3>
 <ul>
@@ -318,13 +331,13 @@
 </table></div>
 <p>We may also disclose information if the law requires it, or where we genuinely need to in order to protect someone's safety or to establish or defend a legal claim.</p>
 
-<h2 id="payments"><span class="num">6</span>Payments and payouts</h2>
+<h2 id="payments"><span class="num">06</span>Payments and payouts</h2>
 <p>Payments run through <a href="https://stripe.com/privacy" rel="noopener">Stripe</a>.</p>
 <p><strong>When you pay for parking,</strong> your card details go from your device to Stripe. They do not pass through our servers and we never hold them. What we keep is the amount, the time, and Stripe's reference for the payment, so a booking can be matched to a payment for refunds and disputes.</p>
 <p><strong>When you are paid as a host,</strong> Stripe has to verify who you are before it can send you money. It collects that information — which can include your date of birth, address, a government identifier such as an SSN or tax ID, and your bank details — <strong>directly, on its own screens.</strong> We never receive it. What we hold is Stripe's identifier for your account and whether payouts are switched on.</p>
 <p>Stripe is an independent controller of the information it collects this way, and handles it under its own privacy policy.</p>
 
-<h2 id="notdo"><span class="num">7</span>What we don't do</h2>
+<h2 id="notdo"><span class="num">07</span>What we don't do</h2>
 <ul>
   <li>We do not sell or rent personal information, and we do not share it for cross-context behavioural advertising.</li>
   <li>We do not show ads in the app.</li>
@@ -333,7 +346,7 @@
   <li>We do not store card numbers.</li>
 </ul>
 
-<h2 id="deletion"><span class="num">8</span>Keeping and deleting your data</h2>
+<h2 id="deletion"><span class="num">08</span>Keeping and deleting your data</h2>
 <p>We keep your information for as long as you have an account, and afterwards only as described here. We have not invented a retention period we could not honour: records tied to a payment are kept as long as we may need them for refunds, chargebacks, tax and legal obligations, and the rest goes when your account does.</p>
 
 <h3>Deleting your account in the app</h3>
@@ -374,7 +387,7 @@
 </ul>
 <p>Deleting in the middle of any of these would strand someone who paid for parking, or forfeit money you are owed. Once the booking ends or the payout lands, the deletion goes through.</p>
 
-<h2 id="rights"><span class="num">9</span>Your rights</h2>
+<h2 id="rights"><span class="num">09</span>Your rights</h2>
 <p>Whoever and wherever you are, you can:</p>
 <ul>
   <li><strong>See what we hold</strong> — most of it is visible in the app; ask us for the rest.</li>
@@ -400,7 +413,11 @@
 <p>If something here is wrong, we would rather hear about it than have it stand.</p>
 
 <footer>
-  SpotOn Privacy Policy · Effective <span class="fill">[ DATE ]</span>
+  <span>SpotOn · Effective <span class="fill">[ DATE ]</span></span>
+  <a class="pill" href="https://spot-on.software/">
+    Back to SpotOn
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+  </a>
 </footer>
 
 </div>
