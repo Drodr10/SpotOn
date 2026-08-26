@@ -9,31 +9,22 @@ the other docs.
 Nothing works in a shipped build until it has a fixed public address. Plan and
 exact settings are in `production-hosting.md`; ~$8/month on Render.
 
-### 2. There is no way to delete an account
-**Apple App Store Guideline 5.1.1(v): an app that lets users create an account
-must let them delete it from inside the app.** Not just deactivate, and not
-"email us". This is one of the most common rejection reasons and it is a hard
-gate.
+### 2. ~~There is no way to delete an account~~ — DONE
+Backend `db45523`, frontend control `db45523`/`dd065b4`. Profile → Delete my
+account. Deletion anonymises rather than erasing: the FK graph forbids a real
+DELETE, and forcing one would take the counterparty's bookings and messages
+with it. Refused while a booking is live or a payout is owed. See
+`backend/services/account_deletion.py`.
 
-Nothing in `frontend/src` or `backend/` does this today — there is `signOut`
-(Profile.tsx:88, logout-button.tsx:25) and nothing else. The backend has no
-deletion route.
+### 3. ~~There is no privacy policy~~ — WRITTEN, not yet live
+`site/privacy.html`, open as ehanrsha/SpotOn-Website#6 so it lands at
+`spot-on.software/privacy`. Written from the schema, not a template.
 
-It is not just a button, either. Deleting a user has to decide what happens to
-their reservations, listings, conversations, messages, vehicles, avatar file,
-and Stripe Connect account — some of which are other people's records too. A
-host who deletes their account still has renters with paid, upcoming bookings.
-Worth designing deliberately rather than reaching for `ON DELETE CASCADE`.
+One placeholder left — the effective date, Ehan's to set. Store-form answers
+and two `Info.plist` fixes are in `app-privacy-declarations.md`.
 
-### 3. There is no privacy policy
-Required as a URL in **both** App Store Connect and Google Play Console, and
-Play additionally requires it to be reachable from inside the app. The only
-occurrence of "terms" in the codebase is marketing copy in
-`Onboarding.tsx:118` (`titlePost: ' terms.'`).
-
-Needs to say what is collected (email, name, avatar, location, vehicle details
-including licence plate, payment metadata via Stripe) and who processes it
-(Supabase, Stripe, OpenStreetMap/Nominatim for geocoding).
+Still to do after it is live: link to it from inside the app. Play requires
+the policy be reachable in-app, and the URL does not exist yet.
 
 ### 4. Nothing from 2026-08-25 has been exercised by a human
 Merged or applied today: the mobile payment element fix, the rate-tier fix,
@@ -52,6 +43,48 @@ phone buzzes, all of it is confirmed at once.
 opaque id from the request body with no caller identity and no ownership check.
 `release-hold` is the sharper one: a `hold_id` is enough to drop someone else's
 slot mid-checkout. Context in `state-check-2026-08-25.md` §3.
+
+## Store setup — surfaced 2026-08-25 from App Store Connect
+
+### 6. The app record does not exist yet
+App Store Connect shows **No Apps**. Nothing has been reserved. The privacy
+policy URL, the app name and the age rating are all entered when the record is
+created, so this gates the paperwork rather than the code.
+
+The developer account is an **Individual** account in Ehan Shah's name — there
+is no LLC — which is why the privacy policy names him personally as publisher.
+Apple shows the individual's legal name as the seller, so the listing and §1
+agree. If an LLC is formed later, both change together.
+
+### 7. The name "SpotOn" is worth checking before it is reserved
+There is a large US payments company operating as SpotOn (spoton.com). Two
+separate problems come from that:
+
+- **App Store names must be unique.** If the name is taken, the record cannot
+  be created under it and a fallback is needed anyway.
+- **The categories overlap.** Our app is not just similarly named, it also
+  processes card payments — which is the situation where an objection is most
+  likely, rather than one where the two uses sit comfortably apart.
+
+Reserving a name is cheap to do and expensive to undo once it is on a listing,
+in a bundle ID and on a domain. Worth a search first, and "SpotOn Parking"
+being the working answer already suggests the concern is real. None of us are
+lawyers and this is not advice — it is a flag that the question should be asked
+of someone who is.
+
+Note the bundle ID is already `com.spoton.app` and the domain is
+`spot-on.software`, so a rename is not free but is much cheaper now than after
+submission.
+
+### 8. EU trader status must be declared
+App Store Connect is showing the Digital Services Act banner: trader status has
+to be provided or the app is removed from the EU App Store. As individuals
+rather than a company the answer is likely "not a trader", but it has to be
+answered by an Admin or the Account Holder — Ehan.
+
+Only relevant if the app is distributed in the EU. A campus parking app for
+Gainesville probably need not be, and limiting the territories is the simpler
+answer if so.
 
 ## Housekeeping
 
