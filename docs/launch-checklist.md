@@ -38,11 +38,17 @@ phone buzzes, all of it is confirmed at once.
 
 ## Before taking real money
 
-### 5. Two money-path endpoints have no authentication
-`/api/stripe/finalize-booking` and `/api/stripe/release-hold` still take an
-opaque id from the request body with no caller identity and no ownership check.
-`release-hold` is the sharper one: a `hold_id` is enough to drop someone else's
-slot mid-checkout. Context in `state-check-2026-08-25.md` §3.
+### 5. ~~Two money-path endpoints have no authentication~~ — DONE
+`a2bc636`. Both now require a token and check ownership: `release-hold`
+scopes the DELETE to the caller inside the query, `finalize-booking`
+checks the PaymentIntent's metadata names the caller.
+
+The ownership check on finalize sits above `_finalize_reservation_from_pi`
+on purpose — below it, a mismatched caller reaches the refund path and can
+refund a stranger's succeeded payment. `test_stripe_endpoint_auth.py` pins
+the ordering, not just the presence of the check.
+
+No client change was needed; the app already sent `Authorization` on both.
 
 ## Store setup — surfaced 2026-08-25 from App Store Connect
 
