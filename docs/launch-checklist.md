@@ -94,13 +94,21 @@ answer if so.
 
 ## Housekeeping
 
-- **13 commits sit unpushed** on `chore/prod-readiness`.
+- **25 commits sit unpushed** on `chore/prod-readiness` — account deletion,
+  the privacy policy and the endpoint auth all live only on this machine.
+  No branch on the remote, no PR.
 - **#66** — merge after correcting its migration comment. It is a no-op against
   production but the only thing that records the RLS setting in the repo.
-- **#70 / #71** — retarget to `main` and to each other; `0808` applies after
-  `0730`.
-- **#72** — decide whether deleting the distance readout is the intended fix.
-- **#59** — conflicting since June. Rebase or close.
+- **#70 / #71** — retargeted to `main` (2026-08-26), both CI-green and clean.
+  `0730` is already on `main` via #72, so `0808` orders correctly by itself.
+  **Merge #70 with a merge commit, not squash.** #71 currently carries #70's
+  commit too; a merge commit lands that exact SHA on `main` and #71's diff
+  collapses to its own commit. A squash puts the same changes on `main` under a
+  new SHA, leaving #71 to re-apply them — conflicts in `stripe_client.py` and a
+  duplicate `20260808140000` migration.
+- **#59** — conflicting on all four files it touches; every one has moved in
+  `main` since it branched in June. That is a rewrite, not a rebase. It also
+  predates CI, so it has never been tested. Re-cut or close.
 - **Three remaining advisor items** — one small migration:
   drop/revoke `get_nearby_listings`, revoke the trigger functions from the public
   API, pin `search_path` on our own functions.
