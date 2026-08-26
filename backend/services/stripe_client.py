@@ -1,6 +1,8 @@
 import os
 import json
+import random
 import re
+import time
 import traceback
 import stripe
 from flask import jsonify
@@ -111,6 +113,21 @@ def _reservation_validation_error(listing_id: str, start_time: str, end_time: st
 _TERMINAL_ERROR_PREFIXES = ("slot_unavailable", "missing_metadata")
 
 
+# Class 40 is "transaction rollback" — 40P01 deadlock_detected, 40001
+# serialization_failure. These mean "your transaction lost a race and was rolled
+# back", which is genuinely retryable: the same call usually succeeds moments
+# later. They are handled by re-calling the RPC (see _FINALIZE_MAX_ATTEMPTS
+# below), not by classification.
+_RETRYABLE_DB_ERROR = re.compile(r"^db_40[0-9A-Z]{3}:")
+
+# How many times to re-call finalize_paid_reservation on a class-40 error.
+# Deliberately small and fast: this runs inside a Stripe webhook handler, which
+# wants a prompt ACK, and deadlocks resolve the instant the victim rolls back.
+# Too generous and Stripe times out and retries the whole webhook on top of us.
+_FINALIZE_MAX_ATTEMPTS = 3
+_FINALIZE_RETRY_DELAY = (0.05, 0.15)  # jittered, so two racers don't re-collide
+
+
 def _is_terminal_finalize_error(message: str) -> bool:
     if not message:
         return False
@@ -119,7 +136,14 @@ def _is_terminal_finalize_error(message: str) -> bool:
     # SQLSTATEs are 5 alphanumeric chars, not 5 digits: class 23 includes 23505
     # (unique), 23503 (FK) AND 23P01 (exclusion — the double-booking one), so a
     # \d{3} tail silently missed exactly the case that matters most here.
-    return bool(re.match(r"^db_(P0001|23[0-9A-Z]{3}):", message))
+    if re.match(r"^db_(P0001|23[0-9A-Z]{3}):", message):
+        return True
+    # A class-40 error only reaches classification once the retries above are
+    # exhausted. Treat it as terminal at that point: the renter's money must not
+    # depend on a later retry that nothing performs. Nothing re-drives a
+    # non-terminal failure — the webhook ACKs 200 regardless and there is no
+    # reconciliation sweep — so "retryable" here means "silently stranded".
+    return bool(_RETRYABLE_DB_ERROR.match(message))
 
 
 def _refund_stranded_payment(payment_intent_id: str, reason: str) -> str:
@@ -492,26 +516,60 @@ def _finalize_reservation_from_pi(pi) -> dict:
             "p_charge_id": str(charge) if charge else None,
         }
 
-        try:
-            result = supabase.rpc("finalize_paid_reservation", params).execute()
-        except Exception as err:  # noqa: BLE001
-            print(f"[stripe] finalize_paid_reservation RPC raised: {err}")
-            traceback.print_exc()
-            return {"error": f"db_error: {err}"}
+        # Retry on class-40 (deadlock / serialization) failures.
+        #
+        # Two renters racing OVERLAPPING — not identical — ranges on one listing
+        # both reach a succeeded payment, and both call this. Measured against
+        # the real function over 30 concurrent trials, the loser came back
+        # 'slot_unavailable' half the time and 'db_40P01: deadlock detected' the
+        # other half. Only the first is terminal, so half of all losing renters
+        # were charged, given no reservation, and never refunded — recoverable
+        # only by a human reading a log line.
+        #
+        # Retrying is the right response rather than reclassifying, because it
+        # produces the correct outcome for BOTH racers instead of just refunding
+        # more people: on the retry one renter wins the slot and the other gets a
+        # clean exclusion violation, which is already terminal and already
+        # refunds. It also fixes the milder case where the client and the webhook
+        # deadlock over the SAME payment — the retry finds the row the other one
+        # just created (finalize_paid_reservation checks stripe_payment_intent
+        # before inserting, so this is safe) and returns success, instead of
+        # showing the renter "charged, contact support" for a booking that exists.
+        #
+        # Both callers — the webhook and the client-invoked finalize — come
+        # through here, so one retry site covers both.
+        for attempt in range(1, _FINALIZE_MAX_ATTEMPTS + 1):
+            try:
+                result = supabase.rpc("finalize_paid_reservation", params).execute()
+            except Exception as err:  # noqa: BLE001
+                print(f"[stripe] finalize_paid_reservation RPC raised: {err}")
+                traceback.print_exc()
+                return {"error": f"db_error: {err}"}
 
-        data = getattr(result, "data", None)
-        print(f"[stripe] finalize_paid_reservation returned data={data!r}")
+            data = getattr(result, "data", None)
+            print(f"[stripe] finalize_paid_reservation returned data={data!r}")
 
-        if not data:
-            return {"error": "rpc_empty_response"}
+            if not data:
+                return {"error": "rpc_empty_response"}
 
-        # RETURNS TABLE → list of rows; occasionally scalar depending on client.
-        row = data[0] if isinstance(data, list) else data
-        if not isinstance(row, dict):
-            return {"error": f"rpc_unexpected_shape: {type(row).__name__}"}
+            # RETURNS TABLE → list of rows; occasionally scalar depending on client.
+            row = data[0] if isinstance(data, list) else data
+            if not isinstance(row, dict):
+                return {"error": f"rpc_unexpected_shape: {type(row).__name__}"}
 
-        if row.get("error_message"):
-            return {"error": row["error_message"]}
+            error_message = row.get("error_message")
+            if error_message:
+                if (_RETRYABLE_DB_ERROR.match(error_message)
+                        and attempt < _FINALIZE_MAX_ATTEMPTS):
+                    print(f"[stripe] finalize attempt {attempt} lost a race "
+                          f"({error_message}); retrying")
+                    time.sleep(random.uniform(*_FINALIZE_RETRY_DELAY))
+                    continue
+                # Either terminal, or class-40 with no attempts left — in which
+                # case _is_terminal_finalize_error now treats it as terminal so
+                # the capture is refunded rather than silently stranded.
+                return {"error": error_message}
+            break
 
         rid = row.get("reservation_id")
         if not rid:
