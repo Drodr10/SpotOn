@@ -94,18 +94,20 @@ answer if so.
 
 ## Housekeeping
 
-- **25 commits sit unpushed** on `chore/prod-readiness` — account deletion,
-  the privacy policy and the endpoint auth all live only on this machine.
-  No branch on the remote, no PR.
+- **#74** — `chore/prod-readiness`, pushed 2026-08-26 and open against `main`.
+  Account deletion, the privacy policy and the endpoint auth. CI on it caught a
+  real bug on the first run: the deletion tests needed real Supabase credentials
+  to import, so they passed locally and failed all 14 in CI. Fixed in `43d8197`.
+  Now 11 behind `main` after #70/#71 landed — a trial merge is clean and the full
+  suite passes (88), including the finalize ordering test, but the branch has not
+  been updated on the remote.
 - **#66** — merge after correcting its migration comment. It is a no-op against
   production but the only thing that records the RLS setting in the repo.
-- **#70 / #71** — retargeted to `main` (2026-08-26), both CI-green and clean.
-  `0730` is already on `main` via #72, so `0808` orders correctly by itself.
-  **Merge #70 with a merge commit, not squash.** #71 currently carries #70's
-  commit too; a merge commit lands that exact SHA on `main` and #71's diff
-  collapses to its own commit. A squash puts the same changes on `main` under a
-  new SHA, leaving #71 to re-apply them — conflicts in `stripe_client.py` and a
-  duplicate `20260808140000` migration.
+- **#70 / #71** — MERGED 2026-08-26 (`e247000`, `1a8ce23`). Both were pointing at
+  branches rather than `main`; `ci/automated-checks` had already been absorbed, so
+  merging #70 would have moved nothing while showing green. Retargeted, then merged
+  with merge commits so `fae40e7` landed verbatim and #71 collapsed to its own
+  commit — a squash would have left #71 re-applying changes already on `main`.
 - **#59** — conflicting on all four files it touches; every one has moved in
   `main` since it branched in June. That is a rewrite, not a rebase. It also
   predates CI, so it has never been tested. Re-cut or close.
