@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How SpotOn's Flask backend gets deployed to Render: the plan, the cost, and the setup steps.">
+<title>SpotOn on Render</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #EFF1F2;
+    --surface:     #FFFFFF;
+    --surface-alt: #E5E8EA;
+    --ink:         #16191C;
+    --ink-soft:    #5A6068;
+    --ink-faint:   #858C94;
+    --rule:        #D2D7DA;
+    --rule-strong: #B4BBC0;
+    --accent:      #1F5CD8;
+    --accent-soft: #E4EBFB;
+    --warn:        #A76400;
+    --warn-soft:   #FBEFDC;
+    --warn-rule:   #E0B269;
+    --danger:      #A81E17;
+    --ok:          #1B6E44;
+    --code-bg:     #E9ECEE;
+    --shadow:      0 1px 2px rgba(20,25,30,.06), 0 6px 18px rgba(20,25,30,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #131619;
+      --surface:     #1B1F23;
+      --surface-alt: #23282D;
+      --ink:         #E8EBEE;
+      --ink-soft:    #A2AAB2;
+      --ink-faint:   #79828B;
+      --rule:        #2D343A;
+      --rule-strong: #414A52;
+      --accent:      #7BA5FF;
+      --accent-soft: #1B2740;
+      --warn:        #E5AC50;
+      --warn-soft:   #2C2313;
+      --warn-rule:   #6B531F;
+      --danger:      #FF7A6E;
+      --ok:          #59C88D;
+      --code-bg:     #22272C;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #131619;
+    --surface:     #1B1F23;
+    --surface-alt: #23282D;
+    --ink:         #E8EBEE;
+    --ink-soft:    #A2AAB2;
+    --ink-faint:   #79828B;
+    --rule:        #2D343A;
+    --rule-strong: #414A52;
+    --accent:      #7BA5FF;
+    --accent-soft: #1B2740;
+    --warn:        #E5AC50;
+    --warn-soft:   #2C2313;
+    --warn-rule:   #6B531F;
+    --danger:      #FF7A6E;
+    --ok:          #59C88D;
+    --code-bg:     #22272C;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 780px; margin: 0 auto; }
+
+  /* ── masthead ─────────────────────────────────────────── */
+  .masthead {
+    padding: 56px 0 28px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    font-weight: 700;
+    font-size: clamp(2.1rem, 5.6vw, 3.05rem);
+    line-height: 1.04;
+    letter-spacing: -.021em;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  .standfirst {
+    font-size: 1.115rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 60ch;
+  }
+
+  /* ── generic type ─────────────────────────────────────── */
+  h2 {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    font-size: 1.42rem;
+    letter-spacing: -.012em;
+    line-height: 1.22;
+    text-wrap: balance;
+    margin: 0 0 16px;
+  }
+  h3 {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    font-size: 1.03rem;
+    letter-spacing: -.005em;
+    margin: 0 0 8px;
+  }
+  p { margin: 0 0 14px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+  strong { font-weight: 600; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px;
+  }
+
+  section { margin-bottom: 52px; }
+
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .855em;
+    background: var(--code-bg);
+    padding: .1em .3em;
+    border-radius: 3px;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule-strong);
+    border-radius: 4px;
+    padding: 14px 16px;
+    font-size: .845rem;
+    line-height: 1.66;
+    overflow-x: auto;
+    margin: 0 0 14px;
+  }
+  pre code { background: none; padding: 0; font-size: 1em; }
+  .cmt { color: var(--ink-faint); }
+
+  /* ── cost strip ───────────────────────────────────────── */
+  .cost {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 26px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 18px;
+  }
+  .cost-fig {
+    font-family: Archivo, sans-serif;
+    font-weight: 700;
+    font-size: 2.5rem;
+    line-height: 1;
+    letter-spacing: -.025em;
+    font-variant-numeric: tabular-nums;
+  }
+  .cost-note { color: var(--ink-soft); font-size: .93rem; max-width: 42ch; }
+
+  /* ── tables ───────────────────────────────────────────── */
+  .tbl-scroll { overflow-x: auto; margin-bottom: 14px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: .915rem;
+    min-width: 400px;
+  }
+  th, td {
+    text-align: left;
+    padding: 9px 14px 9px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    border-bottom-color: var(--rule-strong);
+    white-space: nowrap;
+  }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.pick td { background: var(--accent-soft); }
+  tr.pick td:first-child { font-weight: 600; }
+  .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--accent);
+    color: var(--surface);
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+  :root[data-theme="dark"] .tag, :root:not([data-theme="light"]) .tag { color: #131619; }
+
+  /* ── numbered steps ───────────────────────────────────── */
+  .steps { counter-reset: step; margin: 0; padding: 0; list-style: none; }
+  .step {
+    counter-increment: step;
+    position: relative;
+    padding-left: 54px;
+    padding-bottom: 34px;
+    border-left: 1px solid var(--rule);
+    margin-left: 15px;
+  }
+  .step:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .step::before {
+    content: counter(step);
+    position: absolute;
+    left: -15px;
+    top: -2px;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--ground);
+    font-family: Archivo, sans-serif;
+    font-weight: 600;
+    font-size: .84rem;
+    display: grid;
+    place-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── callouts ─────────────────────────────────────────── */
+  .warn {
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-rule);
+    border-radius: 5px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+  }
+  .warn h3 { color: var(--warn); display: flex; gap: 9px; align-items: baseline; }
+  .warn h3 .mark {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem;
+    border: 1.5px solid var(--warn);
+    border-radius: 3px;
+    padding: 0 5px;
+    flex: none;
+  }
+  .warn p { max-width: 62ch; }
+  .warn p:last-child { margin-bottom: 0; }
+
+  .note {
+    border-left: 3px solid var(--rule-strong);
+    padding: 2px 0 2px 18px;
+    color: var(--ink-soft);
+    font-size: .945rem;
+    margin-bottom: 14px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+  }
+
+  ul.plain { margin: 0 0 14px; padding-left: 20px; }
+  ul.plain li { margin-bottom: 6px; max-width: 64ch; }
+
+  .foot {
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+    color: var(--ink-faint);
+    font-size: .875rem;
+  }
+
+  @media (max-width: 560px) {
+    body { font-size: 16px; padding: 0 16px 72px; }
+    .step { padding-left: 42px; }
+    .cost-fig { font-size: 2.1rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  /* Printing / save-as-PDF — this doc is likely to be printed or PDF'd. */
+  @media print {
+    :root {
+      --ground: #FFFFFF; --surface: #FFFFFF; --surface-alt: #F2F2F2;
+      --ink: #000000; --ink-soft: #333333; --ink-faint: #555555;
+      --rule: #CCCCCC; --rule-strong: #999999;
+      --accent: #14459E; --accent-soft: #EDF2FD;
+      --warn: #7A4A00; --warn-soft: #FBF3E4; --warn-rule: #C9A227;
+      --code-bg: #F2F2F2; --shadow: none;
+    }
+    body { padding: 0; font-size: 11pt; }
+    .masthead { padding-top: 0; }
+    section { break-inside: avoid-page; margin-bottom: 30px; }
+    .warn, .card, .step { break-inside: avoid-page; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">SpotOn · Backend Deployment</p>
+    <h1>Getting the backend off ngrok</h1>
+    <p class="standfirst">Right now the Flask backend only exists on whoever's laptop is running it, behind an ngrok URL that changes. That can't ship to the App Store. Here's the plan, what it costs, and who needs to do what.</p>
+  </header>
+
+  <section>
+    <h2>Why we can't ship as-is</h2>
+    <p>The backend has to be reachable at a <strong>fixed public HTTPS address</strong> for four separate reasons. An ngrok URL rotates, so it fails the first three:</p>
+    <ul class="plain">
+      <li><strong>Stripe sends webhooks to it.</strong> That's the reliable backstop that creates a reservation after payment — if it can't reach us, bookings depend entirely on the app's own follow-up call.</li>
+      <li><strong>Stripe seller onboarding redirects back to it</strong> in a real browser.</li>
+      <li><strong>The app on people's phones calls it</strong> for pricing, booking, and payouts.</li>
+      <li><strong>The background sweeps need something to trigger them</strong> on a schedule.</li>
+    </ul>
+    <p>Expo isn't involved in any of this — it only serves JavaScript to a development build. It was never going to host the backend.</p>
+  </section>
+
+  <section>
+    <h2>What it costs</h2>
+    <div class="cost">
+      <span class="cost-fig">~$8</span>
+      <span class="cost-note">per month, total. Render bills a workspace plan and compute separately — we need the free workspace plus the cheapest paid instance.</span>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr><th>Line item</th><th>Plan</th><th>Cost</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Workspace</td><td>Hobby</td><td class="num">$0/mo</td></tr>
+          <tr class="pick"><td>Web service compute</td><td>Starter — 512&nbsp;MB, 0.5&nbsp;CPU</td><td class="num">$7/mo</td></tr>
+          <tr><td>Cron jobs (×2)</td><td>Starter, per-second billing</td><td class="num">~$1/mo</td></tr>
+          <tr><td>Apple Developer</td><td>already paid</td><td class="num">—</td></tr>
+          <tr><td>Google Play</td><td>already paid</td><td class="num">—</td></tr>
+          <tr><td>Supabase / EAS</td><td>free tiers hold for now</td><td class="num">$0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">If you're looking at Render's pricing page and only seeing $25 — that's the <em>Pro workspace</em> plan, a different line item. The $7 instance table is collapsed behind a black <strong>“Show Pricing”</strong> button in the Compute section.</p>
+
+    <h3 style="margin-top:26px">Why not the free instance</h3>
+    <p>It spins down after 15 minutes of no traffic and takes <strong>about a minute</strong> to wake. Someone tapping <em>Book</em> after a quiet spell would sit on a spinner. It also gets 0.1 CPU against Starter's 0.5. Not worth $7 to find out.</p>
+  </section>
+
+  <section>
+    <h2>What each of us has to do</h2>
+    <div class="card">
+      <h3>Almost nothing, for most of us</h3>
+      <p>Render deploys automatically from GitHub. Push to <code>main</code>, it builds and ships. <strong>You don't need a Render login to write code or release it.</strong></p>
+      <p>A login is only needed to change environment variables, read logs, restart the service, or manage the cron jobs — an ops job, not a per-person one. The Hobby plan includes one seat, and since we share a team email, that covers it. If we ever need two people in the dashboard at once, Pro is $25/mo for unlimited seats and we can decide then.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The setup</h2>
+    <p>Done once, by whoever has the shared login. Roughly half an hour.</p>
+
+    <ol class="steps">
+
+      <li class="step">
+        <h3>Create a <em>Web Service</em> — not a Private Service</h3>
+        <p>Connect the GitHub repo and pick <strong>Web Service</strong>. Render's naming is misleading: “web” means <em>gets a public URL</em>, not <em>serves a website</em>. Our JSON API qualifies. A Private Service is reachable only from inside Render's own network, so Stripe and everyone's phones would be locked out.</p>
+      </li>
+
+      <li class="step">
+        <h3>Point it at the backend folder</h3>
+        <div class="tbl-scroll">
+          <table>
+            <tbody>
+              <tr><td style="width:130px">Root Directory</td><td><code>backend</code></td></tr>
+              <tr><td>Build Command</td><td><code>pip install -r requirements.txt</code></td></tr>
+              <tr><td>Start Command</td><td><code>gunicorn app:app --workers 2 --timeout 60</code></td></tr>
+              <tr><td>Health Check Path</td><td><code>/api/health</code></td></tr>
+              <tr><td>Instance Type</td><td>Starter<span class="tag">$7/mo</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Gunicorn is already in <code>requirements.txt</code> and the Python version is pinned in <code>.python-version</code>, so there's nothing to install or configure beyond this.</p>
+      </li>
+
+      <li class="step">
+        <h3>Set the environment variables</h3>
+        <p>Copy these from <code>backend/.env</code>, with one addition and one change:</p>
+        <pre><code>SUPABASE_URL=
+SUPABASE_KEY=              <span class="cmt"># service-role key — never commit this</span>
+STRIPE_PUBLISHABLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=     <span class="cmt"># NEW value, from step 5</span>
+BACKEND_URL=https://&lt;our-render-domain&gt;
+SWEEP_SECRET=
+ENABLE_SWEEP_SCHEDULER=false   <span class="cmt"># ← see warning below</span></code></pre>
+      </li>
+
+      <li class="step">
+        <h3>Add two cron jobs</h3>
+        <p>These replace the scheduler that currently runs inside the app process. Every 10 minutes each:</p>
+        <pre><code>curl -fsS -X POST https://&lt;domain&gt;/api/stripe/run-payout-sweep \
+  -H "X-Sweep-Secret: $SWEEP_SECRET"
+
+curl -fsS -X POST https://&lt;domain&gt;/api/stripe/run-notification-sweep \
+  -H "X-Sweep-Secret: $SWEEP_SECRET"</code></pre>
+        <p>Both return <code>401</code> without the header, so a wrong secret fails loudly rather than silently doing nothing.</p>
+      </li>
+
+      <li class="step">
+        <h3>Register the Stripe webhook</h3>
+        <p>In the Stripe dashboard, add an endpoint pointing at:</p>
+        <pre><code>https://&lt;domain&gt;/api/stripe/webhook</code></pre>
+        <p>Then copy that endpoint's signing secret into <code>STRIPE_WEBHOOK_SECRET</code>. It's generated per endpoint — it is <em>not</em> the same value we use locally with <code>stripe listen</code>.</p>
+      </li>
+
+      <li class="step">
+        <h3>Point the app at the new address</h3>
+        <p>Set <code>EXPO_PUBLIC_IP</code> to the <strong>bare hostname</strong> — no <code>https://</code>, no <code>/api</code>:</p>
+        <pre><code>EXPO_PUBLIC_IP=spoton-api.onrender.com</code></pre>
+        <p>That's the only change the app needs; every call site already builds the rest of the URL. Set it as an <strong>EAS environment variable</strong>, along with the Supabase keys and the Maps key — EAS does not upload <code>.env</code> files, so anything only in <code>.env</code> ships as undefined.</p>
+      </li>
+
+      <li class="step">
+        <h3>Check it's actually up</h3>
+        <pre><code>curl https://&lt;domain&gt;/api/health
+<span class="cmt"># {"status":"ok"}</span></code></pre>
+        <p>Then make one real booking end to end and confirm the reservation appears. That exercises the app call, the webhook, and the database in one go.</p>
+      </li>
+
+    </ol>
+  </section>
+
+  <section>
+    <h2>Three things that fail silently</h2>
+    <p>Each of these deploys cleanly, looks fine, and is wrong. They're worth knowing about in advance because none of them announce themselves.</p>
+
+    <div class="warn">
+      <h3><span class="mark">1</span> Forgetting <code>ENABLE_SWEEP_SCHEDULER=false</code> costs real money</h3>
+      <p>The app defaults this to <em>on</em>, and its other safety check doesn't apply under gunicorn. With two workers, that means <strong>two schedulers running the payout sweep at the same time, against real Stripe transfers.</strong> This must be set on the very first deploy, not added later.</p>
+    </div>
+
+    <div class="warn">
+      <h3><span class="mark">2</span> The webhook path needs the <code>/api</code> prefix</h3>
+      <p>It is <code>/api/stripe/webhook</code> — the <code>/api</code> is the easy bit to drop. Get it wrong and Stripe records delivery attempts, the app looks healthy, and we quietly lose the backstop that creates reservations when the app's own call doesn't land. Same prefix on both cron URLs.</p>
+    </div>
+
+    <div class="warn">
+      <h3><span class="mark">3</span> Private Service instead of Web Service</h3>
+      <p>Same price, same hardware, no public address. It deploys successfully and then nothing on the internet can reach it.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Going live on Stripe — later, but plan for it</h2>
+    <p>Everything above works in Stripe's test mode. Switching to live mode is a separate step, and it's more than swapping keys:</p>
+    <ul class="plain">
+      <li><strong>New API keys</strong> — <code>pk_live_</code> / <code>sk_live_</code> instead of the test pair.</li>
+      <li><strong>A new webhook secret.</strong> Endpoints are configured per mode, so we create ours again in live mode and it gets a different signing secret.</li>
+      <li><strong>Every seller re-onboards.</strong> Connect accounts don't carry across modes, and our database currently stores test-mode account IDs — those rows have to be cleared at cutover or sellers get handed a dead account.</li>
+    </ul>
+    <div class="warn">
+      <h3><span class="mark">!</span> Start Stripe account activation now</h3>
+      <p>Live mode requires our own Stripe account to be fully activated — business details, bank account, tax info, and a review by Stripe that can take days. It's the one step with real lead time and the only one that can't be done on launch day.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Still open</h2>
+    <ul class="plain">
+      <li><strong>Bandwidth.</strong> Hobby includes 5&nbsp;GB/month outbound. Listing images come from Supabase rather than through Flask, so this is JSON only and should be fine — but it's the first limit likely to bind.</li>
+      <li><strong>Two ungated endpoints.</strong> <code>/api/stripe/finalize-booking</code> and <code>/api/stripe/release-hold</code> still have no authentication. Worth closing before we're taking real money.</li>
+    </ul>
+  </section>
+
+  <p class="foot">Written 25 August 2026. Prices read off Render's pricing page the same day — worth re-checking, they move.</p>
+
+</div>
+</body>
+</html>
