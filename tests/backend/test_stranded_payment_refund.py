@@ -252,13 +252,24 @@ def test_create_booking_payment_refuses_before_touching_stripe(stripe_client, mo
     assert created == []
 
 
+# finalize_booking now checks the PaymentIntent belongs to the caller, so the
+# fake PI carries the renter_id that create_booking_payment would have written
+# and the caller matches it. Refusal itself is covered in
+# test_stripe_endpoint_auth.py; these tests are about what happens to a payment
+# whose booking fails, which is downstream of that gate.
+RENTER = "11111111-1111-4111-8111-111111111111"
+
+
 def _finalize_with(stripe_client, monkeypatch, outcome_error, refund_result="refunded"):
     """Drive finalize_booking against a succeeded PI whose reservation fails."""
     from flask import Flask
 
     monkeypatch.setattr(
         stripe_client.stripe, "PaymentIntent",
-        types.SimpleNamespace(retrieve=lambda *_a, **_k: {"id": "pi_331", "status": "succeeded"}),
+        types.SimpleNamespace(retrieve=lambda *_a, **_k: {
+            "id": "pi_331", "status": "succeeded",
+            "metadata": {"renter_id": RENTER},
+        }),
     )
     monkeypatch.setattr(stripe_client, "_finalize_reservation_from_pi",
                         lambda _pi: {"error": outcome_error})
@@ -272,7 +283,7 @@ def _finalize_with(stripe_client, monkeypatch, outcome_error, refund_result="ref
 
     app = Flask(__name__)
     with app.app_context():
-        response, status = stripe_client.finalize_booking("pi_331")
+        response, status = stripe_client.finalize_booking("pi_331", RENTER)
         return response.get_json(), status, refunds
 
 

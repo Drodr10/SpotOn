@@ -40,18 +40,28 @@ def create_booking_payment_route(current_user_id):
 
 # Release a checkout hold early (renter dismissed the Stripe sheet). The sweep
 # is the backstop, but releasing now frees the slot for others immediately.
+#
+# Authenticated: a hold_id alone used to be enough to drop anyone's slot
+# mid-checkout. release_booking_hold scopes the delete to the caller.
 @stripe_bp.route('/stripe/release-hold', methods=['POST'])
-def release_hold_route():
+@token_required
+def release_hold_route(current_user_id):
     data = request.json or {}
-    return release_booking_hold(data.get("hold_id"))
+    return release_booking_hold(data.get("hold_id"), current_user_id)
 
 
 # Client calls this the moment the payment sheet returns success, so the
 # reservation exists immediately instead of waiting on the webhook (idempotent).
+#
+# Authenticated, and finalize_booking additionally checks the PaymentIntent
+# belongs to the caller. Note a 401 here is a DEFERRED booking, not a lost one:
+# if the session expired between paying and this call, the webhook still
+# creates the reservation. Seeing these in the logs is not an emergency.
 @stripe_bp.route('/stripe/finalize-booking', methods=['POST'])
-def finalize_booking_route():
+@token_required
+def finalize_booking_route(current_user_id):
     data = request.json or {}
-    return finalize_booking(data.get("payment_intent_id"))
+    return finalize_booking(data.get("payment_intent_id"), current_user_id)
 
 
 # Onboarding: create the seller's Express connected account (lazily, at payout setup).
