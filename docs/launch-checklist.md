@@ -16,15 +16,23 @@ DELETE, and forcing one would take the counterparty's bookings and messages
 with it. Refused while a booking is live or a payout is owed. See
 `backend/services/account_deletion.py`.
 
-### 3. ~~There is no privacy policy~~ — WRITTEN, not yet live
-`site/privacy.html`, open as ehanrsha/SpotOn-Website#6 so it lands at
-`spot-on.software/privacy`. Written from the schema, not a template.
+### 3. ~~There is no privacy policy~~ — LIVE
+**https://spot-on.software/privacy** since 2026-08-26
+(ehanrsha/SpotOn-Website#6, `185b11d`). Written from the schema, not a template.
 
-One placeholder left — the effective date, Ehan's to set. Store-form answers
-and two `Info.plist` fixes are in `app-privacy-declarations.md`.
+Effective date set to the day it went live, and the pre-publish box plus all
+`class="fill"` markers removed — merging with those still in would have
+published them, because that site auto-deploys.
 
-Still to do after it is live: link to it from inside the app. Play requires
-the policy be reachable in-app, and the URL does not exist yet.
+**The site publishes on merge.** Cloudflare Workers Builds is connected to
+ehanrsha/SpotOn-Website; there is no separate deploy step and no staging. The
+build went green and the URL returned 200 roughly 40s after merging.
+
+Store-form answers and two `Info.plist` fixes remain in
+`app-privacy-declarations.md`.
+
+Still to do: link to it from inside the app. Play requires the policy be
+reachable in-app, and the URL now exists, so this is unblocked.
 
 ### 4. Nothing from 2026-08-25 has been exercised by a human
 Merged or applied today: the mobile payment element fix, the rate-tier fix,
