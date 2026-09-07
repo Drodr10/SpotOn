@@ -451,7 +451,10 @@ def handle_webhook(payload: bytes, sig_header: str):
             _on_payment_succeeded(obj)
         elif event_type == "account.updated":
             _on_account_updated(obj)
-        elif event_type in ("transfer.created", "charge.refunded"):
+        elif event_type == "charge.refunded":
+            charge = _to_plain_dict(obj) if not isinstance(obj, dict) else obj
+            _on_charge_refunded(charge)
+        elif event_type == "transfer.created":
             oid = _to_plain_dict(obj).get("id") if not isinstance(obj, dict) else obj.get("id")
             print(f"[stripe] {event_type}: {oid}")  # bookkeeping / logs
     except Exception as err:  # noqa: BLE001
@@ -696,6 +699,76 @@ def finalize_booking(payment_intent_id: str, current_user_id: str):
             "message": _finalize_user_message(error, refunded=None),
         }), 409
     return jsonify({"reservationId": outcome["reservation_id"]}), 200
+
+
+def _on_charge_refunded(charge: dict):
+    """
+    Webhook path for a refund issued from the Stripe dashboard — today the
+    *only* way a booking gets refunded on request, since there's no in-app
+    cancellation flow. Without this, the reservation row keeps saying
+    payout_status='held'/'payout_ready' after the money is already back with
+    the renter, and the sweep would go on to Transfer the host their cut of a
+    booking that was refunded out from under it.
+    """
+    try:
+        pi_id = charge.get("payment_intent")
+        amount = charge.get("amount")
+        amount_refunded = charge.get("amount_refunded")
+        fully_refunded = bool(charge.get("refunded")) or (
+            amount is not None and amount_refunded is not None and amount_refunded >= amount
+        )
+
+        if not pi_id:
+            print(f"[stripe] charge.refunded ({charge.get('id')}) has no payment_intent; skipping")
+            return
+
+        rows = (
+            supabase.table("reservations")
+            .select("id, payout_status, stripe_transfer_id")
+            .eq("stripe_payment_intent", pi_id)
+            .execute()
+            .data
+        ) or []
+        if not rows:
+            # Expected for a conflict-refund (_refund_stranded_payment) — that
+            # PI was refunded specifically because no reservation was ever
+            # created for it. Not an error, just nothing to reconcile here.
+            print(f"[stripe] charge.refunded for PI {pi_id}: no reservation row (likely a conflict-refund)")
+            return
+
+        for res in rows:
+            rid = res["id"]
+            current_payout = res.get("payout_status")
+
+            if not fully_refunded:
+                # No established partial-refund policy yet — don't guess at a
+                # reservation-level status change, just make it visible.
+                print(f"[stripe] PARTIAL refund on reservation {rid} (PI {pi_id}); "
+                      f"payout_status left as {current_payout!r} — needs manual review")
+                continue
+
+            if current_payout in ("refunded", "refunded_after_payout"):
+                continue  # already handled — webhooks can and do redeliver
+
+            if current_payout == "paid_out":
+                # The host was already paid before this refund landed. Flipping
+                # this to a plain 'refunded' would misrepresent that the payout
+                # never happened; a human has to claw the transfer back.
+                print(f"[stripe] ALERT reservation {rid} (PI {pi_id}) refunded AFTER "
+                      f"host payout already sent (transfer {res.get('stripe_transfer_id')}) "
+                      f"— needs manual reversal")
+                supabase.table("reservations").update(
+                    {"payout_status": "refunded_after_payout"}
+                ).eq("id", rid).execute()
+                continue
+
+            supabase.table("reservations").update(
+                {"payout_status": "refunded", "status": "cancelled"}
+            ).eq("id", rid).execute()
+            print(f"[stripe] reservation {rid} marked refunded/cancelled from charge.refunded (PI {pi_id})")
+    except Exception as err:  # noqa: BLE001 — never let this bubble to Flask as a 500
+        print(f"[stripe] _on_charge_refunded crashed: {err}")
+        traceback.print_exc()
 
 
 def _on_account_updated(account):
