@@ -41,7 +41,26 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SpotOn uses your location to show nearby parking spots and to set a listing's location when you tap \"use my location\".",
+          "locationAlwaysPermission": false,
+          "locationAlwaysAndWhenInUsePermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SpotOn needs access to your photo library to choose a profile picture or a listing photo.",
+          "cameraPermission": "SpotOn needs access to your camera to take a photo of a parking space you're listing.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
