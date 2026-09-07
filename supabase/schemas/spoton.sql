@@ -108,7 +108,12 @@ create policy "reservations_parties_select" on public.reservations
 create policy "reservations_update_status" on public.reservations
   for update to authenticated
   using (
-    -- allow renter or listing owner to update (could be narrowed by column)
+    -- Row-level half only. UPDATE on this table is REVOKEd from
+    -- authenticated/anon entirely (see 20260906213000_revoke_reservation_client_update.sql)
+    -- since nothing in the shipped app updates reservations through the
+    -- client role. Never grant UPDATE on status/payout_status back to
+    -- authenticated -- those must only change via a real Stripe
+    -- refund/transfer through the backend's service_role key.
     renter_id = (select auth.uid())
     or listing_id in (select id from public.listings where owner_id = (select auth.uid()))
   )
