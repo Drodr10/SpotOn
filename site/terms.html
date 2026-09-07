@@ -229,10 +229,12 @@
 <p>The remainder — the host's payout — is transferred to the host's Stripe-connected account. Hosts go through Stripe's own identity verification before they can receive payouts; SpotOn never holds or has access to the funds in between.</p>
 
 <h2 id="cancellations"><span class="num">06</span>Cancellations and refunds</h2>
+<p>You can cancel a confirmed booking yourself from the app, for a full refund including the service fee, up until <span class="fill">[Ehan: confirm this number — currently 24 hours, set by the CANCELLATION_WINDOW_HOURS setting]</span> hours before it's scheduled to start. We reserve the right to change that window going forward; the number in effect at the time you book is the one that applies to that booking.</p>
+<p>Once you're inside that window, or after a booking has started, self-serve cancellation isn't available. Email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> and we'll look at it case by case.</p>
+<p>One case is automatic on our end: if a host never finishes Stripe onboarding in time to receive a booking's payout, we automatically refund the renter in full and cancel the booking.</p>
 <div class="callout">
-  <p><strong>This section describes what the app actually does today, which is less than a full cancellation policy.</strong> There is currently no self-serve way to cancel a confirmed booking and request a refund from inside the app. If you need to cancel, email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> and we'll handle it manually. <span class="fill">[Ehan/legal: decide and write the real cancellation window and refund policy here before this goes live — e.g. free cancellation up to N hours before a booking starts, host no-show policy, etc.]</span></p>
+  <p><span class="fill">[Ehan/legal: still undecided — what happens if a host doesn't show up or refuses access after a renter arrives (renter-side no-show protection), and what happens if a renter doesn't show up at all (host-side no-show/cancellation policy). Neither exists in the app yet; both need a real answer before launch.]</span></p>
 </div>
-<p>One case is automatic: if a host never finishes Stripe onboarding in time to receive a booking's payout, we automatically refund the renter in full and cancel the booking.</p>
 
 <h2 id="conduct"><span class="num">07</span>Acceptable use</h2>
 <p>Don't use SpotOn to:</p>
