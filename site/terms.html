@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpotOn — Terms of Service</title>
+  <meta name="description" content="The terms that govern using the SpotOn parking app to list, find, and book parking.">
+  <link rel="icon" href="assets/spoton-logo.png">
+
+  <!-- Self-contained on purpose, same convention as privacy.html: everything
+       except Fonts/ and assets/ lives in this file, and those two paths are
+       RELATIVE so dropping terms.html into the root of the SpotOn-Website repo
+       works with no edits. Don't "tidy" them into absolute URLs. Type and
+       colour are lifted from hero.css / privacy.html so this page reads as
+       part of the site.
+
+       DRAFT — has NOT had legal review. Every class="fill" span below is a
+       placeholder Ehan (or a lawyer) needs to fill or confirm before this is
+       real. Facts that are NOT placeholders (fee rates, refund behaviour,
+       age requirement, publisher, governing law) were pulled directly from
+       the current backend and from privacy.html, not invented. -->
+  <style>
+  /* ─── Fonts — the same four faces hero.css declares ──────── */
+  @font-face { font-family: 'Switzer'; src: url('Fonts/Switzer-Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer'; src: url('Fonts/Switzer-Semibold.ttf') format('truetype'); font-weight: 600; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer-Light'; src: url('Fonts/Switzer-Light.ttf') format('truetype'); font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Switzer-Semibold'; src: url('Fonts/Switzer-Semibold.ttf') format('truetype'); font-style: normal; font-display: swap; }
+
+  :root {
+    --ink:        #fff;
+    --ink-body:   rgba(255, 255, 255, 0.75);
+    --ink-faint:  rgba(255, 255, 255, 0.50);
+    --rule:       rgba(255, 255, 255, 0.12);
+    --rule-soft:  rgba(255, 255, 255, 0.07);
+    --surface:    rgba(255, 255, 255, 0.045);
+    --amber:      #F5C97B;
+    --amber-dim:  rgba(245, 201, 123, 0.10);
+    --amber-rule: rgba(245, 201, 123, 0.38);
+    --glow:       0 10px 24px rgba(255,255,255,0.24), 0 22px 44px rgba(255,255,255,0.18);
+    --bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    background: #000;
+    color: var(--ink-body);
+    font-family: 'Switzer', sans-serif;
+    font-weight: 300;
+    font-size: clamp(14px, 1.05vw, 17px);
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+  }
+  strong, b { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; color: var(--ink); }
+
+  .nav {
+    display: flex; align-items: center; gap: 12px;
+    padding: clamp(20px, 3vh, 36px) clamp(20px, 4vw, 48px);
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(0, 0, 0, 0.82);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--rule-soft);
+    animation: blurUp 0.9s ease-out 0.05s backwards;
+  }
+  .nav a { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+  .nav-icon {
+    width: clamp(26px, 2.4vw, 34px); height: clamp(26px, 2.4vw, 34px);
+    border-radius: 50%; object-fit: cover;
+    transition: box-shadow .55s var(--bounce), filter .55s var(--bounce);
+  }
+  .nav-name {
+    font-family: 'Switzer-Light', sans-serif;
+    font-size: clamp(15px, 1.5vw, 20px); letter-spacing: -0.02em; color: var(--ink);
+    transition: text-shadow .55s var(--bounce);
+  }
+  .nav-name strong { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; }
+  .nav a:hover .nav-icon { filter: brightness(1.08); box-shadow: 0 22px 44px rgba(255,255,255,0.18); }
+  .nav a:hover .nav-name { text-shadow: var(--glow); }
+  .nav-tail { margin-left: auto; font-size: clamp(12px, 1vw, 14px); color: var(--ink-faint); letter-spacing: -0.01em; }
+
+  .wrap { max-width: 44rem; margin: 0 auto; padding: clamp(40px, 8vh, 88px) clamp(20px, 4vw, 48px) 8rem; }
+
+  .masthead { animation: blurUp 1s ease-out 0.35s backwards; }
+  h1 {
+    font-size: clamp(30px, 4.2vw, 60px); font-weight: 300;
+    line-height: 1.06; letter-spacing: -0.025em; color: var(--ink);
+    text-wrap: balance; margin-bottom: .55rem;
+  }
+  h1 em { font-family: 'Switzer-Semibold', sans-serif; font-style: normal; font-weight: normal; }
+  .dates { display: flex; flex-wrap: wrap; gap: .2rem 1.6rem; color: var(--ink-faint); font-size: .88em; margin-bottom: 2.6rem; }
+
+  .lede { animation: blurUp 1s ease-out 0.55s backwards; }
+  .lede p { margin-bottom: 1rem; }
+  .lede p:last-child { margin-bottom: 0; }
+
+  h2 {
+    font-size: clamp(19px, 1.9vw, 26px); font-weight: 300; letter-spacing: -0.022em;
+    line-height: 1.2; color: var(--ink); text-wrap: balance;
+    margin: 4rem 0 1rem; padding-top: 1.8rem; border-top: 1px solid var(--rule);
+  }
+  h2 .num { color: var(--ink-faint); font-variant-numeric: tabular-nums; margin-right: .7rem; font-size: .8em; }
+  h3 { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; font-size: 1em; color: var(--ink); margin: 2.2rem 0 .6rem; letter-spacing: -0.01em; }
+
+  p { margin-bottom: 1rem; }
+  ul, ol { padding-left: 1.15rem; margin-bottom: 1rem; }
+  li { margin-bottom: .5rem; }
+  a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); transition: text-decoration-color .3s; }
+  a:hover { text-decoration-color: var(--ink); }
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: .84em; background: var(--surface); padding: .12em .4em; border-radius: 4px; color: var(--ink); }
+
+  .toc { animation: blurUp 1s ease-out 0.75s backwards; margin: 2.6rem 0 0; }
+  .toc ol { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: .1rem 2rem; counter-reset: toc; }
+  .toc li { margin: 0; counter-increment: toc; }
+  .toc a { display: flex; gap: .7rem; padding: .42rem 0; text-decoration: none; color: var(--ink-body); border-bottom: 1px solid var(--rule-soft); transition: color .3s, padding-left .35s var(--bounce); font-size: .93em; }
+  .toc a::before { content: counter(toc); color: var(--ink-faint); font-variant-numeric: tabular-nums; min-width: 1.1em; }
+  .toc a:hover { color: var(--ink); padding-left: .35rem; }
+  @media (max-width: 34rem) { .toc ol { grid-template-columns: 1fr; } }
+
+  .tablewrap { overflow-x: auto; margin-bottom: 1.6rem; border: 1px solid var(--rule); border-radius: 14px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 32rem; font-size: .95em; }
+  th, td { text-align: left; padding: .8rem 1rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th { font-family: 'Switzer-Semibold', sans-serif; font-weight: normal; color: var(--ink); font-size: .92em; letter-spacing: .01em; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--ink); }
+
+  .callout { border: 1px solid var(--rule); border-radius: 14px; padding: 1.15rem 1.4rem; margin-bottom: 1.6rem; background: var(--surface); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* ─── Fill-in placeholder — same convention privacy.html used, so Ehan
+       (or whoever reviews this) can find every unresolved spot at a glance. ─ */
+  .fill { background: var(--amber-dim); border: 1px solid var(--amber-rule); border-radius: 5px; padding: .05em .5em; color: var(--amber); font-style: normal; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; color: #000; border-radius: 999px;
+    padding: clamp(11px, 1.2vh, 15px) clamp(18px, 1.8vw, 28px);
+    font-family: 'Switzer', sans-serif; font-weight: 300;
+    font-size: clamp(13px, .95vw, 15px); letter-spacing: -0.01em;
+    text-decoration: none; white-space: nowrap; width: fit-content;
+    transition: transform .55s var(--bounce), box-shadow .55s var(--bounce);
+    will-change: transform;
+  }
+  .pill:hover { transform: translateY(-7px) scale(1.04); box-shadow: 0 22px 44px rgba(255,255,255,0.18); }
+  .pill:active { transform: translateY(-2px) scale(1.01); transition-duration: .2s; }
+  .pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  footer { margin-top: 4.5rem; padding-top: 1.8rem; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 1.4rem; align-items: center; justify-content: space-between; color: var(--ink-faint); font-size: .88em; }
+
+  @keyframes blurUp {
+    from { opacity: 0; filter: blur(12px); transform: translateY(12px); }
+    to   { opacity: 1; filter: none;       transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+    .pill:hover { transform: none; }
+  }
+  :focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="https://spot-on.software/">
+    <img class="nav-icon" src="assets/spoton-logo.png" alt="">
+    <span class="nav-name"><strong>Spot</strong>On</span>
+  </a>
+  <span class="nav-tail">Terms</span>
+</nav>
+
+<div class="wrap">
+
+<div class="masthead">
+  <h1>Terms of <em>Service</em></h1>
+  <div class="dates">
+    <span>Effective <span class="fill">[date]</span></span>
+    <span>Last updated <span class="fill">[date]</span></span>
+  </div>
+</div>
+
+<div class="lede">
+  <p><strong>The short version.</strong> SpotOn is a marketplace: it connects people who need to park with people who have a private space to rent out. By creating an account you agree to these terms and to our <a href="/privacy">Privacy Policy</a>.</p>
+  <p>We take a service fee out of every booking — 15% on hourly and daily stays, 7% on weekly and monthly stays — and the rest goes to the host through Stripe. You must be 18 or older to use SpotOn, because using it means entering into a payment transaction.</p>
+  <p>The rest of this page is the detail behind those sentences.</p>
+</div>
+
+<div class="toc">
+  <ol>
+    <li><a href="#who">Who we are</a></li>
+    <li><a href="#eligibility">Eligibility and accounts</a></li>
+    <li><a href="#listing">Listing a space</a></li>
+    <li><a href="#booking">Booking a space</a></li>
+    <li><a href="#fees">Fees and payments</a></li>
+    <li><a href="#cancellations">Cancellations and refunds</a></li>
+    <li><a href="#conduct">Acceptable use</a></li>
+    <li><a href="#disclaimer">Disclaimers and liability</a></li>
+    <li><a href="#termination">Suspension and termination</a></li>
+    <li><a href="#disputes">Disputes and governing law</a></li>
+    <li><a href="#changes">Changes to these terms</a></li>
+    <li><a href="#contact">Contact</a></li>
+  </ol>
+</div>
+
+<h2 id="who"><span class="num">01</span>Who we are</h2>
+<p>SpotOn is a mobile app for renting private parking spaces, published by Ehan Shah, based in Gainesville, Florida ("we", "us", "SpotOn"). These terms cover the SpotOn iOS and Android apps and the servers behind them. They govern the relationship between you and SpotOn — not whatever a renter and a host separately agree between themselves off the platform.</p>
+<p>SpotOn is a venue, not a party to any parking arrangement. We don't own the parking spaces listed, and we're not the one parking your car.</p>
+
+<h2 id="eligibility"><span class="num">02</span>Eligibility and accounts</h2>
+<p>You must be 18 or older to create an account. You're responsible for keeping your login credentials to yourself and for everything that happens under your account. Tell us at <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> if you think someone else has access to it.</p>
+<p>The information you give us at sign-up and afterwards — your name, your vehicle details, your listings — needs to be accurate. Listing a space you don't have the right to rent out, or registering a vehicle or plate that isn't yours, breaks these terms.</p>
+
+<h2 id="listing"><span class="num">03</span>Listing a space</h2>
+<p>If you list a space, you're confirming that you have the legal right to offer it for parking — as the owner, or with the owner's permission — and that the address, photos, price and availability you post are accurate. A listing is public inside the app: anyone searching can see its address, position on the map and photos.</p>
+<p>You're responsible for honoring a confirmed booking. If a renter shows up to a space that isn't available as listed, that's between you and SpotOn support to sort out, and repeated failures to honor bookings can lead to suspension under <a href="#termination">§9</a>.</p>
+
+<h2 id="booking"><span class="num">04</span>Booking a space</h2>
+<p>When you book, you're agreeing to park only the vehicle you registered for that booking, only for the window you paid for, and only in the space as described. While a booking is active, the host can see your vehicle's full license plate — see our <a href="/privacy">Privacy Policy</a> for exactly how that works.</p>
+<p>SpotOn does not inspect, verify or guarantee any listed space beyond what the host tells us. Check the listing details and photos before you book.</p>
+
+<h2 id="fees"><span class="num">05</span>Fees and payments</h2>
+<p>Payment runs through Stripe. Your card is charged the listing's rate plus our service fee at the time of booking; card details go straight to Stripe and never reach our servers.</p>
+<div class="tablewrap"><table>
+  <thead><tr><th>Stay length</th><th>Service fee</th></tr></thead>
+  <tbody>
+    <tr><td>Hourly or daily</td><td>15% of the booking subtotal</td></tr>
+    <tr><td>Weekly or monthly</td><td>7% of the booking subtotal</td></tr>
+  </tbody>
+</table></div>
+<p>The remainder — the host's payout — is transferred to the host's Stripe-connected account. Hosts go through Stripe's own identity verification before they can receive payouts; SpotOn never holds or has access to the funds in between.</p>
+
+<h2 id="cancellations"><span class="num">06</span>Cancellations and refunds</h2>
+<p>You can cancel a confirmed booking yourself from the app, for a full refund including the service fee, up until <span class="fill">[Ehan: confirm this number — currently 24 hours, set by the CANCELLATION_WINDOW_HOURS setting]</span> hours before it's scheduled to start. We reserve the right to change that window going forward; the number in effect at the time you book is the one that applies to that booking.</p>
+<p>Once you're inside that window, or after a booking has started, self-serve cancellation isn't available. Email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> and we'll look at it case by case.</p>
+<p>One case is automatic on our end: if a host never finishes Stripe onboarding in time to receive a booking's payout, we automatically refund the renter in full and cancel the booking.</p>
+<div class="callout">
+  <p><span class="fill">[Ehan/legal: still undecided — what happens if a host doesn't show up or refuses access after a renter arrives (renter-side no-show protection), and what happens if a renter doesn't show up at all (host-side no-show/cancellation policy). Neither exists in the app yet; both need a real answer before launch.]</span></p>
+</div>
+
+<h2 id="conduct"><span class="num">07</span>Acceptable use</h2>
+<p>Don't use SpotOn to:</p>
+<ul>
+  <li>List a space you don't have the right to offer, or park in a space you haven't booked</li>
+  <li>Provide false information about your identity, your vehicle, or a listing</li>
+  <li>Harass, threaten, or attempt to defraud another user</li>
+  <li>Circumvent SpotOn's payment system to pay or be paid outside the app for a booking arranged through it</li>
+  <li>Interfere with or attempt to reverse-engineer the app or its backend</li>
+</ul>
+<p>We can remove a listing, cancel a booking, or suspend an account that breaks these rules — see <a href="#termination">§9</a>.</p>
+
+<h2 id="disclaimer"><span class="num">08</span>Disclaimers and liability</h2>
+<p>SpotOn connects renters and hosts; it does not itself provide parking, and we don't guarantee a listed space will be available, safe, or as described. <span class="fill">[Ehan/legal: this section needs a real liability-limitation clause — cap on damages, "as is" disclaimer language, disclaimer of warranties — written or reviewed by someone with legal training. Don't ship without it.]</span></p>
+<p>Nothing in these terms is meant to limit any right you have that can't be limited under Florida or federal law.</p>
+
+<h2 id="termination"><span class="num">09</span>Suspension and termination</h2>
+<p>You can delete your account at any time from Profile in the app — see our <a href="/privacy">Privacy Policy</a> §8 for exactly what that does. We can suspend or terminate an account that breaks these terms, with notice where practical. If you have a booking or payout in progress, see the deletion-timing rules in the Privacy Policy — the same reasoning applies to suspension.</p>
+
+<h2 id="disputes"><span class="num">10</span>Disputes and governing law</h2>
+<p>These terms are governed by the laws of the State of Florida, United States, without regard to conflict-of-law rules.</p>
+
+<h3>Let's talk first</h3>
+<p>Before either of us starts an arbitration or a lawsuit, email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> describing the dispute and what you're asking for. We'll spend 30 days trying to resolve it directly before either of us files anything.</p>
+
+<h3>Binding individual arbitration</h3>
+<p>If that doesn't resolve things, you and SpotOn agree that any dispute arising out of or relating to these terms or the app will be resolved by binding arbitration administered by the American Arbitration Association under its Consumer Arbitration Rules, rather than in court — except that either of us may bring an individual claim in small claims court instead, and either of us may seek injunctive relief in court to stop unauthorized use of our intellectual property or the platform. Arbitration will take place in Alachua County, Florida, or be conducted by phone, video, or on written submissions if the arbitrator agrees. The arbitrator, not any court, decides any dispute about the interpretation or enforceability of this section — except for the class-action waiver below, which only a court can decide.</p>
+<p>If your claim is $10,000 or less, we will pay any arbitration fees beyond what AAA's Consumer Arbitration Rules already reduce for individual filers, unless the arbitrator finds your claim frivolous.</p>
+
+<h3>No class actions</h3>
+<p>You and SpotOn each agree to bring any dispute in arbitration on an individual basis only, not as a plaintiff or class member in any purported class, consolidated, or representative action, and the arbitrator cannot preside over any such proceeding or combine more than one person's claims. If this class-action waiver is found unenforceable as to a particular claim or request for relief, that claim or request must be brought in court instead, and this section still applies to every other claim.</p>
+
+<h3>Opting out</h3>
+<p>You can opt out of this arbitration agreement — everything else in these terms still applies — by emailing <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> within 30 days of creating your account, from the email address on the account, stating that you want to opt out of arbitration. If you opt out, disputes between you and SpotOn go to the state or federal courts located in Alachua County, Florida, and you and SpotOn each waive any right to a jury trial.</p>
+<div class="callout">
+  <p>This section follows the standard structure used across the industry (informal resolution window, AAA individual arbitration, class-action waiver with an opt-out and a severability fallback) rather than being written from scratch — but it still needs a final pass from someone with actual legal training before launch, the way every clause on this page does.</p>
+</div>
+
+<h2 id="changes"><span class="num">11</span>Changes to these terms</h2>
+<p>If we change these terms, we'll update the date at the top, and for anything significant we'll tell you in the app before it takes effect. Continuing to use SpotOn after a change means you accept the new terms.</p>
+
+<h2 id="contact"><span class="num">12</span>Contact</h2>
+<p>Questions about these terms, or anything here that doesn't match what you see in the app: <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a>.</p>
+
+<footer>
+  <span>SpotOn · Effective <span class="fill">[date]</span></span>
+  <a class="pill" href="https://spot-on.software/">
+    Back to SpotOn
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+  </a>
+</footer>
+
+</div>
+</body>
+</html>

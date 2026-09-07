@@ -36,6 +36,7 @@ import {
   Platform,
   Pressable,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -391,6 +392,18 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                 </View>
 
                 {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+                <Text style={styles.legalText}>
+                  By signing up you agree to our{' '}
+                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
+                    Terms
+                  </Text>{' '}
+                  and{' '}
+                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
+                    Privacy Policy
+                  </Text>
+                  .
+                </Text>
               </View>
             </Animated.View>
           </SafeAreaView>
@@ -521,5 +534,17 @@ const styles = StyleSheet.create({
     fontSize: SW * 0.034,
     color: 'rgba(190,0,0,1)',
     marginTop: SW * 0.02,
+  },
+
+  legalText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: SW * 0.03,
+    color: 'rgba(0,0,0,0.5)',
+    marginTop: SW * 0.035,
+    lineHeight: SW * 0.045,
+  },
+  legalLink: {
+    color: 'rgba(0,0,0,0.75)',
+    textDecorationLine: 'underline',
   },
 });
