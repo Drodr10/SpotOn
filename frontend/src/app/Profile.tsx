@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -603,6 +604,19 @@ export default function ProfilePage() {
             )}
           </TouchableOpacity>
 
+          {/* Play/App Store both require the policies be reachable in-app,
+              not just gated behind the signup screen — this is the durable
+              home for users who created their account before this existed. */}
+          <View style={styles.legalRow}>
+            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
+              Terms of Service
+            </Text>
+            <Text style={styles.legalDivider}>·</Text>
+            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
+              Privacy Policy
+            </Text>
+          </View>
+
           {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
         </ScrollView>
@@ -838,6 +852,25 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.035,
     color: 'rgba(200,0,0,0.9)',
     textDecorationLine: 'underline',
+  },
+
+  legalRow: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: screenWidth * 0.025,
+    marginTop: screenWidth * 0.01,
+    marginBottom: screenWidth * 0.02,
+  },
+  legalLink: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.032,
+    color: 'rgba(0,0,0,0.45)',
+    textDecorationLine: 'underline',
+  },
+  legalDivider: {
+    fontSize: screenWidth * 0.032,
+    color: 'rgba(0,0,0,0.3)',
   },
 
   errorText: {
