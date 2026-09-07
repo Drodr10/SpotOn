@@ -91,7 +91,12 @@ def sc(monkeypatch):
         "services.supabase_client": {"supabase": types.SimpleNamespace()},
         "services.payouts": {"_parse_ts": lambda *_a: None,
                              "release_pending_for_account": lambda *_a: 0,
-                             "run_payout_sweep": lambda *_a: {}},
+                             "run_payout_sweep": lambda *_a: {},
+                             # routes.stripe imports this too (cancel-reservation
+                             # route) -- test_both_routes_reject_an_unauthenticated_request
+                             # below re-imports routes.stripe fresh while this stub
+                             # is active, so it needs every name routes.stripe imports.
+                             "cancel_reservation": lambda *_a: ({}, 200)},
         "services.notifications": {"send_booking_notifications": lambda *_a: {},
                                    "run_notification_sweep": lambda *_a: {}},
     }.items():
