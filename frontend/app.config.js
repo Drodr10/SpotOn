@@ -23,6 +23,27 @@ const app = require('./app.json');
 
 module.exports = {
   ...app.expo,
+  plugins: [
+    ...(app.expo.plugins ?? []),
+    [
+      '@stripe/stripe-react-native',
+      {
+        merchantIdentifier: process.env.STRIPE_MERCHANT_IDENTIFIER || 'merchant.identifier',
+      },
+    ],
+    'react-native-maps',
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Allow SpotOn to use your location to show nearby parking.',
+      },
+    ],
+    'expo-font',
+    'expo-image',
+    'expo-status-bar',
+    'expo-web-browser',
+  ],
   android: {
     ...app.expo.android,
     config: {

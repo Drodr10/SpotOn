@@ -85,6 +85,8 @@ const SUGGESTION_LAYOUT_ANIM = {
 export default function QuickSearch() {
   const router = useRouter();
   const inputRef = useRef<TextInput>(null);
+  const mapRef = useRef<MapView>(null);
+  const mapReadyRef = useRef(false);
   const [searchText, setSearchText] = useState('');
   const [firstName, setFirstName] = useState('');
   const [region, setRegion] = useState(GAINESVILLE_REGION);
@@ -148,12 +150,16 @@ export default function QuickSearch() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
-        setRegion({
+        const nextRegion = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
           latitudeDelta: 0.02,
           longitudeDelta: 0.02,
-        });
+        };
+        setRegion(nextRegion);
+        if (mapReadyRef.current) {
+          mapRef.current?.animateToRegion(nextRegion, 350);
+        }
       }
     })();
   }, []);
@@ -311,8 +317,14 @@ export default function QuickSearch() {
 
       {/* Full-screen map — zIndex: base */}
       <MapView
-        style={StyleSheet.absoluteFillObject}
-        region={region}
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={GAINESVILLE_REGION}
+        onMapReady={() => {
+          mapReadyRef.current = true;
+          mapRef.current?.animateToRegion(region, 0);
+        }}
+        onRegionChangeComplete={setRegion}
         showsUserLocation={true}
         showsMyLocationButton={true}
         onPress={handleMapPress}
@@ -324,7 +336,7 @@ export default function QuickSearch() {
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { backgroundColor: '#FFFFFF', opacity: flashOpacity, zIndex: 5 },
         ]}
       />
@@ -425,6 +437,13 @@ export default function QuickSearch() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  map: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
   // Header
   headerSafe: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   header: {
