@@ -1,11 +1,14 @@
 # Requires Python >= 3.12 (see .python-version and the README).
-flask
-flask-cors
-python-dotenv
-supabase
-requests
-gunicorn
-pytest
-stripe>=5.0.0
-apscheduler
-PyJWT[crypto]
+# Pinned to what backend/.venv actually has installed and tested against —
+# this was fully unpinned before, so an upstream release could break
+# production with no commit from anyone on the team.
+flask==3.1.3
+flask-cors==6.0.5
+python-dotenv==1.2.2
+supabase==2.31.0
+requests==2.34.2
+gunicorn==26.0.0
+pytest==9.1.1
+stripe==15.4.0
+apscheduler==3.11.3
+PyJWT[crypto]==2.13.0
