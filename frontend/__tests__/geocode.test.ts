@@ -1,6 +1,6 @@
 import geocodeQuery from '../src/utils/geocode';
 
-global.fetch = jest.fn();
+globalThis.fetch = jest.fn();
 
 describe('geocodeQuery', () => {
   beforeEach(() => {

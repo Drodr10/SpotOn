@@ -28,7 +28,7 @@ const TOKEN = 'jwt-token';
 const getSession = supabase.auth.getSession as jest.Mock;
 
 const respond = (status: number, body: any = {}) => {
-  (global as any).fetch = jest.fn(async () => ({
+  (globalThis as any).fetch = jest.fn(async () => ({
     status,
     ok: status >= 200 && status < 300,
     json: async () => body,
@@ -51,7 +51,7 @@ describe('api.deleteAccount', () => {
     const result = await api.deleteAccount();
 
     expect(result.status).toBe('error');
-    expect((global as any).fetch).not.toHaveBeenCalled();
+    expect((globalThis as any).fetch).not.toHaveBeenCalled();
   });
 
   it('treats an empty EXPO_PUBLIC_IP as unset', async () => {
@@ -82,7 +82,7 @@ describe('api.deleteAccount', () => {
 
     await api.deleteAccount();
 
-    const [url, init] = (global as any).fetch.mock.calls[0];
+    const [url, init] = (globalThis as any).fetch.mock.calls[0];
     expect(url).toBe(`https://example.ngrok.app/api/profiles/${USER}`);
     expect(init.method).toBe('DELETE');
     expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
@@ -118,7 +118,7 @@ describe('api.deleteAccount', () => {
   });
 
   it('does not claim deletion when the response body is unparseable', async () => {
-    (global as any).fetch = jest.fn(async () => ({
+    (globalThis as any).fetch = jest.fn(async () => ({
       status: 502,
       ok: false,
       json: async () => {
@@ -133,7 +133,7 @@ describe('api.deleteAccount', () => {
   });
 
   it('reports a network failure instead of throwing', async () => {
-    (global as any).fetch = jest.fn(async () => {
+    (globalThis as any).fetch = jest.fn(async () => {
       throw new Error('Network request failed');
     });
 
@@ -148,6 +148,6 @@ describe('api.deleteAccount', () => {
     respond(200);
 
     expect((await api.deleteAccount()).status).toBe('error');
-    expect((global as any).fetch).not.toHaveBeenCalled();
+    expect((globalThis as any).fetch).not.toHaveBeenCalled();
   });
 });

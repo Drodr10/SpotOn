@@ -223,7 +223,11 @@ export default function CreateListing2() {
 
   useEffect(() => {
     if (scene === 2) {
-      handleCurrentLocation();
+      // Location is a convenience; it must not prevent the map itself from
+      // mounting if permission or GPS lookup fails.
+      handleCurrentLocation().catch((error) => {
+        console.warn('[CreateListing2] current location unavailable:', error);
+      });
     }
   }, [scene]);
 
@@ -734,8 +738,16 @@ export default function CreateListing2() {
       <View style={styles.mapWrapper}>
         <MapView
           ref={mapRef}
-          style={StyleSheet.absoluteFillObject}
+          style={styles.map}
           initialRegion={GAINESVILLE}
+          onMapReady={() => {
+            if (latitude !== null && longitude !== null) {
+              mapRef.current?.animateToRegion(
+                { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+                0,
+              );
+            }
+          }}
           onLongPress={handleMapLongPress}
         >
           {latitude !== null && longitude !== null && (
@@ -766,7 +778,7 @@ export default function CreateListing2() {
       )}
       <View style={[styles.mapWrapper, { opacity: 0.35 }]}>
         <MapView
-          style={StyleSheet.absoluteFillObject}
+          style={styles.map}
           initialRegion={
             latitude !== null && longitude !== null
               ? { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
@@ -1156,6 +1168,10 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     overflow: 'hidden',
   },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
   currentLocBtn: {
     position: 'absolute',
     bottom: W * 0.04,
@@ -1435,7 +1451,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   scene5Dim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.35,
   },
 
