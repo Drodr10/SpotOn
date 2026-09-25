@@ -65,6 +65,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2fb9f0cf-539a-4ce8-b6ae-fffb26dfefd8"
+      }
+    },
+    "owner": "team.spotonapp"
   }
 }
