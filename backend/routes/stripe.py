@@ -12,7 +12,7 @@ from services.stripe_client import (
     handle_webhook,
     onboardingComplete,
 )
-from services.payouts import run_payout_sweep
+from services.payouts import run_payout_sweep, cancel_reservation
 from services.notifications import run_notification_sweep
 
 stripe_bp = Blueprint('stripe', __name__)
@@ -48,6 +48,18 @@ def create_booking_payment_route(current_user_id):
 def release_hold_route(current_user_id):
     data = request.json or {}
     return release_booking_hold(data.get("hold_id"), current_user_id)
+
+
+# Renter-initiated cancellation, gated on CANCELLATION_WINDOW_HOURS before
+# start_time (env var, default 24 — see services/payouts.py). Full refund.
+@stripe_bp.route('/stripe/cancel-reservation', methods=['POST'])
+@token_required
+def cancel_reservation_route(current_user_id):
+    data = request.json or {}
+    reservation_id = data.get("reservation_id")
+    if not reservation_id:
+        return jsonify({"error": "Missing reservation_id"}), 400
+    return cancel_reservation(reservation_id, current_user_id)
 
 
 # Client calls this the moment the payment sheet returns success, so the

@@ -20,6 +20,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 import stripe
 import requests
+from flask import jsonify
 
 from services.supabase_client import supabase
 
@@ -27,6 +28,12 @@ from services.supabase_client import supabase
 HOLD_WINDOW_DAYS = 30            # auto-refund the buyer if unclaimed this long
 PENDING_EXPIRY_MINUTES = 30      # abandoned checkout -> cancel to free the slot
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+# Renter-initiated cancellation must land at least this many hours before the
+# booking's start_time. Kept as an env var (not a code constant) so the window
+# can change without a redeploy — read fresh on every call, not cached at
+# import time, so a Render env var edit takes effect on the next request.
+CANCELLATION_WINDOW_HOURS_DEFAULT = 24
 
 
 # ── Small helpers ───────────────────────────────────────────────────────────
@@ -148,6 +155,79 @@ def refund_reservation(res: dict) -> bool:
     ).eq("id", res["id"]).execute()
     print(f"[payouts] refunded reservation {res['id']} (seller never onboarded)")
     return True
+
+
+def cancel_reservation(reservation_id: str, current_user_id: str):
+    """
+    Renter-initiated cancellation, gated on CANCELLATION_WINDOW_HOURS (env var,
+    default 24) before start_time. Full refund, including the platform fee —
+    same as the two existing automatic-refund cases, so there's one refund
+    behavior in the whole app, not two.
+
+    Only reachable while payout_status is still 'held': once the sweep has
+    moved a reservation to 'payout_ready' the stay has already started (or
+    ended), which is past any cancellation window by construction, and once
+    a transfer or refund has happened this would be a second one.
+    """
+    res = (
+        supabase.table("reservations")
+        .select("id, renter_id, status, payout_status, start_time, stripe_payment_intent")
+        .eq("id", reservation_id)
+        .execute()
+        .data
+    )
+    res = res[0] if res else None
+    if not res:
+        return jsonify({"error": "Reservation not found"}), 404
+    if res.get("renter_id") != current_user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if res.get("payout_status") != "held":
+        return jsonify({"error": "This booking can no longer be cancelled"}), 409
+
+    window_hours = float(os.getenv("CANCELLATION_WINDOW_HOURS", CANCELLATION_WINDOW_HOURS_DEFAULT))
+    start = _parse_ts(res["start_time"])
+    now = datetime.now(timezone.utc)
+    if start - now < timedelta(hours=window_hours):
+        return jsonify({
+            "error": f"Bookings can only be cancelled at least {window_hours:g} hours before they start",
+        }), 409
+
+    pi = res.get("stripe_payment_intent")
+    if not pi:
+        return jsonify({"error": "No payment on file for this reservation"}), 409
+
+    # Claim the row BEFORE touching Stripe. A plain read-then-refund would let
+    # a double-tap (or a re-mounted screen) pass the payout_status=='held'
+    # check twice and fire two refunds. The conditional UPDATE below only
+    # matches — and only returns a row — for whichever request gets there
+    # first; Postgres re-checks the WHERE clause after the row's lock clears,
+    # so a losing concurrent request sees zero rows updated and bails here
+    # without ever calling Stripe.
+    claimed = (
+        supabase.table("reservations")
+        .update({"payout_status": "refunding"})
+        .eq("id", reservation_id)
+        .eq("payout_status", "held")
+        .execute()
+        .data
+    )
+    if not claimed:
+        return jsonify({"error": "This booking is already being cancelled"}), 409
+
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    try:
+        stripe.Refund.create(payment_intent=pi)
+    except Exception as err:  # noqa: BLE001
+        print(f"[payouts] cancel-refund failed for reservation {reservation_id}: {err}")
+        # Release the claim so this is retryable instead of stuck.
+        supabase.table("reservations").update({"payout_status": "held"}).eq("id", reservation_id).execute()
+        return jsonify({"error": "Refund failed, please contact support"}), 502
+
+    supabase.table("reservations").update(
+        {"status": "cancelled", "payout_status": "refunded"}
+    ).eq("id", reservation_id).execute()
+    print(f"[payouts] reservation {reservation_id} cancelled by renter {current_user_id}, refunded")
+    return jsonify({"reservation_id": reservation_id, "refunded": True}), 200
 
 
 def release_pending_for_account(account_id: str) -> int:

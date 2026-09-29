@@ -8,8 +8,10 @@ import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Image,
+  Linking,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -45,9 +47,49 @@ function formatStartsIn(startTime: Date): string {
   return `Starts in ${parts.join(' ')}.`;
 }
 
+function reportIssue(r: ActiveReservation) {
+  const subject = `Issue with reservation ${r.id}`;
+  const body =
+    `Reservation ID: ${r.id}\n` +
+    `Address: ${r.listingData.address}\n` +
+    `Start: ${r.start_time.toLocaleString()}\n` +
+    `End: ${r.end_time.toLocaleString()}\n\n` +
+    `Describe what went wrong:\n`;
+  const url =
+    `mailto:team.spotonapp@gmail.com` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`;
+  Linking.openURL(url);
+}
+
 export default function PreviousReservations() {
   const [upcoming, setUpcoming] = useState<ActiveReservation[] | null>(null);
   const [past, setPast] = useState<ActiveReservation[] | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const cancelReservation = (r: ActiveReservation) => {
+    Alert.alert(
+      'Cancel this reservation?',
+      'You’ll be refunded in full, including the service fee.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Cancel reservation',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingId(r.id);
+            const result = await api.cancelReservation(r.id);
+            setCancellingId(null);
+            if (result.status === 'cancelled') {
+              setUpcoming((prev) => (prev ?? []).filter((x) => x.id !== r.id));
+            } else {
+              Alert.alert('Could not cancel', result.message);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     (async () => {
@@ -96,16 +138,38 @@ export default function PreviousReservations() {
             {upcoming.map((r) => {
               const inProgress = r.start_time.getTime() <= Date.now();
               return (
-                <ReservationInfoCard
-                  key={r.id}
-                  address={r.listingData.address}
-                  endTime={r.end_time}
-                  totalPrice={r.total_price}
-                  photoUrl={r.listingData.photo_url}
-                  variant='current'
-                  secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time)}
-                  width={screenWidth - H_PAD * 2}
-                />
+                <View key={r.id} style={styles.cardGroup}>
+                  <ReservationInfoCard
+                    address={r.listingData.address}
+                    endTime={r.end_time}
+                    totalPrice={r.total_price}
+                    photoUrl={r.listingData.photo_url}
+                    variant='current'
+                    secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time)}
+                    width={screenWidth - H_PAD * 2}
+                  />
+                  <View style={styles.actionRow}>
+                    {!inProgress && (
+                      <TouchableOpacity
+                        onPress={withLightHaptic(() => cancelReservation(r))}
+                        disabled={cancellingId === r.id}
+                        style={styles.actionButton}
+                      >
+                        {cancellingId === r.id ? (
+                          <ActivityIndicator color='rgba(200,0,0,0.9)' size='small' />
+                        ) : (
+                          <Text style={styles.cancelText}>Cancel reservation</Text>
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      onPress={withLightHaptic(() => reportIssue(r))}
+                      style={styles.actionButton}
+                    >
+                      <Text style={styles.reportText}>Report an issue</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               );
             })}
           </View>
@@ -183,6 +247,33 @@ const styles = StyleSheet.create({
   list: {
     gap: SECTION_GAP,
     alignItems: 'center',
+  },
+  cardGroup: {
+    alignItems: 'center',
+    gap: screenWidth * 0.015,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: screenWidth * 0.05,
+  },
+  actionButton: {
+    paddingVertical: screenWidth * 0.015,
+    paddingHorizontal: screenWidth * 0.02,
+    minHeight: screenWidth * 0.06,
+    justifyContent: 'center',
+  },
+  cancelText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.033,
+    color: 'rgba(200,0,0,0.9)',
+    textDecorationLine: 'underline',
+  },
+  reportText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.033,
+    color: 'rgba(0,0,0,0.5)',
+    textDecorationLine: 'underline',
   },
   emptyText: {
     fontFamily: CustomFonts.SwitzerLight,
