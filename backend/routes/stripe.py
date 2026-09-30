@@ -78,9 +78,8 @@ def create_account_link(current_user_id):
     return createAccountLink(current_user_id)
 
 
-# Simple interstitial that immediately bounces the in-app browser back to the
-# app via the deep link (nicer than a bare 302, and it renders past ngrok's free
-# warning page once the user taps through).
+# Simple interstitial that offers a way back to the app even when the browser
+# does not follow the app deep link automatically.
 def _deep_link_page(target: str, message: str = "Finishing up…"):
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -106,12 +105,15 @@ def onboarding_return():
             sync_connect_account(user_id)
         except Exception as err:  # noqa: BLE001
             print(f"[stripe] onboarding-complete sync failed for {user_id}: {err}")
-    return _deep_link_page("spoton://Homescreen")
+    return _deep_link_page("spoton://Homescreen", "Return to SpotOn to check your payout setup.")
 
 
 @stripe_bp.route('/stripe/onboarding-expired', methods=['GET'])
 def onboarding_expired():
-    return _deep_link_page("spoton://Homescreen")
+    return _deep_link_page(
+        "spoton://Homescreen",
+        "This onboarding link expired. Return to SpotOn and tap Set Up Payouts to try again.",
+    )
 
 
 # Client-invoked backstop: the app calls this after the onboarding browser closes

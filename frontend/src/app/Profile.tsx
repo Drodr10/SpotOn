@@ -145,7 +145,10 @@ export default function ProfilePage() {
     setUser(data as ProfileData);
     setName(data.full_name);
     setEmail(data.email);
-    setPayoutSetup(data.stripe_account_id);
+    // An account ID is created before the seller finishes Stripe onboarding.
+    // Keep Setup Payouts available until Stripe enables payouts so they can
+    // resume after an expired link or missing verification details.
+    setPayoutSetup(!!data.payouts_enabled);
     await loadVehicles(claimsResp.claims.sub);
   };
 
@@ -287,13 +290,13 @@ export default function ProfilePage() {
     setStripeOnboardingLoading(true);
 
     try {
-      await stripe.fetchStripeAccountId(claims.sub);
-      const onboardingLink = await stripe.fetchStripeAccountLink(claims.sub);
+      await stripe.fetchStripeAccountId();
+      const onboardingLink = await stripe.fetchStripeAccountLink();
 
       if (onboardingLink) {
         await WebBrowser.openBrowserAsync(onboardingLink);
         // Backstop the webhook: sync payout status from Stripe on return.
-        await stripe.syncAccount(claims.sub);
+        await stripe.syncAccount();
         await loadProfile();
       }
     }

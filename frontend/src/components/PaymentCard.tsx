@@ -95,7 +95,6 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             // 1) Acquire the slot hold + create the PaymentIntent.
             const result = await stripe.createBookingPayment({
                 listing_id: listingId,
-                renter_id: user.id,
                 vehicle_id: vehicleId,
                 start_time: new Date(reservationStart).toISOString(),
                 end_time: new Date(reservationEnd).toISOString(),
