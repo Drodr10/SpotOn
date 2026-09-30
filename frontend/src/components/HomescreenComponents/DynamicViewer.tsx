@@ -229,7 +229,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
         {/* Background image — fills the entire card, no overlays */}
         <Image
           source={{ uri: item.photo_url }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />
 
