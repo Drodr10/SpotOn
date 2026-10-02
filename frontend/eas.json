@@ -19,7 +19,8 @@
         "buildType": "apk"
       },
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "image": "sdk-57"
       }
     },
     "preview-ios-sim": {
@@ -34,7 +35,9 @@
       "android": {
         "buildType": "app-bundle"
       },
-      "ios": {}
+      "ios": {
+        "image": "sdk-57"
+      }
     }
   },
   "submit": {
