@@ -435,8 +435,55 @@ const deleteAccount = async (): Promise<AccountDeletionResult> => {
     return { status: 'error', message: body?.error ?? `Request failed (${resp.status}).` };
 };
 
+export type CancelReservationResult =
+    | { status: 'cancelled' }
+    | { status: 'blocked'; message: string }
+    | { status: 'error'; message: string };
+
+/**
+ * Renter-initiated cancellation. Mirrors deleteAccount's fetch shape: same
+ * session/host guards, same reason the server call can't be a quiet no-op.
+ * A 409 is an outcome (window passed, already cancelled, etc.), not a
+ * network failure - its message is written to be shown to the user as-is.
+ */
+const cancelReservation = async (reservationId: string): Promise<CancelReservationResult> => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session) {
+        return { status: 'error', message: 'You appear to be signed out. Please sign in and try again.' };
+    }
+
+    const host = process.env.EXPO_PUBLIC_IP;
+    if (!host) {
+        return { status: 'error', message: "Can't reach the server right now. Please try again later." };
+    }
+
+    let resp: Response;
+    try {
+        resp = await fetch(`https://${host}/api/stripe/cancel-reservation`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                'ngrok-skip-browser-warning': 'true',
+            },
+            body: JSON.stringify({ reservation_id: reservationId }),
+        });
+    } catch (err: any) {
+        return { status: 'error', message: err?.message ?? 'Network request failed.' };
+    }
+
+    if (resp.status === 200) return { status: 'cancelled' };
+
+    const body = await resp.json().catch(() => ({} as any));
+    if (resp.status === 409) {
+        return { status: 'blocked', message: body?.error ?? 'This reservation can no longer be cancelled.' };
+    }
+    return { status: 'error', message: body?.error ?? `Request failed (${resp.status}).` };
+};
+
 export const api = {
     reserveSpot,
+    cancelReservation,
     getActiveReservation,
     getActiveReservations,
     getInProgressReservation,

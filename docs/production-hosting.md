@@ -124,6 +124,18 @@ Add a webhook endpoint pointing at:
 https://<domain>/api/stripe/webhook
 ```
 
+Choose **snapshot** payloads and subscribe to these four events:
+
+- `payment_intent.succeeded`
+- `account.updated`
+- `charge.refunded`
+- `transfer.created`
+
+The dashboard's **Send test ping** action is a v2 thin event even for this
+snapshot destination; the backend accepts that ping as a delivery check. Do
+not configure SpotOn's business events as thin events: their payloads do not
+contain the `data.object` snapshots used by the handlers.
+
 Again, `/api/stripe/webhook` — **not** `/stripe/webhook`. A wrong path here
 fails *silently*: Stripe records delivery attempts, the app looks fine, and
 reservations only ever get created by the client-side finalize call, so the
