@@ -105,7 +105,8 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
       } catch {
         // fall through to defaults
       }
-      fetchListings(DEFAULT_LAT, DEFAULT_LNG);
+      // The location state already starts at these defaults, so the listings
+      // effect below handles both denied permission and lookup failures.
     })();
   }, []);
 
