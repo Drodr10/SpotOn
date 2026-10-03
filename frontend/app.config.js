@@ -31,7 +31,11 @@ module.exports = {
         merchantIdentifier: process.env.STRIPE_MERCHANT_IDENTIFIER || 'merchant.identifier',
       },
     ],
-    'react-native-maps',
+    // NOTE: react-native-maps is deliberately NOT listed here. It ships no
+    // config plugin (no app.plugin.js), so Expo would try to import its main
+    // export as one and crash on raw JSX. The Android Maps key is applied
+    // through android.config.googleMaps.apiKey below, which is the supported
+    // mechanism for this library.
     [
       'expo-location',
       {
@@ -40,8 +44,6 @@ module.exports = {
       },
     ],
     'expo-font',
-    'expo-image',
-    'expo-status-bar',
     'expo-web-browser',
   ],
   android: {

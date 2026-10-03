@@ -438,16 +438,48 @@ def onboardingComplete(user_id: str):
 def handle_webhook(payload: bytes, sig_header: str):
     stripe.api_key = secretKey
     try:
+        # Stripe Event Destination pings are always v2 "thin" events, even
+        # though the payment/account events this endpoint consumes are v1
+        # snapshot events.  The two payloads use different SDK parsers.  Read
+        # only enough of the untrusted body to select the parser; both branches
+        # still verify the Stripe signature before anything is processed.
+        raw_event = json.loads(payload)
+        is_thin_event = raw_event.get("object") == "v2.core.event"
+
         if webhookSecret:
-            event = stripe.Webhook.construct_event(payload, sig_header, webhookSecret)
+            if is_thin_event:
+                stripe.StripeClient(secretKey).parse_event_notification(
+                    payload, sig_header, webhookSecret
+                )
+                event = raw_event
+            else:
+                event = stripe.Webhook.construct_event(payload, sig_header, webhookSecret)
         else:
             # Dev fallback only — set STRIPE_WEBHOOK_SECRET in production.
             print("[stripe] WARNING: STRIPE_WEBHOOK_SECRET unset; skipping signature check")
-            event = json.loads(payload)
+            event = raw_event
     except (ValueError, stripe.error.SignatureVerificationError) as err:
         return jsonify({"error": f"Webhook verification failed: {str(err)}"}), 400
 
     event_type = event["type"]
+
+    # The Workbench "Send test ping" action sends this thin event without a
+    # data.object.  It tests delivery only, so successful verification is all
+    # the handling it needs.
+    if is_thin_event:
+        if event_type == "v2.core.event_destination.ping":
+            print(f"[stripe] {event_type}: {event.get('id')}")
+            return jsonify({"received": True}), 200
+
+        # SpotOn's handlers below require v1 snapshots.  Do not ACK an
+        # accidentally configured thin business event and silently lose it.
+        return jsonify({
+            "error": (
+                f"Unsupported thin event: {event_type}. "
+                "Configure this Stripe destination to send snapshot events."
+            )
+        }), 400
+
     obj = event["data"]["object"]
 
     # A handler crash must never 500 the webhook — Stripe would keep retrying and
