@@ -49,19 +49,19 @@ export default function PayoutBanner() {
     triggerLightHaptic();
     setLoading(true);
     try {
-      const accountId = await stripe.fetchStripeAccountId(userId);
+      const accountId = await stripe.fetchStripeAccountId();
       if (!accountId) {
         Alert.alert('Error', 'Could not create a payouts account. Please try again later.');
         return;
       }
-      const url = await stripe.fetchStripeAccountLink(userId);
+      const url = await stripe.fetchStripeAccountLink();
       if (!url) {
         Alert.alert('Error', 'Could not generate an onboarding link. Please try again.');
         return;
       }
       await WebBrowser.openBrowserAsync(url);
       // Backstop the webhook: sync payout status from Stripe on return, then refresh.
-      await stripe.syncAccount(userId);
+      await stripe.syncAccount();
       await load(); // refresh state after they return
     } catch (error: any) {
       Alert.alert('Onboarding Error', error?.message ?? 'An unexpected error occurred.');
