@@ -95,6 +95,7 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             // 1) Acquire the slot hold + create the PaymentIntent.
             const result = await stripe.createBookingPayment({
                 listing_id: listingId,
+                renter_id: user.id,
                 vehicle_id: vehicleId,
                 start_time: new Date(reservationStart).toISOString(),
                 end_time: new Date(reservationEnd).toISOString(),
@@ -247,11 +248,7 @@ const styles = StyleSheet.create({
 
         // ── Slot-in-checkout popup (mirrors the create-listing rate popups) ──
         popupBackdrop: {
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
+            ...StyleSheet.absoluteFillObject,
             backgroundColor: 'rgba(0,0,0,0.45)',
         },
         popupCard: {

@@ -272,6 +272,7 @@ export default function HourScroller({
         showsVerticalScrollIndicator={false}
         snapToInterval={ITEM_HEIGHT}
         decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.95}
+        // @ts-expect-error — Animated wrapper passes through; types narrow on TS strict
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         onScrollBeginDrag={handleScrollBeginDrag}

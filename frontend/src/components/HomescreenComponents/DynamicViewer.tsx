@@ -105,8 +105,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
       } catch {
         // fall through to defaults
       }
-      // The location state already starts at these defaults, so the listings
-      // effect below handles both denied permission and lookup failures.
+      fetchListings(DEFAULT_LAT, DEFAULT_LNG);
     })();
   }, []);
 
@@ -230,7 +229,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
         {/* Background image — fills the entire card, no overlays */}
         <Image
           source={{ uri: item.photo_url }}
-          style={StyleSheet.absoluteFill}
+          style={StyleSheet.absoluteFillObject}
           resizeMode="cover"
         />
 
