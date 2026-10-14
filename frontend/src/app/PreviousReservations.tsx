@@ -34,8 +34,8 @@ const SECTION_GAP = screenWidth * 0.05;
 const TITLE_SIZE = screenWidth * 0.07;
 const LOGO_SIZE = screenWidth * 0.12;
 
-function formatStartsIn(startTime: Date): string {
-  const diff = startTime.getTime() - Date.now();
+function formatStartsIn(startTime: Date, now: number): string {
+  const diff = startTime.getTime() - now;
   if (diff <= 0) return 'Starting now.';
   const days = Math.floor(diff / 86_400_000);
   const hours = Math.floor((diff % 86_400_000) / 3_600_000);
@@ -65,7 +65,13 @@ function reportIssue(r: ActiveReservation) {
 export default function PreviousReservations() {
   const [upcoming, setUpcoming] = useState<ActiveReservation[] | null>(null);
   const [past, setPast] = useState<ActiveReservation[] | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const cancelReservation = (r: ActiveReservation) => {
     Alert.alert(
@@ -136,7 +142,7 @@ export default function PreviousReservations() {
         ) : (
           <View style={styles.list}>
             {upcoming.map((r) => {
-              const inProgress = r.start_time.getTime() <= Date.now();
+              const inProgress = r.start_time.getTime() <= now;
               return (
                 <View key={r.id} style={styles.cardGroup}>
                   <ReservationInfoCard
@@ -145,7 +151,7 @@ export default function PreviousReservations() {
                     totalPrice={r.total_price}
                     photoUrl={r.listingData.photo_url}
                     variant='current'
-                    secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time)}
+                    secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time, now)}
                     width={screenWidth - H_PAD * 2}
                   />
                   <View style={styles.actionRow}>

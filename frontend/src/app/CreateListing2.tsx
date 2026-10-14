@@ -221,16 +221,6 @@ export default function CreateListing2() {
     if (showCalendarPopup) openPopup(calendarPopupAnim);
   }, [showCalendarPopup]);
 
-  useEffect(() => {
-    if (scene === 2) {
-      // Location is a convenience; it must not prevent the map itself from
-      // mounting if permission or GPS lookup fails.
-      handleCurrentLocation().catch((error) => {
-        console.warn('[CreateListing2] current location unavailable:', error);
-      });
-    }
-  }, [scene]);
-
   // ── Price PanResponder ─────────────────────────────────────────────────────
   // Two separate refs so toggling Hourly↔Weekly preserves each value.
   // periodTypeRef mirrors state so the PanResponder (built once via useRef)
@@ -369,6 +359,16 @@ export default function CreateListing2() {
       }
     } catch (_) {}
   };
+
+  useEffect(() => {
+    if (scene === 2) {
+      // Location is a convenience; it must not prevent the map itself from
+      // mounting if permission or GPS lookup fails.
+      handleCurrentLocation().catch((error) => {
+        console.warn('[CreateListing2] current location unavailable:', error);
+      });
+    }
+  }, [scene]);
 
   const handleTakePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();

@@ -541,17 +541,6 @@ export default function SearchScreen() {
     fetchPublishableKey();
   }, []);
 
-  // Auto-open detail view when arriving from DynamicViewer's arrow button.
-  // Waits for listings to load, then selects the target listing and enters detail view.
-  useEffect(() => {
-    if (!openListingId || loading || listings.length === 0) return;
-    const target = listings.find((l) => l.id === openListingId);
-    if (target) {
-      setFilterIndex(getBookingModeForListing(target) === 'weekly' ? 1 : 0);
-      handleCardPress(target);
-    }
-  }, [openListingId, listings, loading]);
-
   // ─── Detail view animation orchestration ────────────────────────────────
   useEffect(() => {
     if (isDetailView) {
@@ -658,6 +647,17 @@ export default function SearchScreen() {
     );
     setViewState('detail');
   };
+
+  // Auto-open detail view when arriving from DynamicViewer's arrow button.
+  // Waits for listings to load, then selects the target listing and enters detail view.
+  useEffect(() => {
+    if (!openListingId || loading || listings.length === 0) return;
+    const target = listings.find((l) => l.id === openListingId);
+    if (target) {
+      setFilterIndex(getBookingModeForListing(target) === 'weekly' ? 1 : 0);
+      handleCardPress(target);
+    }
+  }, [openListingId, listings, loading]);
 
   // Map pin → list. Selects + scrolls list, but does NOT open detail view.
   const handleMarkerPress = (listing: Listing) => {
