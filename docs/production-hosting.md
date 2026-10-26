@@ -10,7 +10,8 @@ hostname before the app can ship, for four independent reasons:
 1. **Stripe webhooks** post to it (`payment_intent.succeeded` is the reliable
    backstop that creates reservations).
 2. **Stripe Connect onboarding** redirects a real browser back to it —
-   `/api/stripe/onboarding-complete` serves the deep-link bounce page.
+   `/api/stripe/onboarding-complete` serves the deep-link bounce page. The
+   callback URLs use the host of the authenticated account-link request.
 3. **The app itself** calls it for pricing, booking, and payouts.
 4. **The sweeps** need something to trigger them on a schedule.
 
@@ -82,7 +83,6 @@ SUPABASE_KEY=            # same — this is the SERVICE_ROLE key, see warning be
 STRIPE_PUBLISHABLE_KEY=  # LIVE key when you go live
 STRIPE_SECRET_KEY=       # LIVE key when you go live
 STRIPE_WEBHOOK_SECRET=   # NEW value — regenerated per endpoint, see below
-BACKEND_URL=https://<your-render-domain>
 SWEEP_SECRET=            # same
 ENABLE_SWEEP_SCHEDULER=false      # <<< MUST be set, see below
 SWEEP_INTERVAL_SECONDS=           # ignored once the scheduler is off

@@ -28,7 +28,7 @@ const RES_ID = 'r-cancel-1';
 const getSession = supabase.auth.getSession as jest.Mock;
 
 const respond = (status: number, body: any = {}) => {
-  (global as any).fetch = jest.fn(async () => ({
+  (globalThis as any).fetch = jest.fn(async () => ({
     status,
     ok: status >= 200 && status < 300,
     json: async () => body,
@@ -51,7 +51,7 @@ describe('api.cancelReservation', () => {
     const result = await api.cancelReservation(RES_ID);
 
     expect(result.status).toBe('error');
-    expect((global as any).fetch).not.toHaveBeenCalled();
+    expect((globalThis as any).fetch).not.toHaveBeenCalled();
   });
 
   it('treats an empty EXPO_PUBLIC_IP as unset', async () => {
@@ -72,7 +72,7 @@ describe('api.cancelReservation', () => {
 
     await api.cancelReservation(RES_ID);
 
-    const [url, init] = (global as any).fetch.mock.calls[0];
+    const [url, init] = (globalThis as any).fetch.mock.calls[0];
     expect(url).toBe('https://example.ngrok.app/api/stripe/cancel-reservation');
     expect(init.method).toBe('POST');
     expect(init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
@@ -111,7 +111,7 @@ describe('api.cancelReservation', () => {
   });
 
   it('does not claim cancellation when the response body is unparseable', async () => {
-    (global as any).fetch = jest.fn(async () => ({
+    (globalThis as any).fetch = jest.fn(async () => ({
       status: 502,
       ok: false,
       json: async () => {
@@ -126,7 +126,7 @@ describe('api.cancelReservation', () => {
   });
 
   it('reports a network failure instead of throwing', async () => {
-    (global as any).fetch = jest.fn(async () => {
+    (globalThis as any).fetch = jest.fn(async () => {
       throw new Error('Network request failed');
     });
 
@@ -141,6 +141,6 @@ describe('api.cancelReservation', () => {
     respond(200);
 
     expect((await api.cancelReservation(RES_ID)).status).toBe('error');
-    expect((global as any).fetch).not.toHaveBeenCalled();
+    expect((globalThis as any).fetch).not.toHaveBeenCalled();
   });
 });

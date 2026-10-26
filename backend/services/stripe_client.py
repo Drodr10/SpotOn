@@ -5,7 +5,7 @@ import re
 import time
 import traceback
 import stripe
-from flask import jsonify
+from flask import jsonify, request, url_for
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -18,7 +18,6 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 publishableKey = os.getenv("STRIPE_PUBLISHABLE_KEY")
 secretKey = os.getenv("STRIPE_SECRET_KEY")
-backendUrl = os.getenv("BACKEND_URL")
 webhookSecret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 # Rate columns we hand to the pricing engine (incl. legacy fallback).
@@ -408,10 +407,18 @@ def createAccountLink(user_id: str):
         if not account_id:
             return jsonify({"error": "Stripe account ID not found for this user. Please create an account first."}), 404
 
-        # Carry the user id back so onboarding-complete can sync payouts even if
-        # the account.updated webhook was missed or failed.
-        return_url = f"https://{backendUrl}/api/stripe/onboarding-complete?user_id={user_id}"
-        refresh_url = f"https://{backendUrl}/api/stripe/onboarding-expired"
+        # Use the host serving this authenticated request. A saved BACKEND_URL
+        # can outlive an ngrok tunnel and strand sellers at a dead redirect.
+        # Render terminates TLS before Flask, so force HTTPS for public hosts.
+        host = request.host.split(":", 1)[0]
+        scheme = "http" if host in {"localhost", "127.0.0.1"} else "https"
+        return_url = url_for(
+            "stripe.onboarding_return", user_id=user_id,
+            _external=True, _scheme=scheme,
+        )
+        refresh_url = url_for(
+            "stripe.onboarding_expired", _external=True, _scheme=scheme,
+        )
 
         account_link = stripe.AccountLink.create(
             account=account_id,

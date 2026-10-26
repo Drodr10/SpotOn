@@ -49,7 +49,7 @@ function timerSegments(timer: TimerData): { value: number; unit: string }[] {
 export default function UpcomingReservationBanner() {
   const router = useRouter();
   const [reservation, setReservation] = useState<ActiveReservation | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();

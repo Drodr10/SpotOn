@@ -233,7 +233,7 @@ export default function MenuBar() {
   const [activeTab, setActiveTab] = useState<TabKey>(routeToTab(currentRoute) ?? 'home');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [endTime, setEndTime]     = useState<Date | null>(null);
-  const [now, setNow]             = useState<number>(Date.now());
+  const [now, setNow]             = useState<number>(() => Date.now());
   const [screenW, setScreenW]     = useState(Dimensions.get('window').width);
 
   // ── Payout-info popup (shown when tapping + before entering the create flow) ──
@@ -660,7 +660,11 @@ const styles = StyleSheet.create({
 
   // ── Payout-info popup ────────────────────────────────────────────────────────
   addInfoBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   addInfoCard: {
