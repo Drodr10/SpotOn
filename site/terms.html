@@ -14,11 +14,9 @@
        colour are lifted from hero.css / privacy.html so this page reads as
        part of the site.
 
-       DRAFT — has NOT had legal review. Every class="fill" span below is a
-       placeholder Ehan (or a lawyer) needs to fill or confirm before this is
-       real. Facts that are NOT placeholders (fee rates, refund behaviour,
-       age requirement, publisher, governing law) were pulled directly from
-       the current backend and from privacy.html, not invented. -->
+       Facts on this page (fee rates, refund behaviour, age requirement,
+       publisher, governing law) come from the current backend and from
+       privacy.html. Keep site/terms.html in the app repo identical. -->
   <style>
   /* ─── Fonts — the same four faces hero.css declares ──────── */
   @font-face { font-family: 'Switzer'; src: url('Fonts/Switzer-Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
@@ -126,8 +124,7 @@
   .callout { border: 1px solid var(--rule); border-radius: 14px; padding: 1.15rem 1.4rem; margin-bottom: 1.6rem; background: var(--surface); }
   .callout p:last-child { margin-bottom: 0; }
 
-  /* ─── Fill-in placeholder — same convention privacy.html used, so Ehan
-       (or whoever reviews this) can find every unresolved spot at a glance. ─ */
+  /* ─── Fill-in placeholder — same convention privacy.html uses. ─ */
   .fill { background: var(--amber-dim); border: 1px solid var(--amber-rule); border-radius: 5px; padding: .05em .5em; color: var(--amber); font-style: normal; }
 
   .pill {
@@ -173,14 +170,15 @@
 <div class="masthead">
   <h1>Terms of <em>Service</em></h1>
   <div class="dates">
-    <span>Effective <span class="fill">[date]</span></span>
-    <span>Last updated <span class="fill">[date]</span></span>
+    <span>Effective October 29, 2026</span>
+    <span>Last updated October 29, 2026</span>
   </div>
 </div>
 
 <div class="lede">
   <p><strong>The short version.</strong> SpotOn is a marketplace: it connects people who need to park with people who have a private space to rent out. By creating an account you agree to these terms and to our <a href="/privacy">Privacy Policy</a>.</p>
   <p>We take a service fee out of every booking — 15% on hourly and daily stays, 7% on weekly and monthly stays — and the rest goes to the host through Stripe. You must be 18 or older to use SpotOn, because using it means entering into a payment transaction.</p>
+  <p>No abuse, harassment or objectionable content. Report or block anyone who breaks this, and we act within 24 hours.</p>
   <p>The rest of this page is the detail behind those sentences.</p>
 </div>
 
@@ -193,6 +191,7 @@
     <li><a href="#fees">Fees and payments</a></li>
     <li><a href="#cancellations">Cancellations and refunds</a></li>
     <li><a href="#conduct">Acceptable use</a></li>
+    <li><a href="#content">User content, reporting and blocking</a></li>
     <li><a href="#disclaimer">Disclaimers and liability</a></li>
     <li><a href="#termination">Suspension and termination</a></li>
     <li><a href="#disputes">Disputes and governing law</a></li>
@@ -211,7 +210,7 @@
 
 <h2 id="listing"><span class="num">03</span>Listing a space</h2>
 <p>If you list a space, you're confirming that you have the legal right to offer it for parking — as the owner, or with the owner's permission — and that the address, photos, price and availability you post are accurate. A listing is public inside the app: anyone searching can see its address, position on the map and photos.</p>
-<p>You're responsible for honoring a confirmed booking. If a renter shows up to a space that isn't available as listed, that's between you and SpotOn support to sort out, and repeated failures to honor bookings can lead to suspension under <a href="#termination">§9</a>.</p>
+<p>You're responsible for honoring a confirmed booking. If a renter shows up to a space that isn't available as listed, the renter is refunded as described in <a href="#cancellations">§6</a>, and repeated failures to honor bookings can lead to suspension under <a href="#termination">§10</a>.</p>
 
 <h2 id="booking"><span class="num">04</span>Booking a space</h2>
 <p>When you book, you're agreeing to park only the vehicle you registered for that booking, only for the window you paid for, and only in the space as described. While a booking is active, the host can see your vehicle's full license plate — see our <a href="/privacy">Privacy Policy</a> for exactly how that works.</p>
@@ -229,12 +228,17 @@
 <p>The remainder — the host's payout — is transferred to the host's Stripe-connected account. Hosts go through Stripe's own identity verification before they can receive payouts; SpotOn never holds or has access to the funds in between.</p>
 
 <h2 id="cancellations"><span class="num">06</span>Cancellations and refunds</h2>
-<p>You can cancel a confirmed booking yourself from the app, for a full refund including the service fee, up until <span class="fill">[Ehan: confirm this number — currently 24 hours, set by the CANCELLATION_WINDOW_HOURS setting]</span> hours before it's scheduled to start. We reserve the right to change that window going forward; the number in effect at the time you book is the one that applies to that booking.</p>
+<p>You can cancel a confirmed booking yourself from the app, for a full refund including the service fee, up until 24 hours before it's scheduled to start. We reserve the right to change that window going forward; the number in effect at the time you book is the one that applies to that booking.</p>
 <p>Once you're inside that window, or after a booking has started, self-serve cancellation isn't available. Email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> and we'll look at it case by case.</p>
 <p>One case is automatic on our end: if a host never finishes Stripe onboarding in time to receive a booking's payout, we automatically refund the renter in full and cancel the booking.</p>
-<div class="callout">
-  <p><span class="fill">[Ehan/legal: still undecided — what happens if a host doesn't show up or refuses access after a renter arrives (renter-side no-show protection), and what happens if a renter doesn't show up at all (host-side no-show/cancellation policy). Neither exists in the app yet; both need a real answer before launch.]</span></p>
-</div>
+<h3>If the space isn't available when you arrive</h3>
+<p>If you arrive and the space is unavailable, blocked, or the host refuses you access, email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> within 24 hours of the booking's start time, ideally with a photo. We'll review it, and if we confirm the problem, we'll refund you in full and withhold the host's payout for that booking.</p>
+
+<h3>If you don't show up</h3>
+<p>A booking reserves the space for you for the whole window you paid for, so the host can't rent it to anyone else. If you don't show up, or don't use the full window, you won't be refunded once you're inside the 24-hour cancellation window.</p>
+
+<h3>If a host cancels</h3>
+<p>Hosts shouldn't cancel confirmed bookings. If a host has to, the renter gets a full refund. Repeated host cancellations can lead to the host's listings being removed or their account being suspended.</p>
 
 <h2 id="conduct"><span class="num">07</span>Acceptable use</h2>
 <p>Don't use SpotOn to:</p>
@@ -245,16 +249,52 @@
   <li>Circumvent SpotOn's payment system to pay or be paid outside the app for a booking arranged through it</li>
   <li>Interfere with or attempt to reverse-engineer the app or its backend</li>
 </ul>
-<p>We can remove a listing, cancel a booking, or suspend an account that breaks these rules — see <a href="#termination">§9</a>.</p>
+<p>We can remove a listing, cancel a booking, or suspend an account that breaks these rules — see <a href="#termination">§10</a>.</p>
 
-<h2 id="disclaimer"><span class="num">08</span>Disclaimers and liability</h2>
-<p>SpotOn connects renters and hosts; it does not itself provide parking, and we don't guarantee a listed space will be available, safe, or as described. <span class="fill">[Ehan/legal: this section needs a real liability-limitation clause — cap on damages, "as is" disclaimer language, disclaimer of warranties — written or reviewed by someone with legal training. Don't ship without it.]</span></p>
-<p>Nothing in these terms is meant to limit any right you have that can't be limited under Florida or federal law.</p>
+<h2 id="content"><span class="num">08</span>User content, reporting and blocking</h2>
+<p>"User content" means anything you put into SpotOn: your listings (including photos, descriptions and addresses), the messages you send, and your profile information. You keep ownership of your content. By posting it, you give SpotOn a non-exclusive, worldwide, royalty-free license to host, store, display and share it inside the app as needed to run the service — for example, showing your listing to people searching, or delivering your messages. That license ends when you delete the content or your account, except for copies we need to keep as described in our <a href="/privacy">Privacy Policy</a>.</p>
 
-<h2 id="termination"><span class="num">09</span>Suspension and termination</h2>
+<h3>Zero tolerance</h3>
+<p>SpotOn has zero tolerance for objectionable content and abusive users. Don't post or send anything that is:</p>
+<ul>
+  <li>Harassment, bullying, or threats</li>
+  <li>Hate speech, or content that attacks people based on who they are</li>
+  <li>Sexual or sexually explicit content</li>
+  <li>Scams, fraud, or attempts to mislead other users</li>
+  <li>Spam or unsolicited advertising</li>
+  <li>Illegal, or infringing someone else's rights, including their privacy, copyright or trademarks</li>
+</ul>
+
+<h3>Reporting</h3>
+<p>If someone breaks these rules, tell us. You can report a user from your chat with them, or report a listing from its details page, right in the app. You can also email <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a>. Reports go to the SpotOn team.</p>
+
+<h3>Blocking</h3>
+<p>You can block another user in the app. Once you block someone, they can no longer message you, and your conversation with them is hidden.</p>
+
+<h3>What we do about it</h3>
+<p>We review reports within 24 hours. Where content breaks these terms, we'll remove it, and where appropriate we'll suspend or permanently ban the user responsible — see <a href="#termination">§10</a>.</p>
+
+<h2 id="disclaimer"><span class="num">09</span>Disclaimers and liability</h2>
+<p>SpotOn connects renters and hosts; it does not itself provide parking, and we don't guarantee a listed space will be available, safe, or as described.</p>
+
+<h3>The app is provided "as is"</h3>
+<p>SpotOn is provided "as is" and "as available". To the fullest extent the law allows, we disclaim all warranties, express or implied, including warranties of merchantability, fitness for a particular purpose, title and non-infringement, and any warranty that the app will be uninterrupted, error-free or secure.</p>
+
+<h3>Parking is at your own risk</h3>
+<p>You park in a host's space at your own risk. SpotOn isn't responsible for loss of or damage to vehicles or other property, or for personal injury, that happens in or around a listed space. Hosts are responsible for their own space — its condition, its safety, and having any insurance they need — and renters are responsible for their own vehicle and belongings.</p>
+
+<h3>Limits on our liability</h3>
+<p>To the fullest extent the law allows, SpotOn won't be liable for any indirect, incidental, special, consequential or punitive damages, or for lost profits, revenue or data, arising out of or relating to these terms or the app, even if we've been told they're possible.</p>
+<p>Our total liability to you for any claim arising out of or relating to these terms or the app is limited to the greater of (a) the service fees SpotOn received from you in the 12 months before the claim arose, or (b) $100.</p>
+<p>Some jurisdictions don't allow certain warranties to be disclaimed or certain damages to be limited, so some of the above may not apply to you. Nothing in these terms is meant to limit any right you have that can't be limited under Florida or federal law.</p>
+
+<h3>Indemnification</h3>
+<p>You agree to defend, indemnify and hold harmless SpotOn and Ehan Shah from any claims, losses, damages, liabilities and expenses (including reasonable legal fees) arising out of your listings, your bookings, your user content, or your breach of these terms or the law.</p>
+
+<h2 id="termination"><span class="num">10</span>Suspension and termination</h2>
 <p>You can delete your account at any time from Profile in the app — see our <a href="/privacy">Privacy Policy</a> §8 for exactly what that does. We can suspend or terminate an account that breaks these terms, with notice where practical. If you have a booking or payout in progress, see the deletion-timing rules in the Privacy Policy — the same reasoning applies to suspension.</p>
 
-<h2 id="disputes"><span class="num">10</span>Disputes and governing law</h2>
+<h2 id="disputes"><span class="num">11</span>Disputes and governing law</h2>
 <p>These terms are governed by the laws of the State of Florida, United States, without regard to conflict-of-law rules.</p>
 
 <h3>Let's talk first</h3>
@@ -269,18 +309,15 @@
 
 <h3>Opting out</h3>
 <p>You can opt out of this arbitration agreement — everything else in these terms still applies — by emailing <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a> within 30 days of creating your account, from the email address on the account, stating that you want to opt out of arbitration. If you opt out, disputes between you and SpotOn go to the state or federal courts located in Alachua County, Florida, and you and SpotOn each waive any right to a jury trial.</p>
-<div class="callout">
-  <p>This section follows the standard structure used across the industry (informal resolution window, AAA individual arbitration, class-action waiver with an opt-out and a severability fallback) rather than being written from scratch — but it still needs a final pass from someone with actual legal training before launch, the way every clause on this page does.</p>
-</div>
 
-<h2 id="changes"><span class="num">11</span>Changes to these terms</h2>
+<h2 id="changes"><span class="num">12</span>Changes to these terms</h2>
 <p>If we change these terms, we'll update the date at the top, and for anything significant we'll tell you in the app before it takes effect. Continuing to use SpotOn after a change means you accept the new terms.</p>
 
-<h2 id="contact"><span class="num">12</span>Contact</h2>
+<h2 id="contact"><span class="num">13</span>Contact</h2>
 <p>Questions about these terms, or anything here that doesn't match what you see in the app: <a href="mailto:team.spotonapp@gmail.com">team.spotonapp@gmail.com</a>.</p>
 
 <footer>
-  <span>SpotOn · Effective <span class="fill">[date]</span></span>
+  <span>SpotOn · Effective October 29, 2026</span>
   <a class="pill" href="https://spot-on.software/">
     Back to SpotOn
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
