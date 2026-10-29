@@ -545,7 +545,7 @@ export default function ProfilePage() {
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./PreviousReservations'))}
           >
-            <Text style={styles.bannerText}>Your{'\n'}Reservations</Text>
+            <Text style={styles.bannerText}>Activity</Text>
             <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
@@ -555,7 +555,7 @@ export default function ProfilePage() {
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./YourSpots'))}
           >
-            <Text style={styles.bannerText}>Your Seller{'\n'}Account</Text>
+            <Text style={styles.bannerText}>Seller{'\n'}Account</Text>
             <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 

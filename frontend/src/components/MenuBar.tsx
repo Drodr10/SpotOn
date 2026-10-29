@@ -58,7 +58,7 @@ export const MENU_BAR_HEIGHT = BAR_HEIGHT;
 
 type TabKey = 'profile' | 'home' | 'messages' | 'add';
 
-const VISIBLE_ROUTES = new Set(['Homescreen', 'Profile', 'Messages']);
+const VISIBLE_ROUTES = new Set(['Homescreen', 'Profile', 'Messages', 'PreviousReservations', 'YourSpots', 'ActivityDetails']);
 
 const TAB_ORDER: Record<TabKey, number> = {
   profile: 0,

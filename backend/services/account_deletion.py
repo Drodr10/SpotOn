@@ -133,6 +133,17 @@ def delete_account(user_id: str) -> dict:
 
     supabase.table("reservation_holds").delete().eq("renter_id", user_id).execute()
 
+    # Blocks this user created say who they avoid -- personal, and pointless once the
+    # account is unusable, so they go. Blocks OTHER people placed on this user stay (they
+    # protect those people). Reports are deliberately kept: reports this user filed and
+    # reports about them are moderation records, and the profile row survives the soft
+    # delete so their FKs never fire. Best-effort: a failure here (e.g. the moderation
+    # migration not applied yet) must not strand the deletion.
+    try:
+        supabase.table("user_blocks").delete().eq("blocker_id", user_id).execute()
+    except Exception as err:  # noqa: BLE001
+        print(f"[account] block cleanup failed for {user_id}: {err}")
+
     listing_ids = _own_listing_ids(user_id)
     if listing_ids:
         supabase.table("listings").update({"is_active": False}).eq(

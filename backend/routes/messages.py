@@ -62,5 +62,11 @@ def send_message(current_user_id):
     if not message_data['content']:
         return jsonify({"error": "Message content is required"}), 400
 
-    response = supabase.table("messages").insert(message_data).execute()
+    try:
+        response = supabase.table("messages").insert(message_data).execute()
+    except Exception as e:
+        # The messages_block_guard trigger rejects sends between users who have blocked each other.
+        if "messaging_blocked" in str(e):
+            return jsonify({"error": "You can't message this user.", "code": "messaging_blocked"}), 403
+        raise
     return jsonify(response.data), 201

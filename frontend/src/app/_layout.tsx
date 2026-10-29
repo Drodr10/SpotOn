@@ -61,6 +61,7 @@ export default function RootLayout() {
             <Stack.Screen name="RegisterVehicle" />
             <Stack.Screen name="PreviousReservations" />
             <Stack.Screen name="YourSpots" />
+            <Stack.Screen name="ActivityDetails" options={{ animation: 'slide_from_right' }} />
           </Stack>
           <MenuBar />
         </View>

@@ -42,8 +42,8 @@ import MapView, { Marker, Region } from 'react-native-maps';
 // ─── Location ─────────────────────────────────────────────────────────────────
 import * as Location from 'expo-location';
 
-// ─── Image Picker ─────────────────────────────────────────────────────────────
-import * as ImagePicker from 'expo-image-picker';
+// ─── Reduced motion ───────────────────────────────────────────────────────────
+import { useReducedMotion } from 'react-native-reanimated';
 
 // ─── Web Browser ──────────────────────────────────────────────────────────────
 
@@ -56,13 +56,13 @@ import { supabase } from '../utils/supabase';
 // ─── Components ───────────────────────────────────────────────────────────────
 import DateRangePicker from '@/src/components/DateRangePicker';
 import FilterToggle from '@/src/components/FilterToggle';
+import ListingCameraCard from '@/src/components/camera/ListingCameraCard';
 import { triggerLightHaptic, triggerSelectionHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 import carparkingImg from '@/assets/images/carparking.png';
 import accessibilityImg from '@/assets/images/accessibility.png';
 import addLocationImg from '@/assets/images/add_location.png';
-import cameraanalogImg from '@/assets/images/cameraanalog.png';
 import calendarImg from '@/assets/images/calendar.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
@@ -163,6 +163,9 @@ export default function CreateListing2() {
 
   // ── Pop-up visibility ──────────────────────────────────────────────────────
   const [showCameraPopup, setShowCameraPopup] = useState(false);
+  // True once the camera card has finished sliding in; the live camera session
+  // only starts after this so it never competes with the entrance spring.
+  const [cameraCardReady, setCameraCardReady] = useState(false);
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -173,6 +176,8 @@ export default function CreateListing2() {
 
   // ── Pop-up animations ──────────────────────────────────────────────────────
   const cameraPopupAnim = useRef(new Animated.Value(H)).current;
+  const cameraPopupOpacity = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useReducedMotion();
   const calendarPopupAnim = useRef(new Animated.Value(H)).current;
   const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
@@ -213,9 +218,49 @@ export default function CreateListing2() {
     initialize();
   }, []);
 
+  // Camera card entrance: a critically damped spring (no bounce — nothing
+  // carried momentum) plus a short fade. Reduced motion drops the travel and
+  // keeps only the fade.
   useEffect(() => {
-    if (showCameraPopup) openPopup(cameraPopupAnim);
+    if (!showCameraPopup) return;
+    cameraPopupOpacity.setValue(0);
+    if (reduceMotion) {
+      cameraPopupAnim.setValue(0);
+      Animated.timing(cameraPopupOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(({ finished }) => finished && setCameraCardReady(true));
+      return;
+    }
+    cameraPopupAnim.setValue(H);
+    Animated.parallel([
+      Animated.spring(cameraPopupAnim, {
+        toValue: 0,
+        stiffness: 240,
+        damping: 31,
+        mass: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cameraPopupOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => finished && setCameraCardReady(true));
   }, [showCameraPopup]);
+
+  const closeCameraPopup = (cb?: () => void) => {
+    if (reduceMotion) {
+      Animated.timing(cameraPopupOpacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => cb && cb());
+      return;
+    }
+    closePopup(cameraPopupAnim, cb);
+  };
 
   useEffect(() => {
     if (showCalendarPopup) openPopup(calendarPopupAnim);
@@ -370,23 +415,15 @@ export default function CreateListing2() {
     }
   }, [scene]);
 
-  const handleTakePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission denied', 'Camera permission is required.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: 'images',
-      quality: 0.7,
+  // Called by ListingCameraCard when the user accepts a photo (taken in-app or
+  // picked from the library). Same URI handling as the old launchCameraAsync
+  // result: stored as-is, uploaded in handleSubmit.
+  const handlePhotoConfirmed = (uri: string) => {
+    setPhotoUri(uri);
+    closeCameraPopup(() => {
+      setShowCameraPopup(false);
+      setScene(4);
     });
-    if (!result.canceled && result.assets.length > 0) {
-      setPhotoUri(result.assets[0].uri);
-      closePopup(cameraPopupAnim, () => {
-        setShowCameraPopup(false);
-        setScene(4);
-      });
-    }
   };
 
   const handleSubmit = async (dateRange?: { start: Date | null; end: Date | null }) => {
@@ -483,12 +520,13 @@ export default function CreateListing2() {
       Alert.alert('No location selected', 'Please select a location on the map first.');
       return;
     }
+    setCameraCardReady(false);
     setShowCameraPopup(true);
     setScene(3);
   };
 
   const goToScene4 = () => {
-    closePopup(cameraPopupAnim, () => {
+    closeCameraPopup(() => {
       setShowCameraPopup(false);
       setScene(4);
     });
@@ -532,7 +570,7 @@ export default function CreateListing2() {
   };
 
   const goBackFromScene3 = () => {
-    closePopup(cameraPopupAnim, () => {
+    closeCameraPopup(() => {
       setShowCameraPopup(false);
       setScene(2);
     });
@@ -792,26 +830,27 @@ export default function CreateListing2() {
           )}
         </MapView>
       </View>
-      <View style={styles.bottomRow}>
-        <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(goBackFromScene3)} activeOpacity={0.8}>
-          <Ionicons name="chevron-back" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
 
-      {/* Camera Pop-up */}
-      <Animated.View
-        style={[styles.popup, { transform: [{ translateY: cameraPopupAnim }] }]}
-      >
-        <View style={styles.popupHelperRow}>
-          <Image source={accessibilityImg} style={[styles.accessibilityIcon, { tintColor: '#fff' }]} />
-          <Text style={styles.popupHelperText}>
-            {"Let's add a photo of your spot. Press the camera to take the photo."}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={withLightHaptic(handleTakePhoto)} activeOpacity={0.85} style={styles.popupImageBtn}>
-          <Image source={cameraanalogImg} style={styles.popupLargeImg} resizeMode="contain" />
-        </TouchableOpacity>
-      </Animated.View>
+      {/* Camera pop-up — live viewfinder, no intermediate camera-icon step.
+          Mounted only while open so the camera session stops on close. */}
+      {showCameraPopup && (
+        <Animated.View
+          style={[
+            styles.cameraCard,
+            {
+              height: Math.min(H * 0.76, H - insets.top - 136),
+              opacity: cameraPopupOpacity,
+              transform: [{ translateY: cameraPopupAnim }],
+            },
+          ]}
+        >
+          <ListingCameraCard
+            ready={cameraCardReady}
+            onBack={goBackFromScene3}
+            onConfirm={handlePhotoConfirmed}
+          />
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 
@@ -1222,41 +1261,11 @@ const styles = StyleSheet.create({
   },
 
   // ── Pop-ups ────────────────────────────────────────────────────────────────
-  popup: {
+  cameraCard: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingTop: W * 0.05,
-    paddingBottom: W * 0.06,
-    paddingHorizontal: H_PAD,
-    minHeight: H * 0.52,
-    justifyContent: 'space-between',
-  },
-  popupHelperRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: W * 0.02,
-    marginBottom: W * 0.04,
-  },
-  popupHelperText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 13,
-    color: '#fff',
-    flex: 1,
-    lineHeight: 18,
-  },
-  popupImageBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-  },
-  popupLargeImg: {
-    width: W * 0.55,
-    height: W * 0.55,
+    bottom: 8,
+    left: W * 0.034,
+    right: W * 0.034,
   },
 
   // ── Scene 4 Price ──────────────────────────────────────────────────────────
