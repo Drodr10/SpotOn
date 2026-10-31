@@ -22,14 +22,14 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import accessibilityImg from '@/assets/images/accessibility.png';
 import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
+import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '@/src/components/activity/motion';
 
 const { width: W } = Dimensions.get('window');
-const H_PAD = W * 0.06;
-const CARD_H_PAD = W * 0.05; // inner horizontal padding of the card
-const CARD_RADIUS = 25;
+const CARD_H_PAD = W * 0.08; // inner horizontal padding — clears the 47pt corners
 const SLIDE_OUT_DISTANCE = 600; // far enough to slide fully off screen
 
-const calendarCellWidth = (W - H_PAD * 2 - CARD_H_PAD * 2) / 7;
+const calendarCellWidth = (W - SHEET_INSET * 2 - CARD_H_PAD * 2) / 7;
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -113,13 +113,12 @@ export default function DateRangePicker({
   const [startDate, setStartDate] = useState<Date | null>(initialStart);
   const [endDate, setEndDate] = useState<Date | null>(initialEnd);
 
-  // Spring animation — matches the Daily / Monthly / Totals card behaviour
+  // Menu-bar slide (650ms, bezier) — matches the Daily / Monthly / Totals card behaviour
   useEffect(() => {
-    Animated.spring(slideAnim, {
+    Animated.timing(slideAnim, {
       toValue: visible ? 0 : SLIDE_OUT_DISTANCE,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
+      duration: SLIDE_MS,
+      easing: visible ? RN_EASE_OUT_SLIDE : RN_EASE_IN_SLIDE,
       useNativeDriver: true,
     }).start();
   }, [visible, slideAnim]);
@@ -226,7 +225,8 @@ export default function DateRangePicker({
       style={[
         styles.card,
         {
-          bottom: W * 0.05 + insets.bottom,
+          bottom: SHEET_BOTTOM,
+          paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
           transform: [{ translateY: slideAnim }],
         },
       ]}
@@ -362,12 +362,13 @@ const styles = StyleSheet.create({
   // ── Floating card — mirrors ratePopup in CreateListing2 ───────────────────
   card: {
     position: 'absolute',
-    left: H_PAD,
-    right: H_PAD,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
     backgroundColor: '#000',
-    borderRadius: CARD_RADIUS,
-    paddingTop: W * 0.055,
-    paddingBottom: W * 0.045,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
+    paddingTop: W * 0.08,
+    paddingBottom: W * 0.06,
     paddingHorizontal: CARD_H_PAD,
     zIndex: 20,
     elevation: 12,
@@ -380,8 +381,8 @@ const styles = StyleSheet.create({
   // ── SpotOn logo ────────────────────────────────────────────────────────────
   logo: {
     position: 'absolute',
-    top: W * 0.045,
-    right: CARD_H_PAD,
+    top: W * 0.07,
+    right: W * 0.09,
     opacity: 0.9,
     zIndex: 1,
   },

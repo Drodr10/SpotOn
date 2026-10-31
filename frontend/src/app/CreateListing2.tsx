@@ -32,6 +32,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 import { useRouter } from 'expo-router';
+import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '../components/activity/motion';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
@@ -42,13 +43,13 @@ import MapView, { Marker, Region } from 'react-native-maps';
 // ─── Location ─────────────────────────────────────────────────────────────────
 import * as Location from 'expo-location';
 
-// ─── Image Picker ─────────────────────────────────────────────────────────────
-import * as ImagePicker from 'expo-image-picker';
+// ─── Reduced motion ───────────────────────────────────────────────────────────
 
 // ─── Web Browser ──────────────────────────────────────────────────────────────
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
@@ -56,13 +57,13 @@ import { supabase } from '../utils/supabase';
 // ─── Components ───────────────────────────────────────────────────────────────
 import DateRangePicker from '@/src/components/DateRangePicker';
 import FilterToggle from '@/src/components/FilterToggle';
+import ListingCameraCard from '@/src/components/camera/ListingCameraCard';
 import { triggerLightHaptic, triggerSelectionHaptic, withLightHaptic } from '@/src/utils/haptics';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 import carparkingImg from '@/assets/images/carparking.png';
 import accessibilityImg from '@/assets/images/accessibility.png';
 import addLocationImg from '@/assets/images/add_location.png';
-import cameraanalogImg from '@/assets/images/cameraanalog.png';
 import calendarImg from '@/assets/images/calendar.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
@@ -172,26 +173,28 @@ export default function CreateListing2() {
   const mapRef = useRef<MapView>(null);
 
   // ── Pop-up animations ──────────────────────────────────────────────────────
-  const cameraPopupAnim = useRef(new Animated.Value(H)).current;
-  const calendarPopupAnim = useRef(new Animated.Value(H)).current;
   const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const totalsPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
 
+  // Bottom pop-ups share the menu-bar slide: 650ms, ease-out up / ease-in down.
   const openPopup = (anim: Animated.Value) => {
+    anim.setValue(POPUP_OFFSCREEN_Y);
     Animated.timing(anim, {
       toValue: 0,
-      duration: 400,
+      duration: SLIDE_MS,
+      easing: RN_EASE_OUT_SLIDE,
       useNativeDriver: true,
     }).start();
   };
 
-  const closePopup = (anim: Animated.Value, cb?: () => void) => {
+  const closePopup = (anim: Animated.Value, cb: () => void) => {
     Animated.timing(anim, {
-      toValue: H,
-      duration: 300,
+      toValue: POPUP_OFFSCREEN_Y,
+      duration: SLIDE_MS,
+      easing: RN_EASE_IN_SLIDE,
       useNativeDriver: true,
-    }).start(() => cb && cb());
+    }).start(cb);
   };
 
   useEffect(() => {
@@ -213,13 +216,11 @@ export default function CreateListing2() {
     initialize();
   }, []);
 
-  useEffect(() => {
-    if (showCameraPopup) openPopup(cameraPopupAnim);
-  }, [showCameraPopup]);
-
-  useEffect(() => {
-    if (showCalendarPopup) openPopup(calendarPopupAnim);
-  }, [showCalendarPopup]);
+  // The camera card animates its own entrance and exit (UI thread, gesture-
+  // driven dismiss), so closing here is just the state change it calls back into.
+  const closeCameraPopup = (cb?: () => void) => {
+    cb?.();
+  };
 
   // ── Price PanResponder ─────────────────────────────────────────────────────
   // Two separate refs so toggling Hourly↔Weekly preserves each value.
@@ -370,23 +371,15 @@ export default function CreateListing2() {
     }
   }, [scene]);
 
-  const handleTakePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission denied', 'Camera permission is required.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: 'images',
-      quality: 0.7,
+  // Called by ListingCameraCard when the user accepts a photo (taken in-app or
+  // picked from the library). Same URI handling as the old launchCameraAsync
+  // result: stored as-is, uploaded in handleSubmit.
+  const handlePhotoConfirmed = (uri: string) => {
+    setPhotoUri(uri);
+    closeCameraPopup(() => {
+      setShowCameraPopup(false);
+      setScene(4);
     });
-    if (!result.canceled && result.assets.length > 0) {
-      setPhotoUri(result.assets[0].uri);
-      closePopup(cameraPopupAnim, () => {
-        setShowCameraPopup(false);
-        setScene(4);
-      });
-    }
   };
 
   const handleSubmit = async (dateRange?: { start: Date | null; end: Date | null }) => {
@@ -488,7 +481,7 @@ export default function CreateListing2() {
   };
 
   const goToScene4 = () => {
-    closePopup(cameraPopupAnim, () => {
+    closeCameraPopup(() => {
       setShowCameraPopup(false);
       setScene(4);
     });
@@ -532,7 +525,7 @@ export default function CreateListing2() {
   };
 
   const goBackFromScene3 = () => {
-    closePopup(cameraPopupAnim, () => {
+    closeCameraPopup(() => {
       setShowCameraPopup(false);
       setScene(2);
     });
@@ -552,14 +545,7 @@ export default function CreateListing2() {
     setDailyEnabled(true);
     setDailyRateAccepted(false);
     setShowDailyPopup(true);
-    dailyPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(dailyPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(dailyPopupAnim);
   };
 
   const dismissDailyPopup = (accepted = true, onDone?: () => void) => {
@@ -567,13 +553,7 @@ export default function CreateListing2() {
     // while the slide-down animation is still in flight.
     dailyPopupDone.current = true;
     setDailyRateAccepted(accepted);
-    Animated.spring(dailyPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(dailyPopupAnim, () => {
       setShowDailyPopup(false);
       onDone?.();
     });
@@ -598,27 +578,14 @@ export default function CreateListing2() {
     setMonthlyEnabled(true);
     setMonthlyRateAccepted(false);
     setShowMonthlyPopup(true);
-    monthlyPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(monthlyPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(monthlyPopupAnim);
   };
 
   const dismissMonthlyPopup = (accepted = true, onDone?: () => void) => {
     // See dismissDailyPopup: set ref synchronously to avoid a lost Continue press.
     monthlyPopupDone.current = true;
     setMonthlyRateAccepted(accepted);
-    Animated.spring(monthlyPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(monthlyPopupAnim, () => {
       setShowMonthlyPopup(false);
       onDone?.();
     });
@@ -638,26 +605,13 @@ export default function CreateListing2() {
 
   const openTotalsPopup = () => {
     setShowTotalsPopup(true);
-    totalsPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(totalsPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(totalsPopupAnim);
   };
 
   const dismissTotalsPopup = (onDone?: () => void) => {
     // Set ref synchronously so the next Continue press immediately advances.
     totalsPopupDone.current = true;
-    Animated.spring(totalsPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(totalsPopupAnim, () => {
       setShowTotalsPopup(false);
       onDone?.();
     });
@@ -792,26 +746,12 @@ export default function CreateListing2() {
           )}
         </MapView>
       </View>
-      <View style={styles.bottomRow}>
-        <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(goBackFromScene3)} activeOpacity={0.8}>
-          <Ionicons name="chevron-back" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
 
-      {/* Camera Pop-up */}
-      <Animated.View
-        style={[styles.popup, { transform: [{ translateY: cameraPopupAnim }] }]}
-      >
-        <View style={styles.popupHelperRow}>
-          <Image source={accessibilityImg} style={[styles.accessibilityIcon, { tintColor: '#fff' }]} />
-          <Text style={styles.popupHelperText}>
-            {"Let's add a photo of your spot. Press the camera to take the photo."}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={withLightHaptic(handleTakePhoto)} activeOpacity={0.85} style={styles.popupImageBtn}>
-          <Image source={cameraanalogImg} style={styles.popupLargeImg} resizeMode="contain" />
-        </TouchableOpacity>
-      </Animated.View>
+      {/* Camera pop-up — floating live card + tap-away backdrop, self-animated.
+          Mounted only while open so the camera session stops on close. */}
+      {showCameraPopup && (
+        <ListingCameraCard onBack={goBackFromScene3} onConfirm={handlePhotoConfirmed} />
+      )}
     </SafeAreaView>
   );
 
@@ -838,7 +778,8 @@ export default function CreateListing2() {
         style={[
           styles.ratePopup,
           {
-            bottom: W * 0.05 + insets.bottom,
+            bottom: SHEET_BOTTOM,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
             transform: [{ translateY: opts.anim }],
           },
         ]}
@@ -943,7 +884,8 @@ export default function CreateListing2() {
           styles.ratePopup,
           styles.totalsPopup,
           {
-            bottom: W * 0.05 + insets.bottom,
+            bottom: SHEET_BOTTOM,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
             transform: [{ translateY: totalsPopupAnim }],
           },
         ]}
@@ -1222,43 +1164,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Pop-ups ────────────────────────────────────────────────────────────────
-  popup: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingTop: W * 0.05,
-    paddingBottom: W * 0.06,
-    paddingHorizontal: H_PAD,
-    minHeight: H * 0.52,
-    justifyContent: 'space-between',
-  },
-  popupHelperRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: W * 0.02,
-    marginBottom: W * 0.04,
-  },
-  popupHelperText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 13,
-    color: '#fff',
-    flex: 1,
-    lineHeight: 18,
-  },
-  popupImageBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-  },
-  popupLargeImg: {
-    width: W * 0.55,
-    height: W * 0.55,
-  },
-
   // ── Scene 4 Price ──────────────────────────────────────────────────────────
   priceContainer: {
     flexDirection: 'row',
@@ -1458,13 +1363,14 @@ const styles = StyleSheet.create({
   // ── Rate Popups (Daily + Monthly share these styles) ───────────────────────
   ratePopup: {
     position: 'absolute',
-    left: H_PAD,
-    right: H_PAD,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
     backgroundColor: '#000',
-    borderRadius: BOTTOM_ACTION_RADIUS,
-    paddingTop: W * 0.045,
-    paddingBottom: W * 0.045,
-    paddingHorizontal: W * 0.05,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
+    paddingTop: W * 0.07,
+    paddingBottom: W * 0.06,
+    paddingHorizontal: W * 0.08,
     zIndex: 20,
     elevation: 12,
     shadowColor: '#000',
@@ -1530,14 +1436,12 @@ const styles = StyleSheet.create({
 
   // ── Totals popup overrides ─────────────────────────────────────────────────
   totalsPopup: {
-    paddingTop: W * 0.055,
-    paddingBottom: W * 0.045,
-    paddingHorizontal: W * 0.06,
+    paddingTop: W * 0.08,
   },
   totalsLogo: {
     position: 'absolute',
-    top: W * 0.04,
-    right: W * 0.05,
+    top: W * 0.07,
+    right: W * 0.09,
     opacity: 0.9,
     zIndex: 1,
   },

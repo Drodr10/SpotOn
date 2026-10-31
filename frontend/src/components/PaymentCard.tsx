@@ -20,6 +20,8 @@ import { stripe } from "../utils/stripe"
 import { supabase } from '@/src/utils/supabase';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { CustomFonts } from '../constants/theme';
+import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from './activity/motion';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
 import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -60,15 +62,15 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
         popupAnim.setValue(SCREEN_H);
         setShowCardPopup(true);
         Animated.parallel([
-            Animated.spring(popupAnim, { toValue: 0, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
-            Animated.timing(backdropAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.timing(popupAnim, { toValue: 0, duration: SLIDE_MS, easing: RN_EASE_OUT_SLIDE, useNativeDriver: true }),
+            Animated.timing(backdropAnim, { toValue: 1, duration: SLIDE_MS, easing: RN_EASE_OUT_SLIDE, useNativeDriver: true }),
         ]).start();
     };
 
     const closeCardPopup = () => {
         Animated.parallel([
-            Animated.spring(popupAnim, { toValue: SCREEN_H, damping: 14, stiffness: 130, mass: 1, useNativeDriver: true }),
-            Animated.timing(backdropAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
+            Animated.timing(popupAnim, { toValue: SCREEN_H, duration: SLIDE_MS, easing: RN_EASE_IN_SLIDE, useNativeDriver: true }),
+            Animated.timing(backdropAnim, { toValue: 0, duration: SLIDE_MS, easing: RN_EASE_IN_SLIDE, useNativeDriver: true }),
         ]).start(() => setShowCardPopup(false));
     };
 
@@ -181,18 +183,17 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
                     style={[
                         styles.popupCard,
                         {
-                            bottom: W * 0.05 + insets.bottom,
-                            paddingTop: W * 0.055,
-                            paddingBottom: W * 0.045,
-                            paddingHorizontal: W * 0.06,
-                            borderRadius: W * 0.07,
+                            bottom: SHEET_BOTTOM,
+                            paddingTop: W * 0.08,
+                            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+                            paddingHorizontal: W * 0.08,
                             transform: [{ translateY: popupAnim }],
                         },
                     ]}
                 >
                     <Image
                         source={spotonLogoCircle}
-                        style={[styles.popupLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+                        style={[styles.popupLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.07, right: W * 0.09 }]}
                         resizeMode="contain"
                     />
 
@@ -256,8 +257,10 @@ const styles = StyleSheet.create({
         },
         popupCard: {
             position: 'absolute',
-            left: 16,
-            right: 16,
+            left: SHEET_INSET,
+            right: SHEET_INSET,
+            borderRadius: SHEET_RADIUS,
+            borderCurve: 'continuous',
             backgroundColor: '#000',
             zIndex: 20,
             elevation: 12,

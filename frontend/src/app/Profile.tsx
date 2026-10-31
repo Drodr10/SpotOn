@@ -27,6 +27,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { api, type ActiveReservation } from '@/src/utils/api';
 import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
+import PillMenu, { PillMenuBackdrop, pillMenuHostStyleForRows, type PillMenuItem } from '@/src/components/PillMenu';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 import logoAsset from '@/assets/images/spotonlogo.png';
@@ -42,6 +43,7 @@ import carParkingIcon from '@/assets/images/carparking.png';
 import addListingIcon from '@/assets/images/addlistingimage.png';
 
 import { stripe } from '@/src/utils/stripe';
+import { setAvatarUrl } from '@/src/utils/avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -92,6 +94,7 @@ const onSignOut = async () => {
 };
 
 export default function ProfilePage() {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [claims, setClaims] = useState<JwtPayload>();
   const [user, setUser] = useState<ProfileData | null>(null);
 
@@ -143,6 +146,7 @@ export default function ProfilePage() {
     if (error || !data) return;
 
     setUser(data as ProfileData);
+    setAvatarUrl((data as ProfileData).avatar_url ?? null);
     setName(data.full_name);
     setEmail(data.email);
     // An account ID is created before the seller finishes Stripe onboarding.
@@ -234,23 +238,23 @@ export default function ProfilePage() {
 
   const pickAvatar = async () => {
     triggerLightHaptic();
-    if (!user) return;
+    if (!user || avatarUploading) return;
 
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setErrorMessage('Photo permission is required to change your picture.');
-      return;
-    }
-
+    // The system photo picker needs no library permission, and asking for one
+    // first was what made the picker slow to appear.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.85,
+      quality: 0.7,
     });
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
+    const previousUrl = user.avatar_url;
+    // Show the new picture straight away on the card and the menu bar.
+    setUser({ ...user, avatar_url: asset.uri });
+    setAvatarUrl(asset.uri);
     setAvatarUploading(true);
     setErrorMessage('');
 
@@ -258,18 +262,20 @@ export default function ProfilePage() {
       const response = await fetch(asset.uri);
       const arrayBuffer = await response.arrayBuffer();
 
-      const ext = (asset.uri.split('.').pop() || 'jpg').toLowerCase();
-      const contentType =
-        asset.mimeType ?? (ext === 'png' ? 'image/png' : 'image/jpeg');
-      const path = `${user.id}/avatar.${ext}`;
+      const contentType = asset.mimeType ?? 'image/jpeg';
+      const ext = contentType === 'image/png' ? 'png' : 'jpg';
+      // A fresh file name each time: overwriting (upsert) needs a storage SELECT
+      // policy, which was removed so the bucket can't be listed. A new name only
+      // needs the owner INSERT policy, and it also busts image caches.
+      const path = `${user.id}/avatar-${Date.now()}.${ext}`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(path, arrayBuffer, { contentType, upsert: true });
+        .upload(path, arrayBuffer, { contentType });
       if (uploadError) throw uploadError;
 
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
-      const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+      const publicUrl = pub.publicUrl;
 
       const { error: profileError } = await supabase
         .from('profiles')
@@ -277,9 +283,19 @@ export default function ProfilePage() {
         .eq('id', user.id);
       if (profileError) throw profileError;
 
-      setUser({ ...user, avatar_url: publicUrl });
+      setUser((u) => (u ? { ...u, avatar_url: publicUrl } : u));
+      setAvatarUrl(publicUrl);
+
+      // Best effort: tidy up the previous upload. Failure just leaves a stray file.
+      const marker = '/avatars/';
+      const oldPath = previousUrl?.split('?')[0].split(marker)[1];
+      if (oldPath && oldPath !== path) {
+        supabase.storage.from('avatars').remove([decodeURIComponent(oldPath)]).catch(() => {});
+      }
     } catch (e: any) {
-      setErrorMessage(e.message ?? 'Failed to upload avatar.');
+      setUser((u) => (u ? { ...u, avatar_url: previousUrl } : u));
+      setAvatarUrl(previousUrl);
+      Alert.alert("Couldn't update your picture", e?.message ?? 'Please try again.');
     } finally {
       setAvatarUploading(false);
     }
@@ -347,6 +363,8 @@ export default function ProfilePage() {
     }
   };
 
+  const closeMenu = () => setMenuOpen(false);
+
   const confirmDeleteAccount = () => {
     if (deletingRef.current) return;
     triggerLightHaptic();
@@ -365,6 +383,31 @@ export default function ProfilePage() {
   };
 
   if (!user) return <SafeAreaView style={styles.safeArea} edges={['top']} />;
+
+  // Apple 5.1.1(v) + store policy: account deletion and the legal pages stay
+  // reachable in-app — they live in the Profile pill's dropdown.
+  const menuItems: PillMenuItem[] = [
+    {
+      key: 'terms',
+      label: 'Terms of Service',
+      icon: 'document-text-outline',
+      onPress: () => Linking.openURL('https://spot-on.software/terms'),
+    },
+    {
+      key: 'privacy',
+      label: 'Privacy Policy',
+      icon: 'shield-checkmark-outline',
+      onPress: () => Linking.openURL('https://spot-on.software/privacy'),
+    },
+    {
+      key: 'delete',
+      label: 'Delete my account',
+      icon: 'trash-outline',
+      destructive: true,
+      busy: deletingAccount,
+      onPress: confirmDeleteAccount,
+    },
+  ];
 
   const memberSince = user.created_at
     ? new Date(user.created_at).toLocaleString('default', {
@@ -386,10 +429,19 @@ export default function ProfilePage() {
           showsVerticalScrollIndicator={false}
         >
           {/* Header: Profile pill + Logout square */}
-          <View style={styles.header}>
-            <View style={styles.profilePill}>
+          {menuOpen && <PillMenuBackdrop onPress={closeMenu} />}
+          <View style={[styles.header, pillMenuHostStyleForRows(3)]} pointerEvents='box-none'>
+            <PillMenu
+              open={menuOpen}
+              onToggle={() => setMenuOpen((o) => !o)}
+              onClose={closeMenu}
+              items={menuItems}
+              accessibilityLabel='Profile. Account options'
+              pillStyle={styles.profilePill}
+              minPanelWidth={screenWidth * 0.56}
+            >
               <Text style={styles.profilePillText}>Profile</Text>
-            </View>
+            </PillMenu>
             <TouchableOpacity
               style={styles.logoutButton}
               onPress={onSignOut}
@@ -545,7 +597,7 @@ export default function ProfilePage() {
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./PreviousReservations'))}
           >
-            <Text style={styles.bannerText}>Your{'\n'}Reservations</Text>
+            <Text style={styles.bannerText}>Activity</Text>
             <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
@@ -555,7 +607,7 @@ export default function ProfilePage() {
             activeOpacity={0.85}
             onPress={withLightHaptic(() => router.push('./YourSpots'))}
           >
-            <Text style={styles.bannerText}>Your Seller{'\n'}Account</Text>
+            <Text style={styles.bannerText}>Seller{'\n'}Account</Text>
             <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
@@ -592,34 +644,6 @@ export default function ProfilePage() {
             </TouchableOpacity>
           </View>
 
-          {/* Account deletion. Deliberately plain and at the end of the page:
-              Apple requires it be easy to find, not that it be prominent. */}
-          <TouchableOpacity
-            style={styles.deleteAccountButton}
-            onPress={confirmDeleteAccount}
-            disabled={deletingAccount}
-            activeOpacity={0.7}
-          >
-            {deletingAccount ? (
-              <ActivityIndicator color='rgba(200,0,0,0.9)' />
-            ) : (
-              <Text style={styles.deleteAccountText}>Delete my account</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Play/App Store both require the policies be reachable in-app,
-              not just gated behind the signup screen — this is the durable
-              home for users who created their account before this existed. */}
-          <View style={styles.legalRow}>
-            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
-              Terms of Service
-            </Text>
-            <Text style={styles.legalDivider}>·</Text>
-            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
-              Privacy Policy
-            </Text>
-          </View>
-
           {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
         </ScrollView>
@@ -641,8 +665,9 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
+    zIndex: 20,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
   profilePill: {
@@ -846,39 +871,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   penIcon: { width: EDIT_ICON, height: EDIT_ICON },
-
-  deleteAccountButton: {
-    alignSelf: 'center',
-    paddingVertical: screenWidth * 0.03,
-    paddingHorizontal: screenWidth * 0.06,
-    minHeight: screenWidth * 0.11,
-    justifyContent: 'center',
-  },
-  deleteAccountText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.035,
-    color: 'rgba(200,0,0,0.9)',
-    textDecorationLine: 'underline',
-  },
-
-  legalRow: {
-    flexDirection: 'row',
-    alignSelf: 'center',
-    alignItems: 'center',
-    gap: screenWidth * 0.025,
-    marginTop: screenWidth * 0.01,
-    marginBottom: screenWidth * 0.02,
-  },
-  legalLink: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.032,
-    color: 'rgba(0,0,0,0.45)',
-    textDecorationLine: 'underline',
-  },
-  legalDivider: {
-    fontSize: screenWidth * 0.032,
-    color: 'rgba(0,0,0,0.3)',
-  },
 
   errorText: {
     color: 'rgba(200,0,0,1)',

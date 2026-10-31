@@ -1,206 +1,158 @@
 /**
- * PreviousReservations — Renter reservation history. Lists upcoming/current
- * reservations (end_time >= now) and past reservations (end_time < now),
- * each in a vertical list using the ReservationInfoCard.
+ * Activity — the renter's bookings (Figma 746:6). File name is kept as
+ * PreviousReservations so the existing Profile entry point and route keep working.
+ *
+ *   Active     a booking in progress right now (live countdown badge)
+ *   Scheduled  booked but not started yet (starts-in badge, cancel pill when the 24h window is open)
+ *   Past       finished or cancelled bookings (compact rows)
+ *
+ * Tapping any card opens Activity Details.
  */
 
-import { useEffect, useState } from 'react';
-import { router } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import ActivityHeader from '@/src/components/activity/ActivityHeader';
+import SectionTab from '@/src/components/activity/SectionTab';
+import Entrance from '@/src/components/activity/Entrance';
+import { ActiveBookingCard, CompactBookingRow } from '@/src/components/activity/BookingCards';
+import { EmptyNote, ErrorNote, LoadingNote } from '@/src/components/activity/Notes';
+import { useCancelBooking } from '@/src/components/activity/useCancelBooking';
+import { openBookingDetails } from '@/src/components/activity/nav';
+import { useNow } from '@/src/components/activity/useNow';
+import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW } from '@/src/components/activity/layout';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Linking,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-
-import { supabase } from '@/src/utils/supabase';
-import { api, type ActiveReservation } from '@/src/utils/api';
-import { CustomFonts } from '@/src/constants/theme';
-import { withLightHaptic } from '@/src/utils/haptics';
-import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
-
-import logoAsset from '@/assets/images/spotonlogo.png';
-
-const { width: screenWidth } = Dimensions.get('window');
-const H_PAD = screenWidth * 0.06;
-const SECTION_GAP = screenWidth * 0.05;
-const TITLE_SIZE = screenWidth * 0.07;
-const LOGO_SIZE = screenWidth * 0.12;
-
-function formatStartsIn(startTime: Date, now: number): string {
-  const diff = startTime.getTime() - now;
-  if (diff <= 0) return 'Starting now.';
-  const days = Math.floor(diff / 86_400_000);
-  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
-  const mins = Math.floor((diff % 3_600_000) / 60_000);
-  const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (days === 0 && hours === 0) parts.push(`${mins} min`);
-  return `Starts in ${parts.join(' ')}.`;
-}
-
-function reportIssue(r: ActiveReservation) {
-  const subject = `Issue with reservation ${r.id}`;
-  const body =
-    `Reservation ID: ${r.id}\n` +
-    `Address: ${r.listingData.address}\n` +
-    `Start: ${r.start_time.toLocaleString()}\n` +
-    `End: ${r.end_time.toLocaleString()}\n\n` +
-    `Describe what went wrong:\n`;
-  const url =
-    `mailto:team.spotonapp@gmail.com` +
-    `?subject=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(body)}`;
-  Linking.openURL(url);
-}
+  canCancelBooking,
+  fetchRenterBookings,
+  getCurrentUserId,
+  groupBookings,
+  type Booking,
+} from '@/src/utils/activity';
 
 export default function PreviousReservations() {
-  const [upcoming, setUpcoming] = useState<ActiveReservation[] | null>(null);
-  const [past, setPast] = useState<ActiveReservation[] | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  const [bookings, setBookings] = useState<Booking[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Phase boundaries (scheduled -> active -> past) re-evaluate on this tick.
+  const now = useNow(15_000);
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const cancelReservation = (r: ActiveReservation) => {
-    Alert.alert(
-      'Cancel this reservation?',
-      'You’ll be refunded in full, including the service fee.',
-      [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Cancel reservation',
-          style: 'destructive',
-          onPress: async () => {
-            setCancellingId(r.id);
-            const result = await api.cancelReservation(r.id);
-            setCancellingId(null);
-            if (result.status === 'cancelled') {
-              setUpcoming((prev) => (prev ?? []).filter((x) => x.id !== r.id));
-            } else {
-              Alert.alert('Could not cancel', result.message);
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  useEffect(() => {
-    (async () => {
-      const { data: claimsResp } = await supabase.auth.getClaims();
-      if (!claimsResp) {
-        setUpcoming([]);
-        setPast([]);
+  const load = useCallback(async () => {
+    try {
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        setBookings([]);
         return;
       }
-      const userId = claimsResp.claims.sub;
-
-      const list = await api.getReservations(userId);
-      const now = Date.now();
-      const notExpired = (list ?? [])
-        .filter((r) => r.end_time.getTime() >= now)
-        .sort((a, b) => a.start_time.getTime() - b.start_time.getTime());
-      const expired = (list ?? []).filter((r) => r.end_time.getTime() < now);
-      setUpcoming(notExpired);
-      setPast(expired);
-    })();
+      setBookings(await fetchRenterBookings(userId));
+      setError(null);
+    } catch (err) {
+      console.warn('[Activity] load failed', err);
+      setError('We couldn’t load your activity. Check your connection and try again.');
+    }
   }, []);
 
+  // Reload whenever the page regains focus (e.g. back from a cancellation on the details screen).
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const { cancellingId, requestCancel } = useCancelBooking(() => {
+    load();
+  });
+
+  const grouped = useMemo(() => groupBookings(bookings ?? [], now), [bookings, now]);
+  const loading = bookings === null && error === null;
+  let order = 0;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backPill}
-            onPress={withLightHaptic(() => router.back())}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.backLabel}>Back</Text>
-          </TouchableOpacity>
-          <Image source={logoAsset} style={styles.logo} resizeMode='contain' />
-        </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: insets.bottom + SW * 0.06 },
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor='#000' />}
+      >
+        <Entrance index={order++}>
+          <ActivityHeader title='Activity' />
+        </Entrance>
 
-        <Text style={styles.title}>Your Reservations</Text>
-
-        <Text style={styles.sectionLabel}>Upcoming Reservations</Text>
-        {upcoming === null ? (
-          <ActivityIndicator color='#000' style={{ marginTop: SECTION_GAP }} />
-        ) : upcoming.length === 0 ? (
-          <Text style={styles.emptyText}>You have no upcoming reservations.</Text>
+        {error !== null && bookings === null ? (
+          <ErrorNote message={error} onRetry={load} />
         ) : (
-          <View style={styles.list}>
-            {upcoming.map((r) => {
-              const inProgress = r.start_time.getTime() <= now;
-              return (
-                <View key={r.id} style={styles.cardGroup}>
-                  <ReservationInfoCard
-                    address={r.listingData.address}
-                    endTime={r.end_time}
-                    totalPrice={r.total_price}
-                    photoUrl={r.listingData.photo_url}
-                    variant='current'
-                    secondaryLineOverride={inProgress ? undefined : formatStartsIn(r.start_time, now)}
-                    width={screenWidth - H_PAD * 2}
-                  />
-                  <View style={styles.actionRow}>
-                    {!inProgress && (
-                      <TouchableOpacity
-                        onPress={withLightHaptic(() => cancelReservation(r))}
-                        disabled={cancellingId === r.id}
-                        style={styles.actionButton}
-                      >
-                        {cancellingId === r.id ? (
-                          <ActivityIndicator color='rgba(200,0,0,0.9)' size='small' />
-                        ) : (
-                          <Text style={styles.cancelText}>Cancel reservation</Text>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      onPress={withLightHaptic(() => reportIssue(r))}
-                      style={styles.actionButton}
-                    >
-                      <Text style={styles.reportText}>Report an issue</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
+          <>
+            <View style={styles.section}>
+              <SectionTab label='Active' />
+              {loading ? (
+                <LoadingNote />
+              ) : grouped.active.length === 0 ? (
+                <EmptyNote text='Nothing in progress right now.' />
+              ) : (
+                grouped.active.map((b) => (
+                  <Entrance key={b.id} index={order++}>
+                    <ActiveBookingCard
+                      now={now}
+                      booking={b}
+                      role='renter'
+                      badge='remaining'
+                      onPress={() => openBookingDetails(b.id)}
+                    />
+                  </Entrance>
+                ))
+              )}
+            </View>
 
-        <Text style={styles.sectionLabel}>Past Reservations</Text>
-        {past === null ? (
-          <ActivityIndicator color='#000' style={{ marginTop: SECTION_GAP }} />
-        ) : past.length === 0 ? (
-          <Text style={styles.emptyText}>You haven’t completed a reservation yet.</Text>
-        ) : (
-          <View style={styles.list}>
-            {past.map((r) => (
-              <ReservationInfoCard
-                key={r.id}
-                address={r.listingData.address}
-                startTime={r.start_time}
-                endTime={r.end_time}
-                totalPrice={r.total_price}
-                photoUrl={r.listingData.photo_url}
-                variant='past'
-                width={screenWidth - H_PAD * 2}
-              />
-            ))}
-          </View>
+            {grouped.scheduled.length > 0 && (
+              <View style={styles.section}>
+                <SectionTab label='Scheduled' />
+                {grouped.scheduled.map((b) => (
+                  <Entrance key={b.id} index={order++}>
+                    <ActiveBookingCard
+                      now={now}
+                      booking={b}
+                      role='renter'
+                      badge='starts'
+                      onPress={() => openBookingDetails(b.id)}
+                      onCancel={canCancelBooking(b, 'renter', now) ? () => requestCancel(b) : undefined}
+                      cancelling={cancellingId === b.id}
+                    />
+                  </Entrance>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.section}>
+              <SectionTab label='Past' />
+              {loading ? (
+                <LoadingNote />
+              ) : grouped.past.length === 0 ? (
+                <EmptyNote text='You haven’t completed a reservation yet.' />
+              ) : (
+                grouped.past.map((b) => (
+                  <Entrance key={b.id} index={order++}>
+                    <CompactBookingRow
+                      now={now}
+                      booking={b}
+                      role='renter'
+                      onPress={() => openBookingDetails(b.id)}
+                    />
+                  </Entrance>
+                ))
+              )}
+            </View>
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -208,84 +160,11 @@ export default function PreviousReservations() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#DCDBD8',
-  },
+  safe: { flex: 1, backgroundColor: PAPER },
   scroll: {
     paddingHorizontal: H_PAD,
-    paddingBottom: screenWidth * 0.4,
+    paddingTop: SW * 0.02,
     gap: SECTION_GAP,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: screenWidth * 0.02,
-  },
-  backPill: {
-    height: screenWidth * 0.12,
-    paddingHorizontal: screenWidth * 0.07,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: screenWidth * 0.045,
-    color: '#FFFFFF',
-  },
-  logo: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
-  },
-  title: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: TITLE_SIZE,
-    color: '#000000',
-  },
-  sectionLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: screenWidth * 0.045,
-    color: '#000000',
-  },
-  list: {
-    gap: SECTION_GAP,
-    alignItems: 'center',
-  },
-  cardGroup: {
-    alignItems: 'center',
-    gap: screenWidth * 0.015,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: screenWidth * 0.05,
-  },
-  actionButton: {
-    paddingVertical: screenWidth * 0.015,
-    paddingHorizontal: screenWidth * 0.02,
-    minHeight: screenWidth * 0.06,
-    justifyContent: 'center',
-  },
-  cancelText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.033,
-    color: 'rgba(200,0,0,0.9)',
-    textDecorationLine: 'underline',
-  },
-  reportText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.033,
-    color: 'rgba(0,0,0,0.5)',
-    textDecorationLine: 'underline',
-  },
-  emptyText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.038,
-    color: 'rgba(0,0,0,0.6)',
-    textAlign: 'center',
-    marginTop: SECTION_GAP,
-  },
+  section: { gap: CARD_GAP },
 });

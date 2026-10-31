@@ -5,7 +5,7 @@
  * Expands left when the user has an active reservation to show a live countdown timer.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -21,11 +21,21 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useSegments } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import Reanimated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
+import { setAvatarUrl, useAvatarUrl } from '../utils/avatar';
+import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLIDE_MS } from './activity/motion';
+
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
@@ -58,7 +68,10 @@ export const MENU_BAR_HEIGHT = BAR_HEIGHT;
 
 type TabKey = 'profile' | 'home' | 'messages' | 'add';
 
-const VISIBLE_ROUTES = new Set(['Homescreen', 'Profile', 'Messages']);
+// Tab screens: the bar is shown.
+const TAB_ROUTES = new Set(['Homescreen', 'Profile', 'Messages']);
+// Screens with their own back button: the bar stays mounted but slides below the screen edge.
+const HIDDEN_ROUTES = new Set(['PreviousReservations', 'YourSpots', 'ActivityDetails']);
 
 const TAB_ORDER: Record<TabKey, number> = {
   profile: 0,
@@ -228,10 +241,11 @@ export default function MenuBar() {
   const insets      = useSafeAreaInsets();
   const segments    = useSegments() as string[];
   const currentRoute = segments[segments.length - 1];
-  const visible     = VISIBLE_ROUTES.has(currentRoute);
+  const hidden      = HIDDEN_ROUTES.has(currentRoute);
+  const visible     = TAB_ROUTES.has(currentRoute) || hidden;
 
   const [activeTab, setActiveTab] = useState<TabKey>(routeToTab(currentRoute) ?? 'home');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const avatarUrl = useAvatarUrl();
   const [endTime, setEndTime]     = useState<Date | null>(null);
   const [now, setNow]             = useState<number>(() => Date.now());
   const [screenW, setScreenW]     = useState(Dimensions.get('window').width);
@@ -248,17 +262,16 @@ export default function MenuBar() {
     addInfoAnim.setValue(Dimensions.get('window').height);
     setShowAddInfo(true);
     Animated.parallel([
-      // Spring to match the springy feel of the other card popups in the app.
-      Animated.spring(addInfoAnim, {
+      Animated.timing(addInfoAnim, {
         toValue: 0,
-        damping: 14,
-        stiffness: 130,
-        mass: 1,
+        duration: SLIDE_MS,
+        easing: RN_EASE_OUT_SLIDE,
         useNativeDriver: true,
       }),
       Animated.timing(addInfoBackdrop, {
         toValue: 1,
-        duration: 300,
+        duration: SLIDE_MS,
+        easing: RN_EASE_OUT_SLIDE,
         useNativeDriver: true,
       }),
     ]).start();
@@ -266,16 +279,16 @@ export default function MenuBar() {
 
   const closeAddInfo = (cb?: () => void) => {
     Animated.parallel([
-      Animated.spring(addInfoAnim, {
+      Animated.timing(addInfoAnim, {
         toValue: Dimensions.get('window').height,
-        damping: 14,
-        stiffness: 130,
-        mass: 1,
+        duration: SLIDE_MS,
+        easing: RN_EASE_IN_SLIDE,
         useNativeDriver: true,
       }),
       Animated.timing(addInfoBackdrop, {
         toValue: 0,
-        duration: 250,
+        duration: SLIDE_MS,
+        easing: RN_EASE_IN_SLIDE,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -288,6 +301,29 @@ export default function MenuBar() {
     const sub = Dimensions.addEventListener('change', ({ window }) => setScreenW(window.width));
     return () => sub.remove();
   }, []);
+
+  // ── Slide below the screen edge on back-button screens (UI thread) ──────────
+  // Distance covers the bar, the bottom safe area and its shadow, so nothing peeks.
+  const hiddenY = BAR_HEIGHT + insets.bottom + BOTTOM_OFFSET + 48;
+  const reducedMotion = useReducedMotion();
+  const slideY = useSharedValue(hidden ? hiddenY : 0);
+  const wasVisible = useRef(false);
+  useLayoutEffect(() => {
+    const target = hidden ? hiddenY : 0;
+    if (!visible) {
+      // Unmounted (instant). Park at the right spot for whatever comes next.
+      wasVisible.current = false;
+      slideY.set(target);
+      return;
+    }
+    if (!wasVisible.current || reducedMotion) {
+      slideY.set(target);
+    } else {
+      slideY.set(withTiming(target, { duration: SLIDE_MS, easing: hidden ? EASE_IN_SLIDE : EASE_OUT_SLIDE }));
+    }
+    wasVisible.current = true;
+  }, [hidden, visible, hiddenY, reducedMotion, slideY]);
+  const slideStyle = useAnimatedStyle(() => ({ transform: [{ translateY: slideY.get() }] }));
 
   useEffect(() => {
     const t = routeToTab(currentRoute);
@@ -433,7 +469,12 @@ export default function MenuBar() {
 
   return (
     <>
-    <View pointerEvents="box-none" style={[styles.wrapper, { bottom: insets.bottom + BOTTOM_OFFSET }]}>
+    <Reanimated.View
+      pointerEvents={hidden ? 'none' : 'box-none'}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+      style={[styles.wrapper, { bottom: insets.bottom + BOTTOM_OFFSET }, slideStyle]}
+    >
       <View style={styles.barRow}>
         {/* Main pill — profile, home, messages */}
         <Animated.View
@@ -549,7 +590,7 @@ export default function MenuBar() {
           </Animated.View>
         </TouchableOpacity>
       </View>
-    </View>
+    </Reanimated.View>
 
     {/* Payout-info popup — slides up when tapping +, mirrors the create-listing
         rate popups (black card, Continue button). */}
@@ -562,18 +603,17 @@ export default function MenuBar() {
         style={[
           styles.addInfoCard,
           {
-            bottom: W * 0.05 + insets.bottom,
-            paddingTop: W * 0.055,
-            paddingBottom: W * 0.045,
-            paddingHorizontal: W * 0.06,
-            borderRadius: W * 0.07,
+            bottom: SHEET_BOTTOM,
+            paddingTop: W * 0.08,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+            paddingHorizontal: W * 0.08,
             transform: [{ translateY: addInfoAnim }],
           },
         ]}
       >
         <Image
           source={spotonLogoCircle}
-          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.07, right: W * 0.09 }]}
           resizeMode="contain"
         />
 
@@ -669,8 +709,10 @@ const styles = StyleSheet.create({
   },
   addInfoCard: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
     backgroundColor: '#000',
     zIndex: 20,
     elevation: 12,

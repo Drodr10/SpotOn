@@ -1,258 +1,273 @@
 /**
- * YourSpots — owner-facing page. Shows total earnings to date and the user's
- * active listings.
+ * Seller Account — the host's page (Figma 786:2 / 787:39 / 787:122). File name is
+ * kept as YourSpots so the existing Profile entry point and route keep working.
+ *
+ *   Stat cards   Payouts Remaining + Lifetime Earnings (per-month breakdown),
+ *                both derived from the host's reservations and their payout state
+ *   Active       a booking of one of your spots happening now (live countdown)
+ *   Scheduled    upcoming bookings of your spots
+ *   Past         finished / cancelled bookings (compact rows)
+ *   Manage Listings -> dark sheet; swipe a listing left to remove it
  */
 
-import { useEffect, useState } from 'react';
-import { router } from 'expo-router';
-import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  ImageBackground,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { supabase } from '@/src/utils/supabase';
-import { api, type ActiveReservation, type ListingForCard } from '@/src/utils/api';
 import { CustomFonts } from '@/src/constants/theme';
-import { withLightHaptic } from '@/src/utils/haptics';
-import { getPrimaryRate } from '@/src/utils/listingPrice';
-import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
-
-import logoAsset from '@/assets/images/spotonlogo.png';
-import auraGradient from '@/assets/images/profilePage/aura_gradient.png';
-
-const { width: screenWidth } = Dimensions.get('window');
-const H_PAD = screenWidth * 0.06;
-const SECTION_GAP = screenWidth * 0.05;
-const TITLE_SIZE = screenWidth * 0.07;
-const SUB_TITLE = screenWidth * 0.045;
-const LOGO_SIZE = screenWidth * 0.12;
-const CARD_WIDTH = screenWidth - H_PAD * 2;
-
-type OwnerListing = ListingForCard & { is_active?: boolean };
+import ActivityHeader from '@/src/components/activity/ActivityHeader';
+import SectionTab from '@/src/components/activity/SectionTab';
+import Entrance from '@/src/components/activity/Entrance';
+import { ActiveBookingCard, CompactBookingRow } from '@/src/components/activity/BookingCards';
+import { EmptyNote, ErrorNote, LoadingNote } from '@/src/components/activity/Notes';
+import { openBookingDetails } from '@/src/components/activity/nav';
+import { useNow } from '@/src/components/activity/useNow';
+import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW } from '@/src/components/activity/layout';
+import StatCards from '@/src/components/seller/StatCards';
+import PayoutSheet from '@/src/components/seller/PayoutSheet';
+import ListingsSheet, { type RemoveResult } from '@/src/components/seller/ListingsSheet';
+import {
+  computeEarnings,
+  deactivateListing,
+  fetchHostDashboard,
+  fetchListingBookings,
+  fetchPayoutsEnabled,
+  getChatTarget,
+  getCurrentUserId,
+  groupBookings,
+  listingRemovalBlock,
+  type Booking,
+  type BookingListing,
+  type HostDashboard,
+} from '@/src/utils/activity';
 
 export default function YourSpots() {
-  const [listings, setListings] = useState<OwnerListing[] | null>(null);
-  const [activeBookings, setActiveBookings] = useState<ActiveReservation[] | null>(null);
-  const [totalEarnings, setTotalEarnings] = useState<number | null>(null);
+  const insets = useSafeAreaInsets();
+  const [dash, setDash] = useState<HostDashboard | null>(null);
+  const [payoutsEnabled, setPayoutsEnabled] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [listingsOpen, setListingsOpen] = useState(false);
+  const [payoutsOpen, setPayoutsOpen] = useState(false);
+  const now = useNow(15_000);
 
-  useEffect(() => {
-    (async () => {
-      const { data: claimsResp } = await supabase.auth.getClaims();
-      if (!claimsResp) {
-        setListings([]);
-        setActiveBookings([]);
-        setTotalEarnings(0);
+  const load = useCallback(async () => {
+    try {
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        setDash({ listings: [], bookings: [] });
         return;
       }
-      const ownerId = claimsResp.claims.sub;
-
-      const { data: listingRows } = await supabase
-        .from('listings')
-        .select(
-          'id, owner_id, address, price_per_hour, photo_url, hourly_rate, daily_rate, weekly_rate, monthly_rate, is_active',
-        )
-        .eq('owner_id', ownerId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-      const ownerListings = (listingRows ?? []) as OwnerListing[];
-      setListings(ownerListings);
-
-      const bookings = await api.getOwnerActiveBookings(ownerId);
-      setActiveBookings(bookings ?? []);
-
-      // Sum total_price across every reservation made on this owner's listings.
-      // Done in a single query against listing_id IN (...) — works for both
-      // active and historical owned listings.
-      const allListingIdsResp = await supabase
-        .from('listings')
-        .select('id')
-        .eq('owner_id', ownerId);
-      const allListingIds = (allListingIdsResp.data ?? []).map((l: { id: string }) => l.id);
-      if (allListingIds.length === 0) {
-        setTotalEarnings(0);
-      } else {
-        const { data: earnRows } = await supabase
-          .from('reservations')
-          .select('total_price')
-          .in('listing_id', allListingIds);
-        const total = (earnRows ?? []).reduce(
-          (sum, r: { total_price: number | null }) => sum + (r.total_price ?? 0),
-          0,
-        );
-        setTotalEarnings(total);
-      }
-    })();
+      const [dashboard, enabled] = await Promise.all([
+        fetchHostDashboard(userId),
+        fetchPayoutsEnabled(userId),
+      ]);
+      setDash(dashboard);
+      setPayoutsEnabled(enabled);
+      setError(null);
+    } catch (err) {
+      console.warn('[SellerAccount] load failed', err);
+      setError('We couldn’t load your seller account. Check your connection and try again.');
+    }
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const bookings = dash?.bookings;
+  const earnings = useMemo(() => (bookings ? computeEarnings(bookings, now) : null), [bookings, now]);
+  const grouped = useMemo(() => groupBookings(bookings ?? [], now), [bookings, now]);
+
+  const messageRenter = useCallback(async (b: Booking) => {
+    try {
+      const target = await getChatTarget(b, 'host');
+      router.push({ pathname: '/Chat', params: target } as any);
+    } catch (err: any) {
+      Alert.alert('Could not open chat', err?.message ?? 'Please try again.');
+    }
+  }, []);
+
+  const removeListing = useCallback(async (listing: BookingListing): Promise<RemoveResult> => {
+    try {
+      const userId = await getCurrentUserId();
+      if (!userId) return { ok: false, message: 'You appear to be signed out. Please sign in again.' };
+      // Re-check against fresh rows: the on-screen list may be stale.
+      const fresh = await fetchListingBookings(listing.id);
+      const reason = listingRemovalBlock(listing.id, fresh, Date.now());
+      if (reason) return { ok: false, message: reason };
+      const done = await deactivateListing(listing.id, userId);
+      if (!done) return { ok: false, message: 'We couldn’t remove this listing. Please try again.' };
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, message: err?.message ?? 'Something went wrong. Please try again.' };
+    }
+  }, []);
+
+  const onRemoved = useCallback((listingId: string) => {
+    setDash((prev) =>
+      prev && {
+        listings: prev.listings.filter((l) => l.id !== listingId),
+        bookings: prev.bookings.filter((b) => b.listingId !== listingId),
+      },
+    );
+  }, []);
+
+  const loading = dash === null && error === null;
+  const noListings = dash !== null && dash.listings.length === 0;
+  let order = 0;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backPill}
-            onPress={withLightHaptic(() => router.back())}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.backLabel}>Back</Text>
-          </TouchableOpacity>
-          <Image source={logoAsset} style={styles.logo} resizeMode='contain' />
-        </View>
-
-        <Text style={styles.title}>Your Seller Account</Text>
-
-        {/* Total earnings — aura-gradient pill card, same width as listings */}
-        <ImageBackground
-          source={auraGradient}
-          style={styles.earningsCard}
-          imageStyle={styles.earningsCardBg}
-          resizeMode='cover'
+    <View style={styles.root}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingBottom: insets.bottom + SW * 0.06 },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor='#000' />}
         >
-          <Text style={styles.earningsLabel}>Total Earnings</Text>
-          <Text style={styles.earningsAmount}>
-            {totalEarnings === null ? '—' : `$${totalEarnings.toFixed(2)}`}
-          </Text>
-        </ImageBackground>
+          <Entrance index={order++}>
+            <ActivityHeader title='Seller Account' />
+          </Entrance>
 
-        {/* Active bookings on the user's listings. */}
-        <Text style={styles.sectionLabel}>Active Bookings</Text>
-        {activeBookings === null ? (
-          <ActivityIndicator color='#000' />
-        ) : activeBookings.length === 0 ? (
-          <Text style={styles.emptyText}>No active bookings on your spots.</Text>
-        ) : (
-          <View style={styles.list}>
-            {activeBookings.map((b) => {
-              const vehicleLine = b.vehicleSummary
-                ? `Vehicle: ${b.vehicleSummary.color} ${b.vehicleSummary.make} ${b.vehicleSummary.model}${b.vehicleSummary.licensePlate ? ` • ${b.vehicleSummary.licensePlate}` : ''}`
-                : undefined;
-              return (
-                <ReservationInfoCard
-                  key={b.id}
-                  address={b.listingData.address}
-                  endTime={b.end_time}
-                  totalPrice={b.total_price}
-                  photoUrl={b.listingData.photo_url}
-                  variant='current'
-                  secondaryLineOverride={vehicleLine}
-                  width={CARD_WIDTH}
+          {error !== null && dash === null ? (
+            <ErrorNote message={error} onRetry={load} />
+          ) : (
+            <>
+              <Entrance index={order++}>
+                <StatCards
+                  earnings={earnings}
+                  hasListings={!noListings}
+                  onPayoutsPress={() => setPayoutsOpen(true)}
+                  onManagePress={() => setListingsOpen(true)}
                 />
-              );
-            })}
-          </View>
-        )}
+              </Entrance>
 
-        {/* My listings */}
-        <Text style={styles.sectionLabel}>My Listings</Text>
-        {listings === null ? (
-          <ActivityIndicator color='#000' />
-        ) : listings.length === 0 ? (
-          <Text style={styles.emptyText}>You haven’t posted any listings yet.</Text>
-        ) : (
-          <View style={styles.list}>
-            {listings.map((l) => {
-              const rate = getPrimaryRate(l);
-              const pillLabel = rate
-                ? `$${rate.value.toFixed(2)} / ${rate.unit}`
-                : 'Active';
-              return (
-                <ReservationInfoCard
-                  key={l.id}
-                  address={l.address}
-                  photoUrl={l.photo_url}
-                  variant='listing'
-                  pillLabel={pillLabel}
-                  width={CARD_WIDTH}
-                />
-              );
-            })}
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+              <View style={styles.section}>
+                <SectionTab label='Active' />
+                {loading ? (
+                  <LoadingNote />
+                ) : grouped.active.length === 0 ? (
+                  <EmptyNote
+                    text={
+                      noListings
+                        ? 'You haven’t posted any listings yet. Tap + to list your first spot.'
+                        : 'No active bookings on your spots.'
+                    }
+                  />
+                ) : (
+                  grouped.active.map((b) => (
+                    <Entrance key={b.id} index={order++}>
+                      <ActiveBookingCard
+                        now={now}
+                        booking={b}
+                        role='host'
+                        badge='remaining'
+                        onPress={() => openBookingDetails(b.id)}
+                        onMessage={() => messageRenter(b)}
+                      />
+                    </Entrance>
+                  ))
+                )}
+              </View>
+
+              <View style={styles.section}>
+                <SectionTab label='Scheduled' />
+                {loading ? (
+                  <LoadingNote />
+                ) : grouped.scheduled.length === 0 ? (
+                  <EmptyNote text='No upcoming bookings yet.' />
+                ) : (
+                  grouped.scheduled.map((b) => (
+                    <Entrance key={b.id} index={order++}>
+                      <ActiveBookingCard
+                        now={now}
+                        booking={b}
+                        role='host'
+                        badge='starts'
+                        onPress={() => openBookingDetails(b.id)}
+                        onMessage={() => messageRenter(b)}
+                      />
+                    </Entrance>
+                  ))
+                )}
+              </View>
+
+              <View style={styles.section}>
+                <SectionTab label='Past' />
+                {loading ? (
+                  <LoadingNote />
+                ) : grouped.past.length === 0 ? (
+                  <EmptyNote text='Finished bookings will show up here.' />
+                ) : (
+                  grouped.past.map((b) => (
+                    <Entrance key={b.id} index={order++}>
+                      <CompactBookingRow
+                        now={now}
+                        booking={b}
+                        role='host'
+                        onPress={() => openBookingDetails(b.id)}
+                      />
+                    </Entrance>
+                  ))
+                )}
+              </View>
+
+              {dash !== null && (
+                <Text style={styles.footnote}>
+                  Amounts are your payout. SpotOn’s service fee is paid by the renter on top of your rate.
+                </Text>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+
+      <ListingsSheet
+        visible={listingsOpen}
+        onClose={() => setListingsOpen(false)}
+        listings={dash?.listings ?? []}
+        bookings={dash?.bookings ?? []}
+        now={now}
+        onRemove={removeListing}
+        onRemoved={onRemoved}
+      />
+      <PayoutSheet
+        visible={payoutsOpen}
+        onClose={() => setPayoutsOpen(false)}
+        remaining={earnings?.remaining ?? 0}
+        payoutsEnabled={payoutsEnabled}
+        onSetupReturned={load}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#DCDBD8',
-  },
+  root: { flex: 1, backgroundColor: PAPER },
+  safe: { flex: 1 },
   scroll: {
     paddingHorizontal: H_PAD,
-    paddingBottom: screenWidth * 0.4,
+    paddingTop: SW * 0.02,
     gap: SECTION_GAP,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: screenWidth * 0.02,
-  },
-  backPill: {
-    height: screenWidth * 0.12,
-    paddingHorizontal: screenWidth * 0.07,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: screenWidth * 0.045,
-    color: '#FFFFFF',
-  },
-  logo: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
-  },
-  title: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: TITLE_SIZE,
-    color: '#000000',
-  },
-  sectionLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: SUB_TITLE,
-    color: '#000000',
-  },
-  list: {
-    gap: SECTION_GAP,
-    alignItems: 'center',
-  },
-  emptyText: {
+  section: { gap: CARD_GAP },
+  footnote: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.038,
-    color: 'rgba(0,0,0,0.6)',
+    fontSize: SW * 0.032,
+    color: 'rgba(0,0,0,0.55)',
     textAlign: 'center',
-  },
-  earningsCard: {
-    width: CARD_WIDTH,
-    alignSelf: 'center',
-    borderRadius: CARD_WIDTH * 0.085,
-    paddingHorizontal: screenWidth * 0.06,
-    paddingVertical: screenWidth * 0.05,
-    overflow: 'hidden',
-  },
-  earningsCardBg: {
-    borderRadius: CARD_WIDTH * 0.085,
-  },
-  earningsLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: screenWidth * 0.042,
-    color: '#000000',
-  },
-  earningsAmount: {
-    fontFamily: CustomFonts.BevellierMedium,
-    fontSize: screenWidth * 0.085,
-    color: '#000000',
-    marginTop: screenWidth * 0.01,
+    paddingHorizontal: SW * 0.04,
   },
 });

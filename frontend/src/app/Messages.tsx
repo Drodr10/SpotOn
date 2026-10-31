@@ -9,7 +9,7 @@
  * floating MenuBar (rendered in _layout) stays at the bottom.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,13 +19,15 @@ import {
   StyleSheet,
   Dimensions,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { supabase } from '../utils/supabase';
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
+import { fetchBlockedIds, unblockUser } from '@/src/utils/moderation';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 import defaultAvatar from '@/assets/images/temprofileicon.png';
@@ -41,6 +43,12 @@ interface ReservationInfo {
   start: Date;
   end: Date;
   status: string | null;
+}
+
+interface BlockedPerson {
+  id: string;
+  name: string;
+  avatar: string | null;
 }
 
 interface Conversation {
@@ -126,6 +134,50 @@ export default function MessagesScreen() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const mounted = useRef(true);
+
+  // People the signed-in user has blocked. Their conversations are hidden from
+  // the inbox (App Store 1.2); they stay reachable in the "Blocked" section so a
+  // block can always be undone. Re-read whenever the screen regains focus, since
+  // blocking happens inside Chat, which sits on top of this screen.
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [blockedPeople, setBlockedPeople] = useState<BlockedPerson[]>([]);
+  const [blockedOpen, setBlockedOpen] = useState(false);
+
+  const loadBlocked = useCallback(async () => {
+    const ids = await fetchBlockedIds();
+    let people: BlockedPerson[] = [];
+    if (ids.size > 0) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', [...ids]);
+      const byId = new Map((data ?? []).map((p: any) => [p.id, p]));
+      people = [...ids].map((id) => {
+        const p: any = byId.get(id);
+        return { id, name: p?.full_name ?? 'Unknown', avatar: p?.avatar_url ?? null };
+      });
+    }
+    if (!mounted.current) return;
+    setBlockedIds(ids);
+    setBlockedPeople(people);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBlocked();
+    }, [loadBlocked]),
+  );
+
+  const handleUnblock = (person: BlockedPerson) => {
+    withLightHaptic(async () => {
+      try {
+        await unblockUser(person.id);
+        await loadBlocked();
+      } catch (e) {
+        Alert.alert("Couldn't unblock", e instanceof Error ? e.message : 'Please try again.');
+      }
+    })();
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -253,10 +305,11 @@ export default function MessagesScreen() {
       } as any),
     );
 
-  const activeConvs = conversations
+  const visibleConversations = conversations.filter((c) => !blockedIds.has(c.otherUserId));
+  const activeConvs = visibleConversations
     .filter((c) => c.category === 'active')
     .sort((a, b) => (a.reservation!.end.getTime() - b.reservation!.end.getTime()));
-  const pastConvs = conversations.filter((c) => c.category === 'past');
+  const pastConvs = visibleConversations.filter((c) => c.category === 'past');
 
   const Avatar = ({ url, size }: { url: string | null; size: number }) => (
     <Image
@@ -276,7 +329,7 @@ export default function MessagesScreen() {
 
       {loading ? (
         <ActivityIndicator size="large" color="#000" style={styles.loader} />
-      ) : conversations.length === 0 ? (
+      ) : visibleConversations.length === 0 && blockedPeople.length === 0 ? (
         <Text style={styles.empty}>No conversations yet</Text>
       ) : (
         <ScrollView
@@ -322,6 +375,46 @@ export default function MessagesScreen() {
               </View>
             </TouchableOpacity>
           ))}
+
+          {visibleConversations.length === 0 && (
+            <Text style={styles.empty}>No conversations yet</Text>
+          )}
+
+          {/* Blocked people — collapsed by default; the only place a block made
+              from a now-hidden conversation can be undone. */}
+          {blockedPeople.length > 0 && (
+            <View style={styles.blockedSection}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={withLightHaptic(() => setBlockedOpen((o) => !o))}
+                style={styles.blockedToggle}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: blockedOpen }}
+              >
+                <Text style={styles.blockedToggleText}>
+                  Blocked users ({blockedPeople.length})
+                </Text>
+              </TouchableOpacity>
+              {blockedOpen &&
+                blockedPeople.map((person) => (
+                  <View key={person.id} style={styles.blockedRow}>
+                    <Avatar url={person.avatar} size={PAST_AVATAR * 0.7} />
+                    <Text style={[styles.name, styles.blockedName]} numberOfLines={1}>
+                      {person.name}
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => handleUnblock(person)}
+                      style={styles.unblockBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Unblock ${person.name}`}
+                    >
+                      <Text style={styles.unblockText}>Unblock</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+            </View>
+          )}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -395,6 +488,44 @@ const styles = StyleSheet.create({
     paddingVertical: screenWidth * 0.05,
     paddingHorizontal: screenWidth * 0.05,
     gap: screenWidth * 0.035,
+  },
+
+  // Blocked users section.
+  blockedSection: { marginTop: screenWidth * 0.02, gap: screenWidth * 0.02 },
+  blockedToggle: {
+    alignSelf: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: screenWidth * 0.04,
+  },
+  blockedToggleText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.035,
+    color: 'rgba(0,0,0,0.5)',
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F4F4F4',
+    borderRadius: 999,
+    paddingVertical: screenWidth * 0.025,
+    paddingLeft: screenWidth * 0.04,
+    paddingRight: screenWidth * 0.025,
+    gap: screenWidth * 0.03,
+  },
+  blockedName: { flex: 1 },
+  unblockBtn: {
+    height: screenWidth * 0.1,
+    paddingHorizontal: screenWidth * 0.045,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unblockText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: screenWidth * 0.035,
+    color: '#FFFFFF',
   },
 
   rowText: { flex: 1 },

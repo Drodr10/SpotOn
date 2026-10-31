@@ -60,6 +60,15 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SpotOn needs access to your camera to take a photo of a parking space you're listing.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {
