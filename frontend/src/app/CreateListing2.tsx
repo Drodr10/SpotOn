@@ -49,6 +49,7 @@ import * as Location from 'expo-location';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 import { supabase } from '../utils/supabase';
@@ -777,7 +778,8 @@ export default function CreateListing2() {
         style={[
           styles.ratePopup,
           {
-            bottom: W * 0.05 + insets.bottom,
+            bottom: SHEET_BOTTOM,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
             transform: [{ translateY: opts.anim }],
           },
         ]}
@@ -882,7 +884,8 @@ export default function CreateListing2() {
           styles.ratePopup,
           styles.totalsPopup,
           {
-            bottom: W * 0.05 + insets.bottom,
+            bottom: SHEET_BOTTOM,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
             transform: [{ translateY: totalsPopupAnim }],
           },
         ]}
@@ -1360,13 +1363,14 @@ const styles = StyleSheet.create({
   // ── Rate Popups (Daily + Monthly share these styles) ───────────────────────
   ratePopup: {
     position: 'absolute',
-    left: H_PAD,
-    right: H_PAD,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
     backgroundColor: '#000',
-    borderRadius: BOTTOM_ACTION_RADIUS,
-    paddingTop: W * 0.045,
-    paddingBottom: W * 0.045,
-    paddingHorizontal: W * 0.05,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
+    paddingTop: W * 0.07,
+    paddingBottom: W * 0.06,
+    paddingHorizontal: W * 0.08,
     zIndex: 20,
     elevation: 12,
     shadowColor: '#000',
@@ -1432,14 +1436,12 @@ const styles = StyleSheet.create({
 
   // ── Totals popup overrides ─────────────────────────────────────────────────
   totalsPopup: {
-    paddingTop: W * 0.055,
-    paddingBottom: W * 0.045,
-    paddingHorizontal: W * 0.06,
+    paddingTop: W * 0.08,
   },
   totalsLogo: {
     position: 'absolute',
-    top: W * 0.04,
-    right: W * 0.05,
+    top: W * 0.07,
+    right: W * 0.09,
     opacity: 0.9,
     zIndex: 1,
   },

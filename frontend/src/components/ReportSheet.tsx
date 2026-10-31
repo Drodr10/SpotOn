@@ -174,6 +174,8 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
       );
     } else {
       slideOut(translateY, hiddenY, (finished) => {
+       'worklet';
+        'worklet';
         if (finished) scheduleOnRN(setMounted, false);
       });
     }
@@ -192,6 +194,8 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
       );
     } else {
       slideOut(translateY, hiddenY, (finished) => {
+       'worklet';
+        'worklet';
         if (finished) scheduleOnRN(finishClose);
       });
     }
@@ -254,6 +258,7 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
           const projected = translateY.get() + project(e.velocityY);
           if (projected > 180) {
             slideOut(translateY, hiddenY, (finished) => {
+              'worklet';
               if (finished) scheduleOnRN(finishClose);
             });
           } else {

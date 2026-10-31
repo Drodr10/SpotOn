@@ -87,6 +87,8 @@ export default function BottomSheet({
       }));
     } else {
       slideOut(ty, H, (f) => {
+       'worklet';
+        'worklet';
         if (f) scheduleOnRN(unmount);
       });
     }
@@ -117,6 +119,7 @@ export default function BottomSheet({
           const projected = ty.get() + project(e.velocityY);
           if (projected > sheetH.get() * 0.4) {
             slideOut(ty, H, (f) => {
+              'worklet';
               if (f) scheduleOnRN(onClose);
             });
           } else {

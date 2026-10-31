@@ -232,6 +232,7 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
           if (y > cardHeight * 0.3 || projected > cardHeight * 0.45 || e.velocityY > 1000) {
             closing.set(true);
             slideOut(sheetY, winH, (finished) => {
+              'worklet';
               if (finished) scheduleOnRN(onBack);
             });
           } else {

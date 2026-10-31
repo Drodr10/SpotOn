@@ -34,6 +34,8 @@ import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
 import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLIDE_MS } from './activity/motion';
 
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
+
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
 import homeBlack from '../../assets/images/menubar/home_black.png';
@@ -600,18 +602,17 @@ export default function MenuBar() {
         style={[
           styles.addInfoCard,
           {
-            bottom: W * 0.05 + insets.bottom,
-            paddingTop: W * 0.055,
-            paddingBottom: W * 0.045,
-            paddingHorizontal: W * 0.06,
-            borderRadius: W * 0.07,
+            bottom: SHEET_BOTTOM,
+            paddingTop: W * 0.08,
+            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+            paddingHorizontal: W * 0.08,
             transform: [{ translateY: addInfoAnim }],
           },
         ]}
       >
         <Image
           source={spotonLogoCircle}
-          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.05, right: W * 0.06 }]}
+          style={[styles.addInfoLogo, { width: W * 0.075, height: W * 0.075, top: W * 0.07, right: W * 0.09 }]}
           resizeMode="contain"
         />
 
@@ -707,8 +708,10 @@ const styles = StyleSheet.create({
   },
   addInfoCard: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
     backgroundColor: '#000',
     zIndex: 20,
     elevation: 12,
