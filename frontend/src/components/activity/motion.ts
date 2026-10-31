@@ -9,6 +9,10 @@ import { Easing, FadeIn, FadeInDown, useReducedMotion } from 'react-native-reani
 
 export const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 export const EASE_IN_OUT = Easing.bezier(0.77, 0, 0.175, 1);
+// Menu bar leaving: starts slow, accelerates out of view.
+export const EASE_IN_SLIDE = Easing.bezier(0.55, 0, 0.85, 0.3);
+// Menu bar returning: arrives fast, settles slowly into place.
+export const EASE_OUT_SLIDE = Easing.bezier(0.15, 0.7, 0.3, 1);
 
 /** Sheet / reposition springs (Apple designer parameters). */
 export const SPRING_SHEET = { duration: 300, dampingRatio: 0.8 } as const;

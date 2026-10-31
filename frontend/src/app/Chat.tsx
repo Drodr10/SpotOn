@@ -424,6 +424,7 @@ export default function ChatScreen() {
             pillWidth={pillSize.width}
             pillHeight={pillSize.height}
             items={menuItems}
+            minWidth={screenWidth * 0.56}
           />
           <Pressable
             onPress={openMenu}

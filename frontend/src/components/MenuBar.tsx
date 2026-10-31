@@ -32,7 +32,7 @@ import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
-import { EASE_OUT } from './activity/motion';
+import { EASE_IN_SLIDE, EASE_OUT_SLIDE } from './activity/motion';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
@@ -69,7 +69,7 @@ type TabKey = 'profile' | 'home' | 'messages' | 'add';
 const TAB_ROUTES = new Set(['Homescreen', 'Profile', 'Messages']);
 // Screens with their own back button: the bar stays mounted but slides below the screen edge.
 const HIDDEN_ROUTES = new Set(['PreviousReservations', 'YourSpots', 'ActivityDetails']);
-const SLIDE_MS = 320;
+const SLIDE_MS = 650;
 
 const TAB_ORDER: Record<TabKey, number> = {
   profile: 0,
@@ -318,7 +318,7 @@ export default function MenuBar() {
     if (!wasVisible.current || reducedMotion) {
       slideY.set(target);
     } else {
-      slideY.set(withTiming(target, { duration: SLIDE_MS, easing: EASE_OUT }));
+      slideY.set(withTiming(target, { duration: SLIDE_MS, easing: hidden ? EASE_IN_SLIDE : EASE_OUT_SLIDE }));
     }
     wasVisible.current = true;
   }, [hidden, visible, hiddenY, reducedMotion, slideY]);

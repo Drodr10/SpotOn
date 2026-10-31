@@ -72,7 +72,7 @@ export interface PillMenuItem {
 const INSET = screenWidth * 0.025;
 export const PILL_MENU_ROW_HEIGHT = Math.max(48, screenWidth * 0.125);
 const SUBTITLE_EXTRA = screenWidth * 0.035;
-const DETACH_GAP = 8;
+export const DETACH_GAP = 8;
 
 /** Overhang for a fixed number of plain rows (Chat's two-row menu). */
 export const pillMenuOverhang = (rows: number) => PILL_MENU_ROW_HEIGHT * rows + 24;
