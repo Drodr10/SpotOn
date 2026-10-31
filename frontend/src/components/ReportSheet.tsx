@@ -41,13 +41,13 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
+import { slideIn, slideOut } from '@/src/components/activity/motion';
 import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 import { blockUser, reportListing, reportUser } from '@/src/utils/moderation';
 import {
@@ -164,17 +164,18 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
   useEffect(() => {
     if (visible) {
       clearCloseTimer();
+      if (reduced) translateY.set(withTiming(0, { duration: 150, easing: EASE_OUT }));
+      else slideIn(translateY, hiddenY);
+    } else if (reduced) {
       translateY.set(
-        reduced
-          ? withTiming(0, { duration: 150, easing: EASE_OUT })
-          : withSpring(0, { duration: 300, dampingRatio: 0.8 }),
-      );
-    } else {
-      translateY.set(
-        withTiming(hiddenY, { duration: reduced ? 100 : 220, easing: EASE_OUT }, (finished) => {
+        withTiming(hiddenY, { duration: 100, easing: EASE_OUT }, (finished) => {
           if (finished) scheduleOnRN(setMounted, false);
         }),
       );
+    } else {
+      slideOut(translateY, hiddenY, (finished) => {
+        if (finished) scheduleOnRN(setMounted, false);
+      });
     }
   }, [visible, reduced, hiddenY, translateY, clearCloseTimer]);
 
@@ -183,11 +184,17 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
   /** Animate out, then tell the parent. Used by every dismissal path. */
   const requestClose = useCallback(() => {
     clearCloseTimer();
-    translateY.set(
-      withTiming(hiddenY, { duration: reduced ? 100 : 220, easing: EASE_OUT }, (finished) => {
+    if (reduced) {
+      translateY.set(
+        withTiming(hiddenY, { duration: 100, easing: EASE_OUT }, (finished) => {
+          if (finished) scheduleOnRN(finishClose);
+        }),
+      );
+    } else {
+      slideOut(translateY, hiddenY, (finished) => {
         if (finished) scheduleOnRN(finishClose);
-      }),
-    );
+      });
+    }
   }, [clearCloseTimer, finishClose, hiddenY, reduced, translateY]);
 
   const submit = async () => {
@@ -246,19 +253,11 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
         .onEnd((e) => {
           const projected = translateY.get() + project(e.velocityY);
           if (projected > 180) {
-            translateY.set(
-              withSpring(
-                hiddenY,
-                { duration: 300, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true },
-                (finished) => {
-                  if (finished) scheduleOnRN(finishClose);
-                },
-              ),
-            );
+            slideOut(translateY, hiddenY, (finished) => {
+              if (finished) scheduleOnRN(finishClose);
+            });
           } else {
-            translateY.set(
-              withSpring(0, { duration: 300, dampingRatio: 0.8, velocity: e.velocityY }),
-            );
+            slideIn(translateY, hiddenY);
           }
         }),
     [dragStart, finishClose, hiddenY, translateY],
@@ -271,7 +270,7 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
     return { transform: [{ translateY: translateY.get() }] };
   });
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(translateY.get(), [0, hiddenY * 0.6], [1, 0], Extrapolation.CLAMP),
+    opacity: interpolate(translateY.get(), [0, hiddenY], [1, 0], Extrapolation.CLAMP),
   }));
 
   if (!mounted) return null;

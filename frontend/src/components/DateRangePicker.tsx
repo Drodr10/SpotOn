@@ -22,6 +22,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import accessibilityImg from '@/assets/images/accessibility.png';
 import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
+import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '@/src/components/activity/motion';
 
 const { width: W } = Dimensions.get('window');
 const H_PAD = W * 0.06;
@@ -113,13 +114,12 @@ export default function DateRangePicker({
   const [startDate, setStartDate] = useState<Date | null>(initialStart);
   const [endDate, setEndDate] = useState<Date | null>(initialEnd);
 
-  // Spring animation — matches the Daily / Monthly / Totals card behaviour
+  // Menu-bar slide (650ms, bezier) — matches the Daily / Monthly / Totals card behaviour
   useEffect(() => {
-    Animated.spring(slideAnim, {
+    Animated.timing(slideAnim, {
       toValue: visible ? 0 : SLIDE_OUT_DISTANCE,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
+      duration: SLIDE_MS,
+      easing: visible ? RN_EASE_OUT_SLIDE : RN_EASE_IN_SLIDE,
       useNativeDriver: true,
     }).start();
   }, [visible, slideAnim]);

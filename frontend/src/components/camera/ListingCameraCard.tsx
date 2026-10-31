@@ -55,6 +55,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
+import { slideIn, slideOut } from '@/src/components/activity/motion';
 import cameraanalogImg from '@/assets/images/cameraanalog.png';
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
@@ -185,12 +186,12 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
       return;
     }
     appear.set(withTiming(1, { duration: 180 }));
-    sheetY.set(withSpring(0, { duration: 450, dampingRatio: 1 }, settled));
-  }, [reduceMotion, appear, sheetY]);
+    slideIn(sheetY, winH, settled);
+  }, [reduceMotion, appear, sheetY, winH]);
 
   // ── Close paths ────────────────────────────────────────────────────────────
   const runClose = useCallback(
-    (then: () => void, velocity = 0) => {
+    (then: () => void) => {
       if (closing.get()) return;
       closing.set(true);
       const done = (finished?: boolean) => {
@@ -200,9 +201,7 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
       if (reduceMotion) {
         appear.set(withTiming(0, { duration: 150 }, done));
       } else {
-        sheetY.set(
-          withSpring(winH, { duration: 350, dampingRatio: 1, velocity, overshootClamping: true }, done),
-        );
+        slideOut(sheetY, winH, done);
       }
     },
     [closing, appear, sheetY, reduceMotion, winH],
@@ -232,17 +231,11 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
           const projected = y + project(e.velocityY);
           if (y > cardHeight * 0.3 || projected > cardHeight * 0.45 || e.velocityY > 1000) {
             closing.set(true);
-            sheetY.set(
-              withSpring(
-                winH,
-                { duration: 350, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true },
-                (finished) => {
-                  if (finished) scheduleOnRN(onBack);
-                },
-              ),
-            );
+            slideOut(sheetY, winH, (finished) => {
+              if (finished) scheduleOnRN(onBack);
+            });
           } else {
-            sheetY.set(withSpring(0, { duration: 400, dampingRatio: 0.8, velocity: e.velocityY }));
+            slideIn(sheetY, winH);
             if (y > 8) scheduleOnRN(triggerLightHaptic); // it snapped home
           }
         }),

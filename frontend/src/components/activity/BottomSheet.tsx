@@ -2,7 +2,7 @@
  * BottomSheet — in-screen dark sheet (Figma 787:122). Rendered as an overlay of
  * its screen (not a native Modal) so gestures and the global MenuBar behave.
  *
- *  - Opens with a spring (300ms perceived, 0.8 damping) from below.
+ *  - Opens/closes with the menu-bar slide (650ms, EASE_OUT_SLIDE up / EASE_IN_SLIDE down).
  *  - The header (grabber + title) is a pan handle: 1:1 tracking, rubber-band
  *    when pulled up, velocity-projected dismissal, velocity handed to the spring.
  *  - Backdrop opacity derives from the same translateY, so it can never desync.
@@ -28,7 +28,6 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -36,7 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
-import { EASE_OUT, SPRING_SHEET, project, rubberband } from './motion';
+import { project, rubberband, slideIn, slideOut } from './motion';
 import { SW } from './layout';
 import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 
@@ -79,7 +78,7 @@ export default function BottomSheet({
         fade.set(withTiming(1, { duration: 150 }));
       } else {
         ty.set(H);
-        ty.set(withSpring(0, SPRING_SHEET));
+        slideIn(ty, H);
         fade.set(1);
       }
     } else if (reduced) {
@@ -87,9 +86,9 @@ export default function BottomSheet({
         if (f) scheduleOnRN(unmount);
       }));
     } else {
-      ty.set(withTiming(H, { duration: 240, easing: EASE_OUT }, (f) => {
+      slideOut(ty, H, (f) => {
         if (f) scheduleOnRN(unmount);
-      }));
+      });
     }
   }, [visible, reduced, H, ty, fade, unmount]);
 
@@ -117,17 +116,11 @@ export default function BottomSheet({
         .onEnd((e) => {
           const projected = ty.get() + project(e.velocityY);
           if (projected > sheetH.get() * 0.4) {
-            ty.set(
-              withSpring(
-                H,
-                { duration: 300, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true },
-                (f) => {
-                  if (f) scheduleOnRN(onClose);
-                },
-              ),
-            );
+            slideOut(ty, H, (f) => {
+              if (f) scheduleOnRN(onClose);
+            });
           } else {
-            ty.set(withSpring(0, { ...SPRING_SHEET, velocity: e.velocityY }));
+            slideIn(ty, H);
             scheduleOnRN(triggerLightHaptic);
           }
         }),
@@ -141,7 +134,7 @@ export default function BottomSheet({
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: reduced
       ? fade.get()
-      : interpolate(ty.get(), [0, sheetH.get()], [1, 0], Extrapolation.CLAMP),
+      : interpolate(ty.get(), [0, H], [1, 0], Extrapolation.CLAMP),
   }));
 
   if (!mounted) return null;

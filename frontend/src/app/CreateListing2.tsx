@@ -32,6 +32,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 import { useRouter } from 'expo-router';
+import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '../components/activity/motion';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
@@ -171,17 +172,28 @@ export default function CreateListing2() {
   const mapRef = useRef<MapView>(null);
 
   // ── Pop-up animations ──────────────────────────────────────────────────────
-  const calendarPopupAnim = useRef(new Animated.Value(H)).current;
   const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const totalsPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
 
+  // Bottom pop-ups share the menu-bar slide: 650ms, ease-out up / ease-in down.
   const openPopup = (anim: Animated.Value) => {
+    anim.setValue(POPUP_OFFSCREEN_Y);
     Animated.timing(anim, {
       toValue: 0,
-      duration: 400,
+      duration: SLIDE_MS,
+      easing: RN_EASE_OUT_SLIDE,
       useNativeDriver: true,
     }).start();
+  };
+
+  const closePopup = (anim: Animated.Value, cb: () => void) => {
+    Animated.timing(anim, {
+      toValue: POPUP_OFFSCREEN_Y,
+      duration: SLIDE_MS,
+      easing: RN_EASE_IN_SLIDE,
+      useNativeDriver: true,
+    }).start(cb);
   };
 
   useEffect(() => {
@@ -208,10 +220,6 @@ export default function CreateListing2() {
   const closeCameraPopup = (cb?: () => void) => {
     cb?.();
   };
-
-  useEffect(() => {
-    if (showCalendarPopup) openPopup(calendarPopupAnim);
-  }, [showCalendarPopup]);
 
   // ── Price PanResponder ─────────────────────────────────────────────────────
   // Two separate refs so toggling Hourly↔Weekly preserves each value.
@@ -536,14 +544,7 @@ export default function CreateListing2() {
     setDailyEnabled(true);
     setDailyRateAccepted(false);
     setShowDailyPopup(true);
-    dailyPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(dailyPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(dailyPopupAnim);
   };
 
   const dismissDailyPopup = (accepted = true, onDone?: () => void) => {
@@ -551,13 +552,7 @@ export default function CreateListing2() {
     // while the slide-down animation is still in flight.
     dailyPopupDone.current = true;
     setDailyRateAccepted(accepted);
-    Animated.spring(dailyPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(dailyPopupAnim, () => {
       setShowDailyPopup(false);
       onDone?.();
     });
@@ -582,27 +577,14 @@ export default function CreateListing2() {
     setMonthlyEnabled(true);
     setMonthlyRateAccepted(false);
     setShowMonthlyPopup(true);
-    monthlyPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(monthlyPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(monthlyPopupAnim);
   };
 
   const dismissMonthlyPopup = (accepted = true, onDone?: () => void) => {
     // See dismissDailyPopup: set ref synchronously to avoid a lost Continue press.
     monthlyPopupDone.current = true;
     setMonthlyRateAccepted(accepted);
-    Animated.spring(monthlyPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(monthlyPopupAnim, () => {
       setShowMonthlyPopup(false);
       onDone?.();
     });
@@ -622,26 +604,13 @@ export default function CreateListing2() {
 
   const openTotalsPopup = () => {
     setShowTotalsPopup(true);
-    totalsPopupAnim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.spring(totalsPopupAnim, {
-      toValue: 0,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start();
+    openPopup(totalsPopupAnim);
   };
 
   const dismissTotalsPopup = (onDone?: () => void) => {
     // Set ref synchronously so the next Continue press immediately advances.
     totalsPopupDone.current = true;
-    Animated.spring(totalsPopupAnim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      damping: 14,
-      stiffness: 130,
-      mass: 1,
-      useNativeDriver: true,
-    }).start(() => {
+    closePopup(totalsPopupAnim, () => {
       setShowTotalsPopup(false);
       onDone?.();
     });

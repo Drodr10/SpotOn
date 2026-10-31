@@ -32,7 +32,7 @@ import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
-import { EASE_IN_SLIDE, EASE_OUT_SLIDE } from './activity/motion';
+import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLIDE_MS } from './activity/motion';
 
 import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
@@ -69,7 +69,6 @@ type TabKey = 'profile' | 'home' | 'messages' | 'add';
 const TAB_ROUTES = new Set(['Homescreen', 'Profile', 'Messages']);
 // Screens with their own back button: the bar stays mounted but slides below the screen edge.
 const HIDDEN_ROUTES = new Set(['PreviousReservations', 'YourSpots', 'ActivityDetails']);
-const SLIDE_MS = 650;
 
 const TAB_ORDER: Record<TabKey, number> = {
   profile: 0,
@@ -260,17 +259,16 @@ export default function MenuBar() {
     addInfoAnim.setValue(Dimensions.get('window').height);
     setShowAddInfo(true);
     Animated.parallel([
-      // Spring to match the springy feel of the other card popups in the app.
-      Animated.spring(addInfoAnim, {
+      Animated.timing(addInfoAnim, {
         toValue: 0,
-        damping: 14,
-        stiffness: 130,
-        mass: 1,
+        duration: SLIDE_MS,
+        easing: RN_EASE_OUT_SLIDE,
         useNativeDriver: true,
       }),
       Animated.timing(addInfoBackdrop, {
         toValue: 1,
-        duration: 300,
+        duration: SLIDE_MS,
+        easing: RN_EASE_OUT_SLIDE,
         useNativeDriver: true,
       }),
     ]).start();
@@ -278,16 +276,16 @@ export default function MenuBar() {
 
   const closeAddInfo = (cb?: () => void) => {
     Animated.parallel([
-      Animated.spring(addInfoAnim, {
+      Animated.timing(addInfoAnim, {
         toValue: Dimensions.get('window').height,
-        damping: 14,
-        stiffness: 130,
-        mass: 1,
+        duration: SLIDE_MS,
+        easing: RN_EASE_IN_SLIDE,
         useNativeDriver: true,
       }),
       Animated.timing(addInfoBackdrop, {
         toValue: 0,
-        duration: 250,
+        duration: SLIDE_MS,
+        easing: RN_EASE_IN_SLIDE,
         useNativeDriver: true,
       }),
     ]).start(() => {
