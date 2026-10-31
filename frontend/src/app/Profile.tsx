@@ -27,6 +27,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { api, type ActiveReservation } from '@/src/utils/api';
 import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
+import PillMenu, { PillMenuBackdrop, pillMenuHostStyleForRows, type PillMenuItem } from '@/src/components/PillMenu';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
 import logoAsset from '@/assets/images/spotonlogo.png';
@@ -92,6 +93,7 @@ const onSignOut = async () => {
 };
 
 export default function ProfilePage() {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [claims, setClaims] = useState<JwtPayload>();
   const [user, setUser] = useState<ProfileData | null>(null);
 
@@ -347,6 +349,8 @@ export default function ProfilePage() {
     }
   };
 
+  const closeMenu = () => setMenuOpen(false);
+
   const confirmDeleteAccount = () => {
     if (deletingRef.current) return;
     triggerLightHaptic();
@@ -365,6 +369,31 @@ export default function ProfilePage() {
   };
 
   if (!user) return <SafeAreaView style={styles.safeArea} edges={['top']} />;
+
+  // Apple 5.1.1(v) + store policy: account deletion and the legal pages stay
+  // reachable in-app — they live in the Profile pill's dropdown.
+  const menuItems: PillMenuItem[] = [
+    {
+      key: 'terms',
+      label: 'Terms of Service',
+      icon: 'document-text-outline',
+      onPress: () => Linking.openURL('https://spot-on.software/terms'),
+    },
+    {
+      key: 'privacy',
+      label: 'Privacy Policy',
+      icon: 'shield-checkmark-outline',
+      onPress: () => Linking.openURL('https://spot-on.software/privacy'),
+    },
+    {
+      key: 'delete',
+      label: 'Delete my account',
+      icon: 'trash-outline',
+      destructive: true,
+      busy: deletingAccount,
+      onPress: confirmDeleteAccount,
+    },
+  ];
 
   const memberSince = user.created_at
     ? new Date(user.created_at).toLocaleString('default', {
@@ -386,10 +415,19 @@ export default function ProfilePage() {
           showsVerticalScrollIndicator={false}
         >
           {/* Header: Profile pill + Logout square */}
-          <View style={styles.header}>
-            <View style={styles.profilePill}>
+          {menuOpen && <PillMenuBackdrop onPress={closeMenu} />}
+          <View style={[styles.header, pillMenuHostStyleForRows(3)]} pointerEvents='box-none'>
+            <PillMenu
+              open={menuOpen}
+              onToggle={() => setMenuOpen((o) => !o)}
+              onClose={closeMenu}
+              items={menuItems}
+              accessibilityLabel='Profile. Account options'
+              pillStyle={styles.profilePill}
+              minPanelWidth={screenWidth * 0.56}
+            >
               <Text style={styles.profilePillText}>Profile</Text>
-            </View>
+            </PillMenu>
             <TouchableOpacity
               style={styles.logoutButton}
               onPress={onSignOut}
@@ -592,34 +630,6 @@ export default function ProfilePage() {
             </TouchableOpacity>
           </View>
 
-          {/* Account deletion. Deliberately plain and at the end of the page:
-              Apple requires it be easy to find, not that it be prominent. */}
-          <TouchableOpacity
-            style={styles.deleteAccountButton}
-            onPress={confirmDeleteAccount}
-            disabled={deletingAccount}
-            activeOpacity={0.7}
-          >
-            {deletingAccount ? (
-              <ActivityIndicator color='rgba(200,0,0,0.9)' />
-            ) : (
-              <Text style={styles.deleteAccountText}>Delete my account</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Play/App Store both require the policies be reachable in-app,
-              not just gated behind the signup screen — this is the durable
-              home for users who created their account before this existed. */}
-          <View style={styles.legalRow}>
-            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
-              Terms of Service
-            </Text>
-            <Text style={styles.legalDivider}>·</Text>
-            <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
-              Privacy Policy
-            </Text>
-          </View>
-
           {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
         </ScrollView>
@@ -641,8 +651,9 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
+    zIndex: 20,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
   profilePill: {
@@ -846,39 +857,6 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   penIcon: { width: EDIT_ICON, height: EDIT_ICON },
-
-  deleteAccountButton: {
-    alignSelf: 'center',
-    paddingVertical: screenWidth * 0.03,
-    paddingHorizontal: screenWidth * 0.06,
-    minHeight: screenWidth * 0.11,
-    justifyContent: 'center',
-  },
-  deleteAccountText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.035,
-    color: 'rgba(200,0,0,0.9)',
-    textDecorationLine: 'underline',
-  },
-
-  legalRow: {
-    flexDirection: 'row',
-    alignSelf: 'center',
-    alignItems: 'center',
-    gap: screenWidth * 0.025,
-    marginTop: screenWidth * 0.01,
-    marginBottom: screenWidth * 0.02,
-  },
-  legalLink: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: screenWidth * 0.032,
-    color: 'rgba(0,0,0,0.45)',
-    textDecorationLine: 'underline',
-  },
-  legalDivider: {
-    fontSize: screenWidth * 0.032,
-    color: 'rgba(0,0,0,0.3)',
-  },
 
   errorText: {
     color: 'rgba(200,0,0,1)',

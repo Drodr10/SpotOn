@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
+import PillMenu, { pillMenuHostStyle, type PillMenuItem } from '@/src/components/PillMenu';
 import PressableCard from './PressableCard';
 import { HEADER_H, SW } from './layout';
 
@@ -17,14 +18,43 @@ export function goBack() {
   else router.replace('/Profile' as any);
 }
 
-export default function ActivityHeader({ title }: { title: string }) {
+export interface HeaderMenu {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  items: PillMenuItem[];
+}
+
+/**
+ * Optional `menu` turns the title pill into a dropdown trigger (Activity Details only).
+ * The caller renders <PillMenuBackdrop/> below the header and gives the header's
+ * wrapper a zIndex so the panel paints above later content.
+ */
+export default function ActivityHeader({ title, menu }: { title: string; menu?: HeaderMenu }) {
   return (
-    <View style={styles.row}>
-      <View style={styles.pill} accessibilityRole='header'>
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-      </View>
+    <View style={[styles.row, menu && pillMenuHostStyle(menu.items)]}>
+      {menu ? (
+        <PillMenu
+          open={menu.open}
+          onToggle={menu.onToggle}
+          onClose={menu.onClose}
+          items={menu.items}
+          accessibilityLabel={`${title}. More actions`}
+          pillStyle={[styles.pill, styles.pillMenu]}
+          minPanelWidth={SW * 0.56}
+          wrapStyle={styles.pillWrap}
+        >
+          <Text style={[styles.title, styles.titleFlex]} numberOfLines={1}>
+            {title}
+          </Text>
+        </PillMenu>
+      ) : (
+        <View style={styles.pill} accessibilityRole='header'>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+        </View>
+      )}
       <PressableCard
         onPress={goBack}
         hitSlop={8}
@@ -52,6 +82,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     marginRight: SW * 0.03,
   },
+  pillMenu: { paddingRight: SW * 0.05, marginRight: 0 },
+  pillWrap: { marginRight: SW * 0.03, maxWidth: '75%' },
+  titleFlex: { flexShrink: 1 },
   title: {
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: SW * 0.05,

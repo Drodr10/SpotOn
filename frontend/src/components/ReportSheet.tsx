@@ -48,6 +48,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 import { blockUser, reportListing, reportUser } from '@/src/utils/moderation';
 import {
   triggerErrorHaptic,
@@ -302,7 +303,7 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
           pointerEvents="box-none"
         >
           <Animated.View
-            style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) + 8 }, sheetStyle]}
+            style={[styles.sheet, { paddingBottom: sheetBottomPad(insets.bottom) + 16 }, sheetStyle]}
           >
             <GestureDetector gesture={pan}>
               <View collapsable={false}>
@@ -456,10 +457,12 @@ const styles = StyleSheet.create({
   kav: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: '#DCDBD8',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: screenWidth * 0.05,
-    maxHeight: screenHeight * 0.92,
+    marginHorizontal: SHEET_INSET,
+    marginBottom: SHEET_BOTTOM,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
+    paddingHorizontal: screenWidth * 0.075,
+    maxHeight: screenHeight * 0.9,
   },
   grabber: {
     alignSelf: 'center',

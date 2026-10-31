@@ -4,8 +4,8 @@
  * reservation itself (renter_id === signed-in user), never from a parameter.
  *
  * Card: map of the spot with a live status badge, address, date/time, vehicle,
- * and a black price-breakdown card. Below: message, cancel (renter, 24h rule),
- * report an issue (support email) and — at the bottom — Report listing.
+ * and a black price-breakdown card. Secondary actions (message, cancel under the
+ * renter 24h rule, report an issue, report listing) live in the title pill's dropdown.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
+import { PillMenuBackdrop, type PillMenuItem } from '@/src/components/PillMenu';
 import ReportSheet, { type ReportTarget } from '@/src/components/ReportSheet';
 import ActivityHeader, { goBack } from '@/src/components/activity/ActivityHeader';
 import Entrance from '@/src/components/activity/Entrance';
@@ -87,6 +88,7 @@ export default function ActivityDetails() {
   const [messaging, setMessaging] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -158,6 +160,67 @@ export default function ActivityDetails() {
     booking.payoutStatus === 'held' &&
     !cancelable;
 
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const toggleMenu = useCallback(() => setMenuOpen((o) => !o), []);
+
+  const menuItems = useMemo<PillMenuItem[]>(() => {
+    if (state !== 'ready' || !booking) return [];
+    const items: PillMenuItem[] = [
+      {
+        key: 'message',
+        label: role === 'renter' ? 'Message host' : 'Message renter',
+        icon: 'chatbubble-ellipses-outline',
+        busy: messaging,
+        onPress: messageOther,
+      },
+    ];
+    if (cancelable) {
+      items.push({
+        key: 'cancel',
+        label: 'Cancel booking',
+        icon: 'close-circle-outline',
+        busy: cancellingId === booking.id,
+        onPress: () => requestCancel(booking),
+      });
+    } else if (showWindowNote) {
+      items.push({
+        key: 'cancel',
+        label: 'Cancel booking',
+        icon: 'close-circle-outline',
+        disabled: true,
+        subtitle: `Only up to ${CANCELLATION_WINDOW_HOURS} hours before the start`,
+        onPress: () => {},
+      });
+    }
+    items.push({
+      key: 'issue',
+      label: 'Report an issue',
+      icon: 'mail-outline',
+      onPress: () => openIssueEmail(booking),
+    });
+    if (role === 'renter') {
+      items.push({
+        key: 'report',
+        label: 'Report listing',
+        icon: 'flag-outline',
+        destructive: true,
+        onPress: openReport,
+      });
+    }
+    return items;
+  }, [
+    state,
+    booking,
+    role,
+    messaging,
+    messageOther,
+    cancelable,
+    showWindowNote,
+    cancellingId,
+    requestCancel,
+    openReport,
+  ]);
+
   const body = useMemo(() => {
     if (state === 'loading') return <LoadingNote />;
     if (state === 'error') return <ErrorNote message='We couldn’t load this booking.' onRetry={load} />;
@@ -180,8 +243,16 @@ export default function ActivityDetails() {
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor='#000' />}
         >
-          <Entrance index={order++}>
-            <ActivityHeader title='Activity Details' />
+          {menuOpen && <PillMenuBackdrop onPress={closeMenu} />}
+          <Entrance index={order++} style={styles.headerWrap}>
+            <ActivityHeader
+              title='Activity Details'
+              menu={
+                menuItems.length > 0
+                  ? { open: menuOpen, onToggle: toggleMenu, onClose: closeMenu, items: menuItems }
+                  : undefined
+              }
+            />
           </Entrance>
 
           {body}
@@ -208,50 +279,6 @@ export default function ActivityDetails() {
                   <Breakdown booking={booking} role={role} />
                 </View>
               </Entrance>
-
-              <Entrance index={order++} style={styles.actions}>
-                <ActionButton
-                  icon='chatbubble-ellipses-outline'
-                  label={role === 'renter' ? 'Message host' : 'Message renter'}
-                  busy={messaging}
-                  onPress={messageOther}
-                />
-
-                {cancelable && (
-                  <ActionButton
-                    variant='solid'
-                    icon='close-circle-outline'
-                    label='Cancel booking'
-                    busy={cancellingId === booking.id}
-                    onPress={() => requestCancel(booking)}
-                  />
-                )}
-                {showWindowNote && (
-                  <Text style={styles.note}>
-                    Bookings can be cancelled up to {CANCELLATION_WINDOW_HOURS} hours before they start.
-                  </Text>
-                )}
-
-                <PressableCard
-                  onPress={() => openIssueEmail(booking)}
-                  accessibilityLabel='Report an issue'
-                  style={styles.linkBtn}
-                  hitSlop={8}
-                >
-                  <Text style={styles.linkText}>Report an issue</Text>
-                </PressableCard>
-              </Entrance>
-
-              {role === 'renter' && (
-                <Entrance index={order++}>
-                  <ActionButton
-                    variant='danger'
-                    icon='flag-outline'
-                    label='Report listing'
-                    onPress={openReport}
-                  />
-                </Entrance>
-              )}
             </>
           )}
         </ScrollView>
@@ -412,45 +439,6 @@ function BreakdownRow({ label, value, strong }: { label: string; value: string; 
   );
 }
 
-// ─── Buttons ─────────────────────────────────────────────────────────────────
-
-function ActionButton({
-  label,
-  icon,
-  onPress,
-  busy,
-  variant = 'outline',
-}: {
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  onPress: () => void;
-  busy?: boolean;
-  variant?: 'outline' | 'solid' | 'danger';
-}) {
-  const color = variant === 'solid' ? '#FFFFFF' : variant === 'danger' ? '#B3261E' : '#000000';
-  return (
-    <PressableCard
-      onPress={onPress}
-      disabled={busy}
-      accessibilityLabel={label}
-      style={[
-        styles.btn,
-        variant === 'solid' && styles.btnSolid,
-        variant === 'danger' && styles.btnDanger,
-      ]}
-    >
-      {busy ? (
-        <ActivityIndicator color={color} />
-      ) : (
-        <>
-          <Ionicons name={icon} size={SW * 0.05} color={color} />
-          <Text style={[styles.btnText, { color }]}>{label}</Text>
-        </>
-      )}
-    </PressableCard>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: PAPER },
   safe: { flex: 1 },
@@ -556,32 +544,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     marginTop: CARD_W * 0.005,
   },
-  actions: { gap: CARD_GAP, alignItems: 'stretch' },
-  btn: {
-    width: CARD_W,
-    height: SW * 0.125,
-    borderRadius: 999,
-    borderWidth: BORDER,
-    borderColor: '#000',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SW * 0.025,
-  },
-  btnSolid: { backgroundColor: '#000' },
-  btnDanger: { borderColor: 'rgba(179,38,30,0.55)' },
-  btnText: { fontFamily: CustomFonts.SwitzerSemibold, fontSize: SW * 0.042 },
-  linkBtn: { alignSelf: 'center', paddingVertical: SW * 0.02, paddingHorizontal: SW * 0.04 },
-  linkText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: SW * 0.036,
-    color: 'rgba(0,0,0,0.6)',
-    textDecorationLine: 'underline',
-  },
-  note: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: SW * 0.033,
-    color: 'rgba(0,0,0,0.6)',
-    textAlign: 'center',
-  },
+  headerWrap: { zIndex: 20 },
 });

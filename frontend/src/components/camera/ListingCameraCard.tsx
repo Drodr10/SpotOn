@@ -1,35 +1,40 @@
 /**
  * ListingCameraCard — the Scene 3 photo pop-up of the listing creator.
  *
- * Opens straight into a live in-app viewfinder (expo-camera). One control does
- * two jobs, as in the Figma "Take A Photo V2" frame: the white circle inside
- * the black pill is the shutter; once a photo exists it gives way to
- * "Continue". Retake and "choose from library" live on the viewfinder itself.
+ * A single floating card: the live camera (expo-camera) fills it edge to edge,
+ * inset 8pt from the left / right / bottom of the screen with a radius that is
+ * concentric with the iPhone's display corners. The header line sits above the
+ * card on the page background. Controls are overlaid on the bottom of the
+ * preview: the shutter (centre), photo library (right). After a capture the
+ * shutter becomes a checkmark "Continue" and Retake appears on the left.
  *
- * Motion (see skills/animate-expo): everything here is transform + opacity on
- * the UI thread via Reanimated. Press feedback is 100ms in / spring out, the
- * viewfinder fades in on `onCameraReady`, the shutter flash is a 60ms-in /
- * 220ms-out white veil, and capture <-> live is an opacity crossfade over a
- * paused (not unmounted) preview so Retake is instant. With reduced motion the
- * scale / flash / drift go away and only the fades remain.
+ * Dismiss: tap the backdrop, or drag the card down (velocity-aware, rubber-
+ * banded upward). Both end in `onBack` after the exit animation.
  *
- * The parent owns the slide-in of the card and passes `ready` once it has
- * settled, so the (heavy) camera session never starts mid-spring.
+ * Motion (skills/animate-expo): everything is transform + opacity on the UI
+ * thread via Reanimated. Entrance is a critically damped spring (no bounce, no
+ * finger involved); the drag hands finger velocity to the spring. Press feedback
+ * is a 100ms scale transition. Capture <-> live is an opacity crossfade over a
+ * paused (not unmounted) preview so Retake is instant. Reduced motion drops the
+ * travel / scale / flash and keeps the fades.
+ *
+ * The camera session only starts once the entrance spring has settled, and the
+ * parent mounts this component only while the pop-up is open.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
-  Dimensions,
   Image,
-  LayoutChangeEvent,
   Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -46,18 +51,24 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
 import cameraanalogImg from '@/assets/images/cameraanalog.png';
 
-// ─── Sizing (screen-relative, like the rest of the creator) ──────────────────
-const { width: W } = Dimensions.get('window');
-const CARD_PAD = W * 0.05;
-const ACTION_HEIGHT = 50; // matches the creator's back circle / Continue pill
-const SHUTTER_SIZE = 58; // a touch taller than the pill, as in the design
-const VIEWFINDER_RATIO = 3 / 4; // width / height — the sensor's 4:3, portrait
-const VIEWFINDER_RADIUS = 26;
+// ─── Layout ──────────────────────────────────────────────────────────────────
+const EDGE_GAP = 8; // inset from left / right / bottom of the screen
+const CORNER_RADIUS = 47; // concentric with the iPhone display corners
+const CORNER_RADIUS_SQUARE = 28; // devices without rounded display (SE)
+const FRAME_WIDTH = 2;
+const SHUTTER_OUTER = 82;
+const SHUTTER_GAP = 72;
+const SHUTTER_CORE = 62;
+const SIDE_BTN = 56;
+const CONTROLS_INSET = 26; // side buttons from card edge (keeps clear of corner arc)
+const CONTROLS_BOTTOM = 24;
+const HEADER_RESERVE = 150; // shared creator header + this screen's header line
 
 // ─── Motion tokens ───────────────────────────────────────────────────────────
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1); // strong ease-out for UI
@@ -67,45 +78,176 @@ const MESSAGE_IN = FadeIn.duration(250).easing(EASE_OUT);
 
 const CAPTURE_QUALITY = 0.7; // same compression the old launchCameraAsync used
 
+// Where the finger would come to rest if it kept decelerating.
+function project(velocity: number, decelerationRate = 0.998) {
+  'worklet';
+  return ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
+}
+
+// The further past the edge, the less the card follows.
+function rubberband(overshoot: number, dimension: number, constant = 0.55) {
+  'worklet';
+  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+}
+
 type Props = {
-  /** Entrance animation finished — safe to ask for permission / start camera. */
-  ready: boolean;
-  /** Back to the map (Scene 2). */
+  /** Back to the map (Scene 2). Called after the exit animation. */
   onBack: () => void;
   /** User accepted a photo. Same URI the old launchCameraAsync produced. */
   onConfirm: (uri: string) => void;
 };
 
-export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
+// ─── Round press-scale button ────────────────────────────────────────────────
+function PressScale({
+  onPress,
+  onPressIn,
+  disabled,
+  label,
+  scaleTo = 0.94,
+  children,
+}: {
+  onPress: () => void;
+  onPressIn?: () => void;
+  disabled?: boolean;
+  label: string;
+  scaleTo?: number;
+  children: React.ReactNode;
+}) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => {
+        setPressed(true);
+        onPressIn?.();
+      }}
+      onPressOut={() => setPressed(false)}
+      disabled={disabled}
+      hitSlop={8}
+      pressRetentionOffset={16}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+    >
+      <Animated.View
+        style={[styles.pressBase, pressed && !disabled && { transform: [{ scale: scaleTo }] }]}
+      >
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
+  const { height: winH } = useWindowDimensions();
 
   const cameraRef = useRef<CameraView>(null);
   const capturingRef = useRef(false);
   const confirmedRef = useRef(false);
   const askedRef = useRef(false);
 
+  const [ready, setReady] = useState(false); // entrance finished
   const [permission, requestPermission, refreshPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   // Kept after Retake so the preview can fade out instead of vanishing.
   const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
 
-  // ── Derived state ──────────────────────────────────────────────────────────
+  // ── Derived ────────────────────────────────────────────────────────────────
   const granted = permission?.granted ?? false;
   const denied = permission !== null && !granted && permission.status !== 'undetermined';
   const blocked = (denied || cameraError) && photo === null;
   const mountCamera = ready && granted && !cameraError;
+  const cardHeight = Math.round(Math.min(winH * 0.72, winH - insets.top - HEADER_RESERVE));
+  const radius = insets.bottom > 0 ? CORNER_RADIUS : CORNER_RADIUS_SQUARE;
 
   // ── Shared values ──────────────────────────────────────────────────────────
+  const sheetY = useSharedValue(reduceMotion ? 0 : winH); // drag / entrance / exit
+  const dragStart = useSharedValue(0);
+  const appear = useSharedValue(0); // sheet opacity
+  const closing = useSharedValue(false);
   const cameraFade = useSharedValue(0); // 0 = camera starting, 1 = live
   const captured = useSharedValue(0); // 0 = live, 1 = showing a photo
   const flash = useSharedValue(0);
   const squeeze = useSharedValue(1);
-  const shutterPress = useSharedValue(1);
-  const pillPress = useSharedValue(1);
+
+  // ── Entrance ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const settled = () => {
+      'worklet';
+      scheduleOnRN(setReady, true);
+    };
+    if (reduceMotion) {
+      appear.set(withTiming(1, { duration: 200 }, settled));
+      return;
+    }
+    appear.set(withTiming(1, { duration: 180 }));
+    sheetY.set(withSpring(0, { duration: 450, dampingRatio: 1 }, settled));
+  }, [reduceMotion, appear, sheetY]);
+
+  // ── Close paths ────────────────────────────────────────────────────────────
+  const runClose = useCallback(
+    (then: () => void, velocity = 0) => {
+      if (closing.get()) return;
+      closing.set(true);
+      const done = (finished?: boolean) => {
+        'worklet';
+        if (finished) scheduleOnRN(then);
+      };
+      if (reduceMotion) {
+        appear.set(withTiming(0, { duration: 150 }, done));
+      } else {
+        sheetY.set(
+          withSpring(winH, { duration: 350, dampingRatio: 1, velocity, overshootClamping: true }, done),
+        );
+      }
+    },
+    [closing, appear, sheetY, reduceMotion, winH],
+  );
+
+  const handleBackdrop = useCallback(() => {
+    triggerLightHaptic();
+    runClose(onBack);
+  }, [runClose, onBack]);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-10, 10])
+        .failOffsetX([-24, 24])
+        .onStart(() => {
+          dragStart.set(sheetY.get());
+        })
+        .onUpdate((e) => {
+          if (closing.get()) return;
+          const next = dragStart.get() + e.translationY;
+          sheetY.set(next >= 0 ? next : rubberband(next, cardHeight));
+        })
+        .onEnd((e) => {
+          if (closing.get()) return;
+          const y = sheetY.get();
+          const projected = y + project(e.velocityY);
+          if (y > cardHeight * 0.3 || projected > cardHeight * 0.45 || e.velocityY > 1000) {
+            closing.set(true);
+            sheetY.set(
+              withSpring(
+                winH,
+                { duration: 350, dampingRatio: 1, velocity: e.velocityY, overshootClamping: true },
+                (finished) => {
+                  if (finished) scheduleOnRN(onBack);
+                },
+              ),
+            );
+          } else {
+            sheetY.set(withSpring(0, { duration: 400, dampingRatio: 0.8, velocity: e.velocityY }));
+            if (y > 8) scheduleOnRN(triggerLightHaptic); // it snapped home
+          }
+        }),
+    [dragStart, sheetY, closing, cardHeight, winH, onBack],
+  );
 
   // ── Permission: ask once the card has settled ──────────────────────────────
   useEffect(() => {
@@ -135,13 +277,6 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
   }, [photo, reduceMotion, captured]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const onStageLayout = useCallback((e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    setStage((prev) =>
-      prev && prev.w === width && prev.h === height ? prev : { w: width, h: height },
-    );
-  }, []);
-
   const handleCameraReady = useCallback(() => {
     setCameraReady(true);
     cameraFade.set(withTiming(1, { duration: reduceMotion ? 150 : 320, easing: EASE_OUT }));
@@ -178,7 +313,7 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
       );
       squeeze.set(
         withSequence(
-          withTiming(0.985, { duration: 70, easing: EASE_OUT }),
+          withTiming(0.99, { duration: 70, easing: EASE_OUT }),
           withSpring(1, { duration: 300, dampingRatio: 0.7 }),
         ),
       );
@@ -187,6 +322,7 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
     try {
       const picture = await cam.takePictureAsync({ quality: CAPTURE_QUALITY });
       showPhoto(picture.uri);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e) {
       console.warn('[ListingCameraCard] capture failed:', e);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
@@ -199,8 +335,9 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
   const handleConfirm = useCallback(() => {
     if (!photo || confirmedRef.current) return;
     confirmedRef.current = true;
-    onConfirm(photo);
-  }, [photo, onConfirm]);
+    triggerLightHaptic();
+    runClose(() => onConfirm(photo));
+  }, [photo, onConfirm, runClose]);
 
   const handleRetake = useCallback(() => {
     triggerLightHaptic();
@@ -233,67 +370,30 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
     }
   }, [permission, requestPermission]);
 
-  const handlePillPress = photo ? handleConfirm : handleShutter;
-
-  const handlePressIn = () => {
-    if (photo) {
-      pillPress.set(withTiming(0.97, { duration: 100, easing: EASE_OUT }));
-    } else if (cameraReady) {
-      shutterPress.set(withTiming(0.9, { duration: 100, easing: EASE_OUT }));
-    }
-  };
-  const handlePressOut = () => {
-    pillPress.set(withTiming(1, { duration: 120, easing: EASE_OUT }));
-    shutterPress.set(withSpring(1, { duration: 250, dampingRatio: 0.7 }));
-  };
-
   // ── Animated styles ────────────────────────────────────────────────────────
-  const viewfinderStyle = useAnimatedStyle(() => ({
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: appear.get(),
+    transform: [{ translateY: sheetY.get() }],
+  }));
+  const squeezeStyle = useAnimatedStyle(() => ({
     transform: [{ scale: squeeze.get() }],
   }));
   const cameraStyle = useAnimatedStyle(() => ({
     opacity: cameraFade.get(),
-    transform: [
-      { scale: reduceMotion ? 1 : interpolate(cameraFade.get(), [0, 1], [1.03, 1]) },
-    ],
+    transform: [{ scale: reduceMotion ? 1 : interpolate(cameraFade.get(), [0, 1], [1.03, 1]) }],
   }));
-  const placeholderStyle = useAnimatedStyle(() => ({
-    opacity: 1 - cameraFade.get(),
-  }));
-  const gridStyle = useAnimatedStyle(() => ({
-    opacity: cameraFade.get() * (1 - captured.get()),
-  }));
-  const previewStyle = useAnimatedStyle(() => ({
+  const placeholderStyle = useAnimatedStyle(() => ({ opacity: 1 - cameraFade.get() }));
+  const previewStyle = useAnimatedStyle(() => ({ opacity: captured.get() }));
+  const flashStyle = useAnimatedStyle(() => ({ opacity: flash.get() }));
+  const libraryStyle = useAnimatedStyle(() => ({ opacity: 1 - captured.get() }));
+  const retakeStyle = useAnimatedStyle(() => ({ opacity: captured.get() }));
+  const checkStyle = useAnimatedStyle(() => ({
     opacity: captured.get(),
+    transform: [{ scale: reduceMotion ? 1 : interpolate(captured.get(), [0, 1], [0.7, 1]) }],
   }));
-  const flashStyle = useAnimatedStyle(() => ({
-    opacity: flash.get(),
-  }));
-  const libraryBtnStyle = useAnimatedStyle(() => ({
-    opacity: 1 - captured.get(),
-  }));
-  const retakeBtnStyle = useAnimatedStyle(() => ({
-    opacity: captured.get(),
-  }));
-  const pillStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pillPress.get() }],
-  }));
-  const shutterStyle = useAnimatedStyle(() => ({
-    opacity: 1 - captured.get(),
-    transform: [
-      { scale: shutterPress.get() * (reduceMotion ? 1 : interpolate(captured.get(), [0, 1], [1, 0.6])) },
-    ],
-  }));
-  const continueStyle = useAnimatedStyle(() => ({
-    opacity: captured.get(),
-    transform: [{ translateX: reduceMotion ? 0 : interpolate(captured.get(), [0, 1], [10, 0]) }],
-  }));
-
-  // ── Viewfinder size: largest 3:4 that fits the stage ───────────────────────
-  const vfWidth = stage ? Math.floor(Math.min(stage.w, stage.h * VIEWFINDER_RATIO)) : 0;
-  const vfHeight = Math.floor(vfWidth / VIEWFINDER_RATIO);
 
   const shutterEnabled = cameraReady && !blocked;
+  const centerEnabled = photo !== null || shutterEnabled;
 
   const messageTitle = cameraError ? "Camera isn't available" : 'Camera access is off';
   const messageBody = cameraError
@@ -301,215 +401,178 @@ export default function ListingCameraCard({ ready, onBack, onConfirm }: Props) {
     : 'Allow SpotOn to use your camera to photograph your spot, or pick a photo from your library instead.';
 
   return (
-    <View
-      style={[
-        styles.card,
-        { paddingBottom: Math.max(insets.bottom, 12) + W * 0.015 },
-      ]}
-    >
-      {/* Header row */}
-      <View style={styles.headerRow}>
-        <Image source={cameraanalogImg} style={styles.headerGlyph} resizeMode="contain" />
-        <Animated.Text
-          key={photo ? 'review' : 'live'}
-          entering={TEXT_SWAP}
-          style={styles.headerText}
-          accessibilityRole="header"
-        >
-          {photo ? 'Looking good? Continue, or retake.' : "Let's add a photo to your listing."}
-        </Animated.Text>
-      </View>
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {/* Backdrop: tap anywhere outside the card to minimise */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={handleBackdrop}
+        accessibilityRole="button"
+        accessibilityLabel="Close camera"
+      />
 
-      {/* Stage — the viewfinder is centred in whatever space is left */}
-      <View style={styles.stage} onLayout={onStageLayout}>
-        {stage !== null && vfWidth > 0 && (
-          <Animated.View style={[styles.viewfinder, { width: vfWidth, height: vfHeight }, viewfinderStyle]}>
-            {/* Resting surface while the camera spins up */}
-            <View style={styles.vfBase} />
-            {!blocked && (
-              <Animated.View style={[styles.placeholder, placeholderStyle]} pointerEvents="none">
-                <Ionicons name="camera-outline" size={34} color="rgba(255,255,255,0.28)" />
-              </Animated.View>
-            )}
+      <Animated.View style={[styles.sheet, sheetStyle]} pointerEvents="box-none">
+        {/* Header sits on the page background, above the card */}
+        <View style={styles.headerRow} pointerEvents="none">
+          <Image source={cameraanalogImg} style={styles.headerGlyph} resizeMode="contain" />
+          <Animated.Text
+            key={photo ? 'review' : 'live'}
+            entering={TEXT_SWAP}
+            style={styles.headerText}
+            accessibilityRole="header"
+          >
+            {photo ? 'Looking good? Continue, or retake.' : "Let's add a photo to your listing."}
+          </Animated.Text>
+        </View>
 
-            {mountCamera && (
-              <Animated.View style={[StyleSheet.absoluteFill, cameraStyle]}>
-                <CameraView
-                  ref={cameraRef}
-                  style={StyleSheet.absoluteFill}
-                  facing="back"
-                  ratio="4:3"
-                  animateShutter={false}
-                  onCameraReady={handleCameraReady}
-                  onMountError={handleMountError}
-                />
-              </Animated.View>
-            )}
+        <GestureDetector gesture={pan}>
+          <Animated.View
+            style={[styles.cardShadow, { height: cardHeight, borderRadius: radius }, squeezeStyle]}
+          >
+            <View style={[styles.cardClip, { borderRadius: radius }]}>
+              {/* Resting surface while the camera spins up */}
+              {!blocked && (
+                <Animated.View style={[styles.placeholder, placeholderStyle]} pointerEvents="none">
+                  <Ionicons name="camera-outline" size={38} color="rgba(255,255,255,0.28)" />
+                </Animated.View>
+              )}
 
-            {/* Rule-of-thirds guide, camera only */}
-            <Animated.View style={[StyleSheet.absoluteFill, gridStyle]} pointerEvents="none">
-              <View style={[styles.gridV, { left: '33.333%' }]} />
-              <View style={[styles.gridV, { left: '66.666%' }]} />
-              <View style={[styles.gridH, { top: '33.333%' }]} />
-              <View style={[styles.gridH, { top: '66.666%' }]} />
-            </Animated.View>
+              {mountCamera && (
+                <Animated.View style={[StyleSheet.absoluteFill, cameraStyle]}>
+                  <CameraView
+                    ref={cameraRef}
+                    style={StyleSheet.absoluteFill}
+                    facing="back"
+                    animateShutter={false}
+                    onCameraReady={handleCameraReady}
+                    onMountError={handleMountError}
+                  />
+                </Animated.View>
+              )}
 
-            {/* Captured photo */}
-            {previewUri !== null && (
-              <Animated.View
-                style={[StyleSheet.absoluteFill, previewStyle]}
-                pointerEvents="none"
-              >
-                <ExpoImage
-                  source={{ uri: previewUri }}
-                  style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                  transition={0}
-                  accessibilityLabel="Photo of your parking spot"
-                />
-              </Animated.View>
-            )}
+              {/* Captured photo */}
+              {previewUri !== null && (
+                <Animated.View style={[StyleSheet.absoluteFill, previewStyle]} pointerEvents="none">
+                  <ExpoImage
+                    source={{ uri: previewUri }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    transition={0}
+                    accessibilityLabel="Photo of your parking spot"
+                  />
+                </Animated.View>
+              )}
 
-            {/* Shutter flash */}
-            <Animated.View style={[styles.flash, flashStyle]} pointerEvents="none" />
+              {/* Shutter flash */}
+              <Animated.View style={[styles.flash, flashStyle]} pointerEvents="none" />
 
-            {/* Permission denied / no camera */}
-            {blocked && (
-              <Animated.View entering={MESSAGE_IN} style={styles.message}>
-                <View style={styles.messageIcon}>
-                  <Ionicons name="camera-outline" size={26} color="#fff" />
-                </View>
-                <Text style={styles.messageTitle}>{messageTitle}</Text>
-                <Text style={styles.messageBody}>{messageBody}</Text>
-                {denied && !cameraError && (
-                  <Pressable
-                    onPress={handleAllowCamera}
-                    style={({ pressed }) => [styles.primaryPill, pressed && styles.pillPressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Allow camera"
-                  >
-                    <Text style={styles.primaryPillText}>Allow camera</Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  onPress={handleLibrary}
-                  style={({ pressed }) => [styles.secondaryPill, pressed && styles.pillPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Choose from library"
-                >
-                  <Ionicons name="images-outline" size={16} color="#fff" />
-                  <Text style={styles.secondaryPillText}>Choose from library</Text>
-                </Pressable>
-              </Animated.View>
-            )}
-
-            {/* Library (live) / Retake (photo) share one corner */}
-            {!blocked && (
-              <>
-                <Animated.View
-                  style={[styles.cornerSlot, libraryBtnStyle]}
-                  pointerEvents={photo ? 'none' : 'auto'}
-                >
+              {/* Permission denied / no camera */}
+              {blocked && (
+                <Animated.View entering={MESSAGE_IN} style={styles.message}>
+                  <View style={styles.messageIcon}>
+                    <Ionicons name="camera-outline" size={26} color="#fff" />
+                  </View>
+                  <Text style={styles.messageTitle}>{messageTitle}</Text>
+                  <Text style={styles.messageBody}>{messageBody}</Text>
+                  {denied && !cameraError && (
+                    <Pressable
+                      onPress={handleAllowCamera}
+                      style={({ pressed }) => [styles.primaryPill, pressed && styles.pillPressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Allow camera"
+                    >
+                      <Text style={styles.primaryPillText}>Allow camera</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={handleLibrary}
-                    style={({ pressed }) => [styles.libraryBtn, pressed && styles.pillPressed]}
-                    hitSlop={6}
+                    style={({ pressed }) => [styles.secondaryPill, pressed && styles.pillPressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Choose from library"
                   >
-                    <Ionicons name="images-outline" size={20} color="#fff" />
+                    <Ionicons name="images-outline" size={16} color="#fff" />
+                    <Text style={styles.secondaryPillText}>Choose from library</Text>
                   </Pressable>
                 </Animated.View>
-                <Animated.View
-                  style={[styles.cornerSlot, retakeBtnStyle]}
-                  pointerEvents={photo ? 'auto' : 'none'}
-                >
-                  <Pressable
-                    onPress={handleRetake}
-                    style={({ pressed }) => [styles.retakeBtn, pressed && styles.pillPressed]}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retake photo"
+              )}
+
+              {/* Controls overlaid on the bottom of the preview */}
+              {!blocked && (
+                <View style={styles.controls} pointerEvents="box-none">
+                  {/* Left: Retake (after capture) */}
+                  <Animated.View
+                    style={[styles.slot, { left: CONTROLS_INSET }, retakeStyle]}
+                    pointerEvents={photo ? 'auto' : 'none'}
                   >
-                    <Ionicons name="refresh" size={17} color="#fff" />
-                    <Text style={styles.retakeText}>Retake</Text>
-                  </Pressable>
-                </Animated.View>
-              </>
-            )}
+                    <PressScale onPress={handleRetake} label="Retake photo" disabled={!photo}>
+                      <View style={styles.sideBtn}>
+                        <Ionicons name="refresh" size={24} color="#fff" />
+                      </View>
+                    </PressScale>
+                  </Animated.View>
 
-            <View style={styles.vfBorder} pointerEvents="none" />
-          </Animated.View>
-        )}
-      </View>
+                  {/* Centre: shutter, becomes Continue */}
+                  <View style={styles.centerSlot}>
+                    <PressScale
+                      onPress={photo ? handleConfirm : handleShutter}
+                      disabled={!centerEnabled}
+                      label={photo ? 'Continue with this photo' : 'Take photo'}
+                      scaleTo={0.92}
+                    >
+                      <View style={[styles.shutterOuter, !centerEnabled && styles.shutterIdle]}>
+                        <View style={styles.shutterGap}>
+                          <View style={styles.shutterCore}>
+                            <Animated.View style={checkStyle}>
+                              <Ionicons name="checkmark" size={34} color="#000" />
+                            </Animated.View>
+                          </View>
+                        </View>
+                      </View>
+                    </PressScale>
+                  </View>
 
-      {/* Bottom row — back circle + black pill carrying the shutter */}
-      <View style={styles.bottomRow}>
-        <Pressable
-          onPress={() => {
-            triggerLightHaptic();
-            onBack();
-          }}
-          style={({ pressed }) => [styles.backCircle, pressed && styles.pillPressed]}
-          hitSlop={6}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="chevron-back" size={22} color="#fff" />
-        </Pressable>
-
-        <Animated.View style={[styles.pillWrap, pillStyle]}>
-          <Pressable
-            onPress={handlePillPress}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-            disabled={!photo && !shutterEnabled}
-            pressRetentionOffset={16}
-            style={styles.pill}
-            accessibilityRole="button"
-            accessibilityLabel={photo ? 'Continue with this photo' : 'Take photo'}
-            accessibilityState={{ disabled: !photo && !shutterEnabled }}
-          >
-            {/* Continue label — fades in as the shutter fades out */}
-            <Animated.View style={[styles.continueRow, continueStyle]} pointerEvents="none">
-              <Text style={styles.continueText}>Continue</Text>
-              <Ionicons name="arrow-forward" size={18} color="#fff" />
-            </Animated.View>
-
-            {blocked && <Text style={styles.disabledText}>Continue</Text>}
-
-            {!blocked && (
-              <Animated.View style={[styles.shutterWrap, shutterStyle]} pointerEvents="none">
-                <View style={[styles.shutter, !cameraReady && styles.shutterIdle]}>
-                  <View style={styles.shutterRing} />
+                  {/* Right: photo library (live only) */}
+                  <Animated.View
+                    style={[styles.slot, { right: CONTROLS_INSET }, libraryStyle]}
+                    pointerEvents={photo ? 'none' : 'auto'}
+                  >
+                    <PressScale onPress={handleLibrary} label="Choose from library" disabled={!!photo}>
+                      <View style={styles.sideBtn}>
+                        <Ionicons name="images" size={22} color="#fff" />
+                      </View>
+                    </PressScale>
+                  </Animated.View>
                 </View>
-              </Animated.View>
-            )}
-          </Pressable>
-        </Animated.View>
-      </View>
+              )}
+            </View>
+
+            {/* Thin translucent frame, above the camera */}
+            <View
+              style={[styles.frame, { borderRadius: radius }]}
+              pointerEvents="none"
+            />
+          </Animated.View>
+        </GestureDetector>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.68)',
-    borderRadius: 34,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-    paddingTop: W * 0.04,
-    paddingHorizontal: CARD_PAD,
-    overflow: 'hidden',
+  sheet: {
+    position: 'absolute',
+    left: EDGE_GAP,
+    right: EDGE_GAP,
+    bottom: EDGE_GAP,
   },
 
-  // ── Header ─────────────────────────────────────────────────────────────────
+  // ── Header (on page background) ────────────────────────────────────────────
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: W * 0.025,
-    paddingLeft: 2,
+    gap: 10,
+    paddingLeft: 14,
+    paddingRight: 8,
+    marginBottom: 14,
     minHeight: 34,
   },
   headerGlyph: {
@@ -519,88 +582,102 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 14,
-    lineHeight: 19,
-    color: '#fff',
+    fontSize: 16,
+    lineHeight: 21,
+    color: '#2A2A2A',
   },
 
-  // ── Viewfinder ─────────────────────────────────────────────────────────────
-  stage: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: W * 0.03,
+  // ── Card ───────────────────────────────────────────────────────────────────
+  cardShadow: {
+    backgroundColor: '#0B0B0B',
+    borderCurve: 'continuous',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
   },
-  viewfinder: {
-    borderRadius: VIEWFINDER_RADIUS,
-    overflow: 'hidden',
-    backgroundColor: '#101010',
-  },
-  vfBase: {
+  cardClip: {
     ...StyleSheet.absoluteFill,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
     backgroundColor: '#141414',
   },
-  vfBorder: {
+  frame: {
     ...StyleSheet.absoluteFill,
-    borderRadius: VIEWFINDER_RADIUS,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderCurve: 'continuous',
+    borderWidth: FRAME_WIDTH,
+    borderColor: 'rgba(255,255,255,0.5)',
   },
   placeholder: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  gridV: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-  },
-  gridH: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-  },
   flash: {
     ...StyleSheet.absoluteFill,
     backgroundColor: '#fff',
   },
 
-  // ── Corner controls on the viewfinder ──────────────────────────────────────
-  cornerSlot: {
+  // ── Controls ───────────────────────────────────────────────────────────────
+  controls: {
     position: 'absolute',
-    left: 12,
-    bottom: 12,
+    left: 0,
+    right: 0,
+    bottom: CONTROLS_BOTTOM,
+    height: SHUTTER_OUTER,
   },
-  libraryBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  slot: {
+    position: 'absolute',
+    top: (SHUTTER_OUTER - SIDE_BTN) / 2,
+  },
+  centerSlot: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pressBase: {
+    transitionProperty: 'transform',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)',
+    transform: [{ scale: 1 }],
+  },
+  sideBtn: {
+    width: SIDE_BTN,
+    height: SIDE_BTN,
+    borderRadius: SIDE_BTN / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  shutterOuter: {
+    width: SHUTTER_OUTER,
+    height: SHUTTER_OUTER,
+    borderRadius: SHUTTER_OUTER / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  shutterGap: {
+    width: SHUTTER_GAP,
+    height: SHUTTER_GAP,
+    borderRadius: SHUTTER_GAP / 2,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.28)',
   },
-  retakeBtn: {
-    height: 44,
-    paddingHorizontal: 16,
-    borderRadius: 22,
-    flexDirection: 'row',
+  shutterCore: {
+    width: SHUTTER_CORE,
+    height: SHUTTER_CORE,
+    borderRadius: SHUTTER_CORE / 2,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.28)',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
   },
-  retakeText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 14,
-    color: '#fff',
+  shutterIdle: {
+    opacity: 0.5,
   },
   pillPressed: {
     opacity: 0.7,
@@ -611,7 +688,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 32,
     gap: 10,
   },
   messageIcon: {
@@ -667,79 +744,5 @@ const styles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: 15,
     color: '#fff',
-  },
-
-  // ── Bottom row ─────────────────────────────────────────────────────────────
-  bottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: W * 0.03,
-    height: SHUTTER_SIZE,
-  },
-  backCircle: {
-    width: ACTION_HEIGHT,
-    height: ACTION_HEIGHT,
-    borderRadius: ACTION_HEIGHT / 2,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  pillWrap: {
-    flex: 1,
-    height: SHUTTER_SIZE,
-    justifyContent: 'center',
-  },
-  pill: {
-    height: ACTION_HEIGHT,
-    borderRadius: ACTION_HEIGHT / 2,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  shutterWrap: {
-    position: 'absolute',
-    width: SHUTTER_SIZE,
-    height: SHUTTER_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutter: {
-    width: SHUTTER_SIZE,
-    height: SHUTTER_SIZE,
-    borderRadius: SHUTTER_SIZE / 2,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterIdle: {
-    opacity: 0.45,
-  },
-  shutterRing: {
-    width: SHUTTER_SIZE - 10,
-    height: SHUTTER_SIZE - 10,
-    borderRadius: (SHUTTER_SIZE - 10) / 2,
-    borderWidth: 2,
-    borderColor: 'rgba(0,0,0,0.16)',
-  },
-  continueRow: {
-    ...StyleSheet.absoluteFill,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  continueText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 16,
-    color: '#fff',
-  },
-  disabledText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.35)',
   },
 });

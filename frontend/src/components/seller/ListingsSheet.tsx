@@ -32,6 +32,7 @@ import BottomSheet from '@/src/components/activity/BottomSheet';
 import PressableCard from '@/src/components/activity/PressableCard';
 import { ListingThumb } from '@/src/components/activity/BookingCards';
 import { SW } from '@/src/components/activity/layout';
+import { SHEET_INSET } from '@/src/constants/sheet';
 import {
   EASE_OUT,
   SPRING_SETTLE,
@@ -49,7 +50,7 @@ import {
   type BookingListing,
 } from '@/src/utils/activity';
 
-const ROW_W = SW * 0.89;
+const ROW_W = SW * 0.86;
 const ROW_H = ROW_W * 0.27;
 const ROW_R = ROW_H * 0.46;
 const REVEAL = ROW_W * 0.34;
@@ -312,11 +313,11 @@ export default function ListingsSheet({
 const styles = StyleSheet.create({
   scroll: { flexGrow: 0 },
   scrollContent: {
-    paddingHorizontal: (SW * 0.95 - ROW_W) / 2,
+    paddingHorizontal: (SW - SHEET_INSET * 2 - ROW_W) / 2,
     paddingBottom: SW * 0.05,
     gap: SW * 0.03,
   },
-  empty: { paddingHorizontal: SW * 0.06, paddingBottom: SW * 0.08 },
+  empty: { paddingHorizontal: SW * 0.08, paddingBottom: SW * 0.08 },
   emptyText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: SW * 0.04,

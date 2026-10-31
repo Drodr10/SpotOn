@@ -107,7 +107,7 @@ export default function PayoutSheet({
 
 const styles = StyleSheet.create({
   body: {
-    paddingHorizontal: SW * 0.06,
+    paddingHorizontal: SW * 0.08,
     paddingBottom: SW * 0.05,
   },
   title: {

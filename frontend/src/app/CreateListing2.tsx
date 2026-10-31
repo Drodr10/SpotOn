@@ -43,7 +43,6 @@ import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 
 // ─── Reduced motion ───────────────────────────────────────────────────────────
-import { useReducedMotion } from 'react-native-reanimated';
 
 // ─── Web Browser ──────────────────────────────────────────────────────────────
 
@@ -163,9 +162,6 @@ export default function CreateListing2() {
 
   // ── Pop-up visibility ──────────────────────────────────────────────────────
   const [showCameraPopup, setShowCameraPopup] = useState(false);
-  // True once the camera card has finished sliding in; the live camera session
-  // only starts after this so it never competes with the entrance spring.
-  const [cameraCardReady, setCameraCardReady] = useState(false);
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -175,9 +171,6 @@ export default function CreateListing2() {
   const mapRef = useRef<MapView>(null);
 
   // ── Pop-up animations ──────────────────────────────────────────────────────
-  const cameraPopupAnim = useRef(new Animated.Value(H)).current;
-  const cameraPopupOpacity = useRef(new Animated.Value(0)).current;
-  const reduceMotion = useReducedMotion();
   const calendarPopupAnim = useRef(new Animated.Value(H)).current;
   const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
   const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
@@ -189,14 +182,6 @@ export default function CreateListing2() {
       duration: 400,
       useNativeDriver: true,
     }).start();
-  };
-
-  const closePopup = (anim: Animated.Value, cb?: () => void) => {
-    Animated.timing(anim, {
-      toValue: H,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => cb && cb());
   };
 
   useEffect(() => {
@@ -218,48 +203,10 @@ export default function CreateListing2() {
     initialize();
   }, []);
 
-  // Camera card entrance: a critically damped spring (no bounce — nothing
-  // carried momentum) plus a short fade. Reduced motion drops the travel and
-  // keeps only the fade.
-  useEffect(() => {
-    if (!showCameraPopup) return;
-    cameraPopupOpacity.setValue(0);
-    if (reduceMotion) {
-      cameraPopupAnim.setValue(0);
-      Animated.timing(cameraPopupOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(({ finished }) => finished && setCameraCardReady(true));
-      return;
-    }
-    cameraPopupAnim.setValue(H);
-    Animated.parallel([
-      Animated.spring(cameraPopupAnim, {
-        toValue: 0,
-        stiffness: 240,
-        damping: 31,
-        mass: 1,
-        useNativeDriver: true,
-      }),
-      Animated.timing(cameraPopupOpacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => finished && setCameraCardReady(true));
-  }, [showCameraPopup]);
-
+  // The camera card animates its own entrance and exit (UI thread, gesture-
+  // driven dismiss), so closing here is just the state change it calls back into.
   const closeCameraPopup = (cb?: () => void) => {
-    if (reduceMotion) {
-      Animated.timing(cameraPopupOpacity, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => cb && cb());
-      return;
-    }
-    closePopup(cameraPopupAnim, cb);
+    cb?.();
   };
 
   useEffect(() => {
@@ -520,7 +467,6 @@ export default function CreateListing2() {
       Alert.alert('No location selected', 'Please select a location on the map first.');
       return;
     }
-    setCameraCardReady(false);
     setShowCameraPopup(true);
     setScene(3);
   };
@@ -831,25 +777,10 @@ export default function CreateListing2() {
         </MapView>
       </View>
 
-      {/* Camera pop-up — live viewfinder, no intermediate camera-icon step.
+      {/* Camera pop-up — floating live card + tap-away backdrop, self-animated.
           Mounted only while open so the camera session stops on close. */}
       {showCameraPopup && (
-        <Animated.View
-          style={[
-            styles.cameraCard,
-            {
-              height: Math.min(H * 0.76, H - insets.top - 136),
-              opacity: cameraPopupOpacity,
-              transform: [{ translateY: cameraPopupAnim }],
-            },
-          ]}
-        >
-          <ListingCameraCard
-            ready={cameraCardReady}
-            onBack={goBackFromScene3}
-            onConfirm={handlePhotoConfirmed}
-          />
-        </Animated.View>
+        <ListingCameraCard onBack={goBackFromScene3} onConfirm={handlePhotoConfirmed} />
       )}
     </SafeAreaView>
   );
@@ -1261,13 +1192,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Pop-ups ────────────────────────────────────────────────────────────────
-  cameraCard: {
-    position: 'absolute',
-    bottom: 8,
-    left: W * 0.034,
-    right: W * 0.034,
-  },
-
   // ── Scene 4 Price ──────────────────────────────────────────────────────────
   priceContainer: {
     flexDirection: 'row',

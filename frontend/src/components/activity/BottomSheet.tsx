@@ -38,6 +38,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
 import { EASE_OUT, SPRING_SHEET, project, rubberband } from './motion';
 import { SW } from './layout';
+import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 
 type Props = {
   visible: boolean;
@@ -160,7 +161,7 @@ export default function BottomSheet({
         onLayout={(e) => sheetH.set(e.nativeEvent.layout.height)}
         style={[
           styles.sheet,
-          { bottom: insets.bottom + SW * 0.03, maxHeight: H * maxHeightRatio },
+          { bottom: SHEET_BOTTOM, maxHeight: H * maxHeightRatio },
           sheetStyle,
         ]}
         accessibilityViewIsModal
@@ -175,6 +176,7 @@ export default function BottomSheet({
           </View>
         </GestureDetector>
         {children}
+        <View style={{ height: sheetBottomPad(insets.bottom) }} />
       </Animated.View>
     </View>
   );
@@ -185,18 +187,19 @@ const styles = StyleSheet.create({
   backdrop: { backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     position: 'absolute',
-    left: SW * 0.025,
-    right: SW * 0.025,
-    borderRadius: SW * 0.07,
+    left: SHEET_INSET,
+    right: SHEET_INSET,
+    borderRadius: SHEET_RADIUS,
+    borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: '#000',
     backgroundColor: Platform.OS === 'ios' ? 'rgba(0,0,0,0.72)' : 'rgba(10,10,10,0.95)',
     overflow: 'hidden',
   },
   handle: {
-    paddingTop: SW * 0.025,
+    paddingTop: SW * 0.03,
     paddingBottom: SW * 0.03,
-    paddingHorizontal: SW * 0.06,
+    paddingHorizontal: SW * 0.08,
   },
   grabber: {
     alignSelf: 'center',

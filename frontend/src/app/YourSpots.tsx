@@ -16,7 +16,6 @@ import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomFonts } from '@/src/constants/theme';
-import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 import ActivityHeader from '@/src/components/activity/ActivityHeader';
 import SectionTab from '@/src/components/activity/SectionTab';
 import Entrance from '@/src/components/activity/Entrance';
@@ -133,7 +132,7 @@ export default function YourSpots() {
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
-            { paddingBottom: MENU_BAR_HEIGHT + insets.bottom + SW * 0.12 },
+            { paddingBottom: insets.bottom + SW * 0.06 },
           ]}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor='#000' />}
