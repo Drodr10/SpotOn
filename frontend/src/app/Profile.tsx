@@ -43,6 +43,7 @@ import carParkingIcon from '@/assets/images/carparking.png';
 import addListingIcon from '@/assets/images/addlistingimage.png';
 
 import { stripe } from '@/src/utils/stripe';
+import { setAvatarUrl } from '@/src/utils/avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -145,6 +146,7 @@ export default function ProfilePage() {
     if (error || !data) return;
 
     setUser(data as ProfileData);
+    setAvatarUrl((data as ProfileData).avatar_url ?? null);
     setName(data.full_name);
     setEmail(data.email);
     // An account ID is created before the seller finishes Stripe onboarding.
@@ -236,23 +238,23 @@ export default function ProfilePage() {
 
   const pickAvatar = async () => {
     triggerLightHaptic();
-    if (!user) return;
+    if (!user || avatarUploading) return;
 
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setErrorMessage('Photo permission is required to change your picture.');
-      return;
-    }
-
+    // The system photo picker needs no library permission, and asking for one
+    // first was what made the picker slow to appear.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.85,
+      quality: 0.7,
     });
     if (result.canceled || !result.assets?.length) return;
 
     const asset = result.assets[0];
+    const previousUrl = user.avatar_url;
+    // Show the new picture straight away on the card and the menu bar.
+    setUser({ ...user, avatar_url: asset.uri });
+    setAvatarUrl(asset.uri);
     setAvatarUploading(true);
     setErrorMessage('');
 
@@ -260,18 +262,20 @@ export default function ProfilePage() {
       const response = await fetch(asset.uri);
       const arrayBuffer = await response.arrayBuffer();
 
-      const ext = (asset.uri.split('.').pop() || 'jpg').toLowerCase();
-      const contentType =
-        asset.mimeType ?? (ext === 'png' ? 'image/png' : 'image/jpeg');
-      const path = `${user.id}/avatar.${ext}`;
+      const contentType = asset.mimeType ?? 'image/jpeg';
+      const ext = contentType === 'image/png' ? 'png' : 'jpg';
+      // A fresh file name each time: overwriting (upsert) needs a storage SELECT
+      // policy, which was removed so the bucket can't be listed. A new name only
+      // needs the owner INSERT policy, and it also busts image caches.
+      const path = `${user.id}/avatar-${Date.now()}.${ext}`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(path, arrayBuffer, { contentType, upsert: true });
+        .upload(path, arrayBuffer, { contentType });
       if (uploadError) throw uploadError;
 
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
-      const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+      const publicUrl = pub.publicUrl;
 
       const { error: profileError } = await supabase
         .from('profiles')
@@ -279,9 +283,19 @@ export default function ProfilePage() {
         .eq('id', user.id);
       if (profileError) throw profileError;
 
-      setUser({ ...user, avatar_url: publicUrl });
+      setUser((u) => (u ? { ...u, avatar_url: publicUrl } : u));
+      setAvatarUrl(publicUrl);
+
+      // Best effort: tidy up the previous upload. Failure just leaves a stray file.
+      const marker = '/avatars/';
+      const oldPath = previousUrl?.split('?')[0].split(marker)[1];
+      if (oldPath && oldPath !== path) {
+        supabase.storage.from('avatars').remove([decodeURIComponent(oldPath)]).catch(() => {});
+      }
     } catch (e: any) {
-      setErrorMessage(e.message ?? 'Failed to upload avatar.');
+      setUser((u) => (u ? { ...u, avatar_url: previousUrl } : u));
+      setAvatarUrl(previousUrl);
+      Alert.alert("Couldn't update your picture", e?.message ?? 'Please try again.');
     } finally {
       setAvatarUploading(false);
     }

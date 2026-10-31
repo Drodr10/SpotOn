@@ -32,6 +32,7 @@ import { supabase } from '../utils/supabase';
 import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
+import { setAvatarUrl, useAvatarUrl } from '../utils/avatar';
 import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLIDE_MS } from './activity/motion';
 
 import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
@@ -244,7 +245,7 @@ export default function MenuBar() {
   const visible     = TAB_ROUTES.has(currentRoute) || hidden;
 
   const [activeTab, setActiveTab] = useState<TabKey>(routeToTab(currentRoute) ?? 'home');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const avatarUrl = useAvatarUrl();
   const [endTime, setEndTime]     = useState<Date | null>(null);
   const [now, setNow]             = useState<number>(() => Date.now());
   const [screenW, setScreenW]     = useState(Dimensions.get('window').width);

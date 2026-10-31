@@ -7,6 +7,7 @@ import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import MenuBar from "../components/MenuBar";
+import { setAvatarUrl } from "../utils/avatar";
 import { supabase } from "../utils/supabase";
 import { registerForPushNotifications } from "../utils/push";
 
@@ -33,6 +34,8 @@ export default function RootLayout() {
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) registerForPushNotifications();
+      // Don't show the last user's picture to whoever signs in next.
+      if (event === 'SIGNED_OUT') setAvatarUrl(null);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
