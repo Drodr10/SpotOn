@@ -48,7 +48,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { slideIn, slideOut } from '@/src/components/activity/motion';
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
+import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '@/src/constants/sheet';
 import { blockUser, reportListing, reportUser } from '@/src/utils/moderation';
 import {
   triggerErrorHaptic,
@@ -307,7 +307,7 @@ export default function ReportSheet({ visible, target, onClose }: Props) {
           pointerEvents="box-none"
         >
           <Animated.View
-            style={[styles.sheet, { paddingBottom: sheetBottomPad(insets.bottom) + 16 }, sheetStyle]}
+            style={[styles.sheet, { marginBottom: sheetBottom(insets.bottom), paddingBottom: sheetContentPad(insets.bottom) + 16 }, sheetStyle]}
           >
             <GestureDetector gesture={pan}>
               <View collapsable={false}>
@@ -462,7 +462,6 @@ const styles = StyleSheet.create({
   sheet: {
     backgroundColor: '#DCDBD8',
     marginHorizontal: SHEET_INSET,
-    marginBottom: SHEET_BOTTOM,
     borderRadius: SHEET_RADIUS,
     borderCurve: 'continuous',
     paddingHorizontal: screenWidth * 0.075,

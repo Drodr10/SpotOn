@@ -13,7 +13,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -28,9 +27,11 @@ import { supabase } from '../utils/supabase';
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
 import { fetchBlockedIds, unblockUser } from '@/src/utils/moderation';
+import { fetchPublicProfiles } from '@/src/utils/publicProfiles';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
-import defaultAvatar from '@/assets/images/temprofileicon.png';
+import DefaultAvatar from '@/src/components/DefaultAvatar';
+import { ErrorNote } from '@/src/components/activity/Notes';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -147,13 +148,10 @@ export default function MessagesScreen() {
     const ids = await fetchBlockedIds();
     let people: BlockedPerson[] = [];
     if (ids.size > 0) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url')
-        .in('id', [...ids]);
-      const byId = new Map((data ?? []).map((p: any) => [p.id, p]));
+      // Other users' profiles: public fields only, via RPC (RLS hides the row).
+      const byId = await fetchPublicProfiles([...ids]);
       people = [...ids].map((id) => {
-        const p: any = byId.get(id);
+        const p = byId.get(id);
         return { id, name: p?.full_name ?? 'Unknown', avatar: p?.avatar_url ?? null };
       });
     }
@@ -179,10 +177,13 @@ export default function MessagesScreen() {
     })();
   };
 
-  useEffect(() => {
-    mounted.current = true;
-    (async () => {
-      const { data: claims } = await supabase.auth.getClaims();
+  // A failed load shows an error with retry, not "No conversations yet".
+  const [loadError, setLoadError] = useState(false);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const { data: claims, error: claimsError } = await supabase.auth.getClaims();
+      if (claimsError) throw claimsError;
       if (!claims) {
         if (mounted.current) setLoading(false);
         return;
@@ -195,8 +196,12 @@ export default function MessagesScreen() {
         .or(`renter_id.eq.${userId},owner_id.eq.${userId}`)
         .order('updated_at', { ascending: false });
 
-      if (error || !convData || convData.length === 0) {
-        if (mounted.current) setLoading(false);
+      if (error) throw error;
+      if (!convData || convData.length === 0) {
+        if (mounted.current) {
+          setConversations([]);
+          setLoading(false);
+        }
         return;
       }
 
@@ -206,15 +211,13 @@ export default function MessagesScreen() {
           convData.map((c: any) => (c.renter_id === userId ? c.owner_id : c.renter_id)),
         ),
       ];
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url')
-        .in('id', otherIds);
+      // Public fields only, via RPC — other users' profile rows aren't readable.
+      const publicProfiles = await fetchPublicProfiles(otherIds);
       const profileMap: Record<string, { name: string; avatar: string | null }> =
         Object.fromEntries(
-          (profileData ?? []).map((p: any) => [
+          [...publicProfiles.values()].map((p) => [
             p.id,
-            { name: p.full_name, avatar: p.avatar_url ?? null },
+            { name: p.full_name ?? 'Unknown', avatar: p.avatar_url ?? null },
           ]),
         );
 
@@ -291,11 +294,24 @@ export default function MessagesScreen() {
         setConversations(enriched);
         setLoading(false);
       }
-    })();
+    } catch (e) {
+      console.warn('[Messages] load failed', e);
+      if (mounted.current) {
+        setLoadError(true);
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    // Deferred a tick: the loader only sets state after its first await anyway.
+    const t = setTimeout(loadConversations, 0);
     return () => {
+      clearTimeout(t);
       mounted.current = false;
     };
-  }, []);
+  }, [loadConversations]);
 
   const openChat = (conv: Conversation) =>
     withLightHaptic(() =>
@@ -312,10 +328,7 @@ export default function MessagesScreen() {
   const pastConvs = visibleConversations.filter((c) => c.category === 'past');
 
   const Avatar = ({ url, size }: { url: string | null; size: number }) => (
-    <Image
-      source={url ? { uri: url } : defaultAvatar}
-      style={{ width: size, height: size, borderRadius: size / 2 }}
-    />
+    <DefaultAvatar size={size} uri={url} />
   );
 
   return (
@@ -329,6 +342,17 @@ export default function MessagesScreen() {
 
       {loading ? (
         <ActivityIndicator size="large" color="#000" style={styles.loader} />
+      ) : loadError ? (
+        <View style={styles.errorWrap}>
+          <ErrorNote
+            message="We couldn't load your messages. Check your connection and try again."
+            onRetry={() => {
+              setLoadError(false);
+              setLoading(true);
+              loadConversations();
+            }}
+          />
+        </View>
       ) : visibleConversations.length === 0 && blockedPeople.length === 0 ? (
         <Text style={styles.empty}>No conversations yet</Text>
       ) : (
@@ -446,6 +470,7 @@ const styles = StyleSheet.create({
   },
 
   loader: { marginTop: 40 },
+  errorWrap: { marginTop: 40, paddingHorizontal: 24 },
   empty: {
     textAlign: 'center',
     marginTop: 60,

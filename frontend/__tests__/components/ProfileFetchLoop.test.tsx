@@ -97,6 +97,12 @@ jest.mock('@/src/utils/supabase', () => {
           data: { claims: { sub: '11111111-1111-4111-8111-111111111111' } },
           error: null,
         })),
+        // Profile shows the auth user's email (source of truth). The client
+        // never writes profiles.email (a DB trigger on auth.users syncs it).
+        getUser: jest.fn(async () => ({
+          data: { user: { id: '11111111-1111-4111-8111-111111111111', email: 'test@example.com' } },
+          error: null,
+        })),
         signOut: jest.fn(),
         updateUser: jest.fn(),
       },

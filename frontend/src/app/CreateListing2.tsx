@@ -3,7 +3,7 @@
  *
  * Step 1 (scene 2): Pick location (map). Carries the one-line intro that used
  *                   to be its own Welcome scene.
- * Step 2 (scene 3): Camera card over the dimmed map.
+ * Step 2 (scene 3): Camera card on the plain page background.
  * Step 3 (scene 4): Price & availability — main rate, optional secondary rate
  *                   (daily for hourly / monthly for weekly), availability dates
  *                   and an earnings summary, all on one screen. "List my spot"
@@ -55,9 +55,10 @@ import DateRangePicker from '@/src/components/DateRangePicker';
 import FilterToggle from '@/src/components/FilterToggle';
 import ListingCameraCard from '@/src/components/camera/ListingCameraCard';
 import { triggerLightHaptic, triggerSelectionHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { formatReverseGeocodeAddress } from '@/src/utils/geocode';
+import { safeBack, useHardwareBack } from '@/src/utils/navigation';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
-import accessibilityImg from '@/assets/images/accessibility.png';
 import addLocationImg from '@/assets/images/add_location.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
 import addlistingimageAsset from '@/assets/images/addlistingimage.png';
@@ -68,6 +69,10 @@ import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
 const { width: W } = Dimensions.get('window');
 const H_PAD = W * 0.06;
 const BOTTOM_ACTION_HEIGHT = 50;
+
+// Helper-row glyph per step (location → photo → price). Replaces a stock
+// "accessibility" figure that testers read as a stray person icon.
+const STEP_ICONS = ['location-outline', 'camera-outline', 'pricetag-outline'] as const;
 const BOTTOM_ACTION_RADIUS = BOTTOM_ACTION_HEIGHT / 2;
 const TAG_H = W * 0.065;
 const TAG_W = TAG_H * 2;
@@ -318,9 +323,8 @@ export default function CreateListing2() {
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (results.length > 0) {
-        const r = results[0];
-        const parts = [r.streetNumber, r.street, r.city, r.region].filter(Boolean);
-        setAddress(parts.join(', '));
+        const formatted = formatReverseGeocodeAddress(results[0]);
+        setAddress(formatted);
       }
     } catch (_) {}
   };
@@ -342,9 +346,8 @@ export default function CreateListing2() {
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (results.length > 0) {
-        const r = results[0];
-        const parts = [r.streetNumber, r.street, r.city, r.region].filter(Boolean);
-        setAddress(parts.join(', '));
+        const formatted = formatReverseGeocodeAddress(results[0]);
+        setAddress(formatted);
       }
     } catch (_) {}
   };
@@ -482,6 +485,32 @@ export default function CreateListing2() {
     });
   };
 
+  // Step 3 → step 2 (photo). The photo already taken stays in state until a
+  // new one is confirmed.
+  const goBackFromScene4 = () => {
+    setShowCameraPopup(true);
+    setScene(3);
+  };
+
+  // Android system back walks the steps (3 → 2 → 1) instead of dropping the
+  // whole flow; on step 1 it leaves the screen as usual. An open date picker
+  // closes first.
+  useHardwareBack(() => {
+    if (showCalendarPopup) {
+      if (!submitting) setShowCalendarPopup(false);
+      return true;
+    }
+    if (scene === 4) {
+      goBackFromScene4();
+      return true;
+    }
+    if (scene === 3) {
+      goBackFromScene3();
+      return true;
+    }
+    return false;
+  });
+
   // "List my spot". A start date has always been required (the picker can't
   // confirm without one), so with none set yet the picker opens in submit mode
   // and its confirm lists the spot — no extra step when dates are already set.
@@ -548,7 +577,12 @@ export default function CreateListing2() {
         <Text style={styles.titleText}>Listing Creator</Text>
         <Text style={styles.stepText}>Step {step} of 3</Text>
         <View style={styles.helperRow}>
-          <Image source={accessibilityImg} style={styles.accessibilityIcon} />
+          <Ionicons
+            name={STEP_ICONS[step - 1] ?? 'information-circle-outline'}
+            size={18}
+            color="#333"
+            style={styles.helperIcon}
+          />
           <Text style={styles.helperText}>{helperText}</Text>
         </View>
       </View>
@@ -563,7 +597,13 @@ export default function CreateListing2() {
     continueDisabled = false,
   ) => (
     <View style={styles.bottomRow}>
-      <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(onBack)} activeOpacity={0.8}>
+      <TouchableOpacity
+        style={styles.backCircle}
+        onPress={withLightHaptic(onBack)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </TouchableOpacity>
       <TouchableOpacity
@@ -610,11 +650,13 @@ export default function CreateListing2() {
           style={styles.currentLocBtn}
           onPress={withLightHaptic(handleCurrentLocation)}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Use my current location"
         >
           <Image source={addLocationImg} style={styles.addLocationIcon} resizeMode="contain" />
         </TouchableOpacity>
       </View>
-      {renderBottomButtons(() => router.back(), goToScene3)}
+      {renderBottomButtons(() => safeBack('/Homescreen'), goToScene3)}
     </SafeAreaView>
   );
 
@@ -623,24 +665,12 @@ export default function CreateListing2() {
   // ─────────────────────────────────────────────────────────────────────────────
   const renderScene3 = () => (
     <SafeAreaView style={styles.safeArea}>
-      {/* Dimmed map background */}
       {renderSharedHeader('Snap a photo of your spot so renters know where to park.', 2)}
-      <View style={[styles.mapWrapper, { opacity: 0.35 }]}>
-        <MapView
-          style={styles.map}
-          initialRegion={
-            latitude !== null && longitude !== null
-              ? { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-              : GAINESVILLE
-          }
-          scrollEnabled={false}
-          zoomEnabled={false}
-        >
-          {latitude !== null && longitude !== null && (
-            <Marker coordinate={{ latitude, longitude }} />
-          )}
-        </MapView>
-      </View>
+      {/* Solid page background, like steps 1 and 3. This used to be the step-1
+          map at 35% opacity, but the camera card's header ("Let's add a photo
+          to your listing.") floats above the card and the map's street labels
+          showed through behind it. */}
+      <View style={styles.photoBackdrop} />
 
       {/* Camera pop-up — floating live card + tap-away backdrop, self-animated.
           Mounted only while open so the camera session stops on close. */}
@@ -803,7 +833,7 @@ export default function CreateListing2() {
           {renderEarningsSummary()}
         </View>
         {renderBottomButtons(
-          () => setScene(2),
+          goBackFromScene4,
           handleListPress,
           submitting ? 'Creating...' : 'List my spot',
           submitting,
@@ -859,10 +889,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: W * 0.02,
   },
-  accessibilityIcon: {
-    width: 18,
-    height: 18,
-    marginTop: 2,
+  helperIcon: {
+    marginTop: 0,
   },
   helperText: {
     fontFamily: CustomFonts.SwitzerLight,
@@ -889,6 +917,10 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  photoBackdrop: {
+    flex: 1,
+    backgroundColor: '#DCDBD8',
   },
   currentLocBtn: {
     position: 'absolute',

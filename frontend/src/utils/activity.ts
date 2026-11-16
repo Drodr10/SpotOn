@@ -18,6 +18,7 @@ import { Linking, Platform } from 'react-native';
 
 import { supabase } from './supabase';
 import { findOrCreateConversation } from './conversations';
+import { fetchPublicProfile } from './publicProfiles';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -488,14 +489,11 @@ export async function getChatTarget(
   if (role === 'renter') {
     return { conversationId: convo.conversationId, otherUserName: convo.ownerName };
   }
-  const { data } = await supabase
-    .from('profiles')
-    .select('full_name')
-    .eq('id', booking.renterId)
-    .maybeSingle();
+  // Public fields only, via RPC — other users' profile rows aren't readable.
+  const renter = await fetchPublicProfile(booking.renterId);
   return {
     conversationId: convo.conversationId,
-    otherUserName: (data?.full_name as string | null) || 'Renter',
+    otherUserName: renter?.full_name || 'Renter',
   };
 }
 

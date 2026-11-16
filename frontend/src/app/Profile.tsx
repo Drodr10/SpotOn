@@ -16,11 +16,12 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser'
 
 import { supabase } from '@/src/utils/supabase';
+import { signOutAndForgetDevice } from '@/src/utils/signOut';
 import { JwtPayload } from '@supabase/supabase-js';
 
 import { CustomFonts } from '@/src/constants/theme';
@@ -29,8 +30,8 @@ import { api, type ActiveReservation } from '@/src/utils/api';
 import ReservationInfoCard from '@/src/components/ProfilePageComponents/ReservationInfoCard';
 import PillMenu, { PillMenuBackdrop, pillMenuHostStyleForRows, type PillMenuItem } from '@/src/components/PillMenu';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
+import DefaultAvatar from '@/src/components/DefaultAvatar';
 
-import { Ionicons } from '@expo/vector-icons';
 import { formatPlate } from '@/src/utils/vehicles';
 import logoAsset from '@/assets/images/spotonlogo.png';
 import penIcon from '@/assets/images/penicon.png';
@@ -61,12 +62,18 @@ const SUB_SIZE = screenWidth * 0.032;
 const BANNER_HEIGHT = screenWidth * 0.22;
 const BANNER_TEXT = screenWidth * 0.045;
 const VEHICLE_CARD_HEIGHT = screenWidth * 0.22;
-const VEHICLE_CARD_WIDTH = screenWidth * 0.5;
+// A lone car spans the full content width like the banners around it; with
+// several, each card is narrower so the next one peeks in and the row reads
+// as scrollable.
+const VEHICLE_CARD_WIDTH_SINGLE = screenWidth - H_PAD * 2;
+const VEHICLE_CARD_WIDTH_MULTI = screenWidth * 0.68;
 const BANNER_IMAGE_RIGHT = screenWidth * 0.015;
-const VEHICLE_CAR_VISIBLE_RATIO = 0.6;
-const VEHICLE_CAR_IMAGE_WIDTH = VEHICLE_CARD_WIDTH;
-const VEHICLE_CAR_IMAGE_HEIGHT = VEHICLE_CARD_HEIGHT * 1.3;
-const VEHICLE_CAR_CLIP_WIDTH = VEHICLE_CAR_IMAGE_WIDTH * VEHICLE_CAR_VISIBLE_RATIO;
+// registeredCar.avif is 1536x1024 (3:2). The image box keeps that ratio and
+// sits inside the card, so `contain` shows the whole car — the old box was
+// wider than its clip and cut the car off at the card's right edge.
+const VEHICLE_CAR_IMAGE_ASPECT = 1536 / 1024;
+const VEHICLE_CAR_IMAGE_HEIGHT = VEHICLE_CARD_HEIGHT * 0.92;
+const VEHICLE_CAR_IMAGE_WIDTH = VEHICLE_CAR_IMAGE_HEIGHT * VEHICLE_CAR_IMAGE_ASPECT;
 const EMAIL_ICON = screenWidth * 0.09;
 const EDIT_ICON = screenWidth * 0.05;
 const PROFILE_LOGO = screenWidth * 0.13;
@@ -92,10 +99,21 @@ type VehicleProfile = {
   plate_state?: string | null;
 };
 
-const onSignOut = async () => {
-  triggerLightHaptic();
-  await supabase.auth.signOut();
+// Clears this device's push token first (best-effort, bounded), so a shared
+// phone stops receiving the previous user's booking pushes.
+const signOut = async () => {
+  await signOutAndForgetDevice();
   router.replace('/Intro');
+};
+
+// The exit icon sits right next to the Profile pill; a stray tap used to sign
+// the user out on the spot.
+const confirmSignOut = () => {
+  triggerLightHaptic();
+  Alert.alert('Sign out?', undefined, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Sign out', style: 'destructive', onPress: signOut },
+  ]);
 };
 
 export default function ProfilePage() {
@@ -123,6 +141,9 @@ export default function ProfilePage() {
   const [hasListings, setHasListings] = useState(false);
   const [stripeOnboardingLoading, setStripeOnboardingLoading] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  // Set while an email change waits for the user to click the confirmation link.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
   const nameInput = useRef<TextInput>(null);
   const emailInput = useRef<TextInput>(null);
@@ -174,10 +195,27 @@ export default function ProfilePage() {
       .single();
     if (error || !data) return;
 
-    setUser(data as ProfileData);
-    setAvatarUrl((data as ProfileData).avatar_url ?? null);
+    // The auth user's email is the login email and the source of truth.
+    // profiles.email is a server-maintained copy: the on_auth_user_email_update
+    // trigger (20261116160000_profiles_privacy.sql) copies a confirmed change
+    // from auth.users into it. Clients must never write profiles.email.
+    // getUser() asks the server (not the cached JWT) so it reflects a change
+    // confirmed from the email link even before the copy is read.
+    let authEmail: string | null = null;
+    try {
+      const { data: authResp } = await supabase.auth.getUser();
+      authEmail = authResp?.user?.email ?? null;
+      setPendingEmail(authResp?.user?.new_email ?? null);
+    } catch {
+      // Offline etc.: fall back to the profile copy below.
+    }
+    const profile = data as ProfileData;
+    const currentEmail = authEmail ?? profile.email;
+
+    setUser({ ...profile, email: currentEmail });
+    setAvatarUrl(profile.avatar_url ?? null);
     setName(data.full_name);
-    setEmail(data.email);
+    setEmail(currentEmail);
     // An account ID is created before the seller finishes Stripe onboarding.
     // Keep Setup Payouts available until Stripe enables payouts so they can
     // resume after an expired link or missing verification details.
@@ -267,13 +305,22 @@ export default function ProfilePage() {
       return;
     }
     setErrorMessage('');
-    const { error } = await supabase.auth.updateUser({ email });
+    setSuccessMessage('');
+    const newEmail = email.trim();
+    // Only auth.updateUser — never profiles.email directly (see loadProfile).
+    // The login email changes once the link in the confirmation email is
+    // clicked; the auth.users trigger then syncs the profile copy.
+    const { error } = await supabase.auth.updateUser({ email: newEmail });
+    // Until confirmed, the row keeps showing the email that still signs in.
+    setEmail(user.email);
     if (error) {
       setErrorMessage(error.message);
-      setEmail(user.email);
       return;
     }
-    setSuccessMessage('Check your new email to confirm the change.');
+    setPendingEmail(newEmail);
+    setSuccessMessage(
+      `We sent a confirmation link to ${newEmail}. Your email changes once you confirm it.`,
+    );
   };
 
   const pickAvatar = async () => {
@@ -474,7 +521,12 @@ export default function ProfilePage() {
       >
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            // Clear the floating MenuBar, which sits insets.bottom above the
+            // screen edge (this SafeAreaView only pads the top).
+            { paddingBottom: MENU_BAR_HEIGHT + insets.bottom + SECTION_GAP * 2 },
+          ]}
           keyboardShouldPersistTaps='handled'
           showsVerticalScrollIndicator={false}
         >
@@ -494,8 +546,10 @@ export default function ProfilePage() {
             </PillMenu>
             <TouchableOpacity
               style={styles.logoutButton}
-              onPress={onSignOut}
+              onPress={confirmSignOut}
               activeOpacity={0.85}
+              accessibilityLabel='Sign out'
+              accessibilityRole='button'
             >
               <Image source={exitIcon} style={styles.logoutIcon} resizeMode='contain' />
             </TouchableOpacity>
@@ -538,15 +592,7 @@ export default function ProfilePage() {
               activeOpacity={0.85}
               style={styles.avatarTouch}
             >
-              {user.avatar_url ? (
-                <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
-              ) : (
-                // No photo yet: a car on a light disc instead of the old solid
-                // black circle, which testers read as a broken image.
-                <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                  <Ionicons name='car-sport' size={AVATAR_SIZE * 0.5} color='#1A1A1A' />
-                </View>
-              )}
+              <DefaultAvatar size={AVATAR_SIZE} uri={user.avatar_url} />
               {avatarUploading && (
                 <View style={styles.avatarOverlay}>
                   <ActivityIndicator color='#FFFFFF' />
@@ -620,7 +666,13 @@ export default function ProfilePage() {
                 // found make/model alone "blank" and couldn't tell cars apart.
                 <TouchableOpacity
                   key={v.id}
-                  style={styles.vehicleCard}
+                  style={[
+                    styles.vehicleCard,
+                    {
+                      width:
+                        vehicles.length === 1 ? VEHICLE_CARD_WIDTH_SINGLE : VEHICLE_CARD_WIDTH_MULTI,
+                    },
+                  ]}
                   activeOpacity={0.85}
                   onPress={withLightHaptic(() =>
                     router.push({ pathname: '/RegisterVehicle', params: { vehicleId: v.id } } as any),
@@ -643,13 +695,11 @@ export default function ProfilePage() {
                       <Text style={styles.vehicleColorText} numberOfLines={1}>{v.color}</Text>
                     )}
                   </View>
-                  <View style={styles.vehicleCarClip}>
-                    <Image
-                      source={registeredCar}
-                      style={styles.vehicleCarImage}
-                      resizeMode='contain'
-                    />
-                  </View>
+                  <Image
+                    source={registeredCar}
+                    style={styles.vehicleCarImage}
+                    resizeMode='contain'
+                  />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -731,6 +781,11 @@ export default function ProfilePage() {
 
           {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
           {!!successMessage && <Text style={styles.successText}>{successMessage}</Text>}
+          {!!pendingEmail && !successMessage && (
+            <Text style={styles.pendingText}>
+              Waiting for you to confirm {pendingEmail} — check that inbox.
+            </Text>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -742,9 +797,6 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: H_PAD,
     paddingTop: screenWidth * 0.02,
-    // Extra bottom pad so the last cards can scroll clear of the floating MenuBar,
-    // while the page itself extends edge-to-edge underneath it.
-    paddingBottom: MENU_BAR_HEIGHT + screenWidth * 0.1,
     gap: SECTION_GAP,
   },
 
@@ -827,16 +879,6 @@ const styles = StyleSheet.create({
     borderRadius: AVATAR_SIZE / 2,
     overflow: 'hidden',
   },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-  },
-  avatarPlaceholder: {
-    backgroundColor: '#F2F1EE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   avatarOverlay: {
     position: 'absolute',
     top: 0,
@@ -899,15 +941,17 @@ const styles = StyleSheet.create({
     paddingRight: H_PAD,
   },
   vehicleCard: {
-    width: VEHICLE_CARD_WIDTH,
     height: VEHICLE_CARD_HEIGHT,
     borderRadius: CARD_RADIUS,
     backgroundColor: '#F4F4F4',
     overflow: 'hidden',
     paddingLeft: screenWidth * 0.04,
-    justifyContent: 'center',
+    paddingRight: screenWidth * 0.02,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: screenWidth * 0.02,
   },
-  vehicleInfo: { maxWidth: '58%', gap: screenWidth * 0.012 },
+  vehicleInfo: { flex: 1, gap: screenWidth * 0.012 },
   vehicleCardText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: screenWidth * 0.035,
@@ -934,18 +978,7 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.028,
     color: 'rgba(0,0,0,0.6)',
   },
-  vehicleCarClip: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: VEHICLE_CAR_CLIP_WIDTH,
-    overflow: 'hidden',
-  },
   vehicleCarImage: {
-    position: 'absolute',
-    left: 0,
-    top: (VEHICLE_CARD_HEIGHT - VEHICLE_CAR_IMAGE_HEIGHT) / 2,
     width: VEHICLE_CAR_IMAGE_WIDTH,
     height: VEHICLE_CAR_IMAGE_HEIGHT,
   },
@@ -983,6 +1016,12 @@ const styles = StyleSheet.create({
     color: 'rgba(200,0,0,1)',
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: screenWidth * 0.035,
+    textAlign: 'center',
+  },
+  pendingText: {
+    color: 'rgba(0,0,0,0.6)',
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.032,
     textAlign: 'center',
   },
   successText: {

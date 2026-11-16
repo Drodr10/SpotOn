@@ -54,6 +54,7 @@ import Animated, {
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '@/src/utils/supabase';
+import { isValidEmail, normalizeEmail } from '@/src/utils/email';
 
 import signinBg from '@/assets/images/onboardingflow/onboarding.signin.png';
 import mockup1 from '@/assets/images/onboardingflow/onboarding.mockup1.png';
@@ -295,15 +296,21 @@ function SignupStep({ onBack }: { onBack: () => void }) {
 
   const handleSignup = async () => {
     triggerLightHaptic();
-    if (!fullName || !email || !password) {
+    const name = fullName.trim();
+    if (!name || !email.trim() || !password) {
       setError('Please fill in all fields.');
       return;
     }
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setError('');
     setLoading(true);
     const { error: err } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
-      options: { data: { full_name: fullName } },
+      options: { data: { full_name: name } },
     });
     setLoading(false);
     if (err) {
@@ -349,9 +356,15 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                   Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s get you started.
                 </Text>
 
+                {/* Uncontrolled on purpose (no `value` prop): nothing here ever
+                    sets these fields programmatically, and without a JS-owned
+                    value the native text can't be overwritten by a stale
+                    state echo when input arrives faster than the JS thread
+                    (autofill, the iOS strong-password sheet, a busy JS thread).
+                    onChangeText still mirrors the text into state for submit. */}
                 <TextInput
                   style={styles.input}
-                  value={fullName}
+                  defaultValue=""
                   onChangeText={setFullName}
                   placeholder="Name"
                   placeholderTextColor="rgba(0,0,0,0.45)"
@@ -362,7 +375,7 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                 />
                 <TextInput
                   style={styles.input}
-                  value={email}
+                  defaultValue=""
                   onChangeText={setEmail}
                   placeholder="Email"
                   placeholderTextColor="rgba(0,0,0,0.45)"
@@ -375,7 +388,7 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                 <View style={styles.passwordRow}>
                   <TextInput
                     style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
-                    value={password}
+                    defaultValue=""
                     onChangeText={setPassword}
                     placeholder="Password"
                     placeholderTextColor="rgba(0,0,0,0.45)"

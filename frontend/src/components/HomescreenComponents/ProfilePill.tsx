@@ -8,18 +8,18 @@
 // ─── React & React Native ────────────────────────────────────────────────────
 import React from 'react'
 
-import { View, Text, Image, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
 
-// ─── Assets ──────────────────────────────────────────────────────────────────
-import profileIconAsset from '@/assets/images/temprofileicon.png';
+import { useAvatarUrl } from '@/src/utils/avatar';
 
 // ─── Components ──────────────────────────────────────────────────────────────────
 import LogoutButton from '@/src/components/logout-button';
+import DefaultAvatar from '@/src/components/DefaultAvatar';
 
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
@@ -37,11 +37,12 @@ interface ProfilePillProps {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ProfilePill({ username }: ProfilePillProps) {
+  const avatarUrl = useAvatarUrl();
   return (
     <View style={styles.pill}>
       {/* Circular avatar */}
       <TouchableOpacity onPress={withLightHaptic(() => router.push('./Profile'))}>
-        <Image source={profileIconAsset} style={styles.avatar} />
+        <DefaultAvatar size={AVATAR_SIZE} uri={avatarUrl} />
         </TouchableOpacity>
       {/* Username label */}
       <Text style={styles.username}>{username}</Text>
@@ -62,11 +63,6 @@ const styles = StyleSheet.create({
     paddingVertical: V_PAD,
     gap: GAP,
     alignSelf: 'flex-start',
-  },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 999,
   },
   username: {
     fontFamily: CustomFonts.SwitzerLight,

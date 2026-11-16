@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { safeBack } from '@/src/utils/navigation';
 import {
   View,
   Text,
@@ -190,7 +191,7 @@ export default function RegisterVehicle() {
       setErrorMessage(vehicleSaveErrorMessage(error));
       return;
     }
-    router.back();
+    safeBack('/Profile');
   };
 
   const onRemove = () => {
@@ -216,7 +217,7 @@ export default function RegisterVehicle() {
               setErrorMessage(vehicleSaveErrorMessage(error ?? { message: "Couldn't remove this car." }));
               return;
             }
-            router.back();
+            safeBack('/Profile');
           },
         },
       ],
@@ -236,8 +237,10 @@ export default function RegisterVehicle() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backPill}
-            onPress={withLightHaptic(() => router.back())}
+            onPress={withLightHaptic(() => safeBack('/Profile'))}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
             <Text style={styles.backLabel}>Back</Text>
           </TouchableOpacity>

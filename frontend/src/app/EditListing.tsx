@@ -25,7 +25,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { safeBack } from '@/src/utils/navigation';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomFonts } from '@/src/constants/theme';
@@ -170,7 +171,7 @@ export default function EditListing() {
       if (!ok) throw new Error('We couldn’t save your changes. Please try again.');
       hapticSuccess();
       Alert.alert('Saved', 'Your listing has been updated.', [
-        { text: 'OK', onPress: () => router.back() },
+        { text: 'OK', onPress: () => safeBack('/YourSpots') },
       ]);
     } catch (err: any) {
       hapticWarning();
@@ -201,7 +202,7 @@ export default function EditListing() {
             setRemoving(false);
             if (result.ok) {
               hapticSuccess();
-              router.back();
+              safeBack('/YourSpots');
             } else {
               hapticWarning();
               Alert.alert('Could not remove this spot', result.message);

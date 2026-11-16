@@ -51,12 +51,12 @@ export default function PayoutBanner() {
     try {
       const accountId = await stripe.fetchStripeAccountId();
       if (!accountId) {
-        Alert.alert('Error', 'Could not create a payouts account. Please try again later.');
+        Alert.alert("Couldn't set up payouts", 'Could not create a payouts account. Please try again later.');
         return;
       }
       const url = await stripe.fetchStripeAccountLink();
       if (!url) {
-        Alert.alert('Error', 'Could not generate an onboarding link. Please try again.');
+        Alert.alert("Couldn't set up payouts", 'Could not generate an onboarding link. Please try again.');
         return;
       }
       await WebBrowser.openBrowserAsync(url);
@@ -64,7 +64,13 @@ export default function PayoutBanner() {
       await stripe.syncAccount();
       await load(); // refresh state after they return
     } catch (error: any) {
-      Alert.alert('Onboarding Error', error?.message ?? 'An unexpected error occurred.');
+      // Raw messages here are fetch/backend errors ("Network request failed",
+      // HTTP bodies) — log them, show the payer-facing copy.
+      console.warn('[PayoutBanner] payout setup failed', error);
+      Alert.alert(
+        "Couldn't set up payouts",
+        "We couldn't reach SpotOn right now. Check your connection and try again.",
+      );
     } finally {
       setLoading(false);
     }

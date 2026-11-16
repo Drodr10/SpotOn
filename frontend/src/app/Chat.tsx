@@ -15,7 +15,6 @@ import {
   Pressable,
   View,
   Text,
-  Image,
   ImageBackground,
   FlatList,
   TextInput,
@@ -32,6 +31,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { supabase } from '../utils/supabase';
+import { fetchPublicProfile } from '@/src/utils/publicProfiles';
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import {
@@ -42,6 +42,7 @@ import {
   unblockUser,
 } from '@/src/utils/moderation';
 import ReportSheet from '@/src/components/ReportSheet';
+import { safeBack } from '@/src/utils/navigation';
 import ChatActionsMenu, {
   MENU_OVERHANG,
   type ChatMenuItem,
@@ -51,7 +52,7 @@ import {
   triggerErrorHaptic,
 } from '@/src/components/moderation/haptics';
 
-import defaultAvatar from '@/assets/images/temprofileicon.png';
+import DefaultAvatar from '@/src/components/DefaultAvatar';
 import auraGradient from '@/assets/images/profilePage/aura_gradient.png';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -144,11 +145,8 @@ export default function ChatScreen() {
       const otherId =
         conv.renter_id === currentUserId ? conv.owner_id : conv.renter_id;
       setOtherUserId(otherId);
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, avatar_url')
-        .eq('id', otherId)
-        .maybeSingle();
+      // Public fields only, via RPC — other users' profile rows aren't readable.
+      const profile = await fetchPublicProfile(otherId);
       if (profile) {
         setHeaderName(profile.full_name ?? otherUserName ?? 'Chat');
         setHeaderAvatar(profile.avatar_url ?? null);
@@ -285,7 +283,7 @@ export default function ChatScreen() {
       router.replace('/Homescreen');
       return;
     }
-    router.back();
+    safeBack('/Messages');
   };
 
   // -- Report / block -------------------------------------------------------
@@ -425,6 +423,7 @@ export default function ChatScreen() {
             pillHeight={pillSize.height}
             items={menuItems}
             minWidth={screenWidth * 0.56}
+            onClose={closeMenu}
           />
           <Pressable
             onPress={openMenu}
@@ -439,10 +438,7 @@ export default function ChatScreen() {
             accessibilityLabel={`${headerName}. Conversation options`}
             accessibilityState={{ expanded: menuOpen }}
           >
-            <Image
-              source={headerAvatar ? { uri: headerAvatar } : defaultAvatar}
-              style={styles.headerAvatar}
-            />
+            <DefaultAvatar size={HEADER_AVATAR} uri={headerAvatar} />
             <Text style={styles.headerName} numberOfLines={1}>
               {headerName}
             </Text>
@@ -457,6 +453,8 @@ export default function ChatScreen() {
           onPress={withLightHaptic(handleBack)}
           style={styles.backCircle}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={HEADER_BTN_HEIGHT * 0.5} color="#FFFFFF" />
         </TouchableOpacity>
@@ -605,11 +603,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.85)',
     gap: screenWidth * 0.025,
     minWidth: screenWidth * 0.4,
-  },
-  headerAvatar: {
-    width: HEADER_AVATAR,
-    height: HEADER_AVATAR,
-    borderRadius: HEADER_AVATAR / 2,
   },
   headerName: {
     fontFamily: CustomFonts.SwitzerSemibold,

@@ -82,6 +82,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
 
   const [listings, setListings] = useState<NearbyListing[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [userLat, setUserLat]   = useState(DEFAULT_LAT);
   const [userLng, setUserLng]   = useState(DEFAULT_LNG);
 
@@ -115,6 +116,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
   // the closest listings anywhere — sorted by distance, no limit.
   const fetchListings = async (lat: number, lng: number) => {
     setLoading(true);
+    setLoadFailed(false);
 
     // Home uses get_visible_listings(FALSE): excludes not-yet-live listings, expired
     // listings, and anything with a live conflict at now() (confirmed reservation
@@ -128,6 +130,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
     if (visibleError) {
       console.error('[DynamicViewer] get_visible_listings error:', visibleError);
       setListings([]);
+      setLoadFailed(true);
       onFallback?.(false);
       setLoading(false);
       return;
@@ -195,7 +198,29 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
     );
   }
 
-  if (listings.length === 0) return null;
+  // Nothing to show: say so instead of leaving a blank gap under the
+  // "Listings Near You" heading.
+  if (listings.length === 0) {
+    return (
+      <View style={[styles.emptyWrap, { height: CARD_HEIGHT_SMALL }]}>
+        <View style={[styles.emptyCard, { width: CARD_WIDTH, borderRadius: RADIUS }]}>
+          <Ionicons
+            name={loadFailed ? 'cloud-offline-outline' : 'car-outline'}
+            size={W * 0.09}
+            color="rgba(0,0,0,0.45)"
+          />
+          <Text style={styles.emptyTitle}>
+            {loadFailed ? "Couldn't load listings" : 'No spots listed yet'}
+          </Text>
+          <Text style={styles.emptyBody}>
+            {loadFailed
+              ? 'Check your connection and try again later.'
+              : 'Check back soon, or list your own spot with the + button.'}
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   // ── Card (height animates with scroll position) ───────────────────────────
   const renderCard = ({ item, index }: { item: NearbyListing; index: number }) => {
@@ -323,6 +348,31 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
 }
 
 const styles = StyleSheet.create({
+  emptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  emptyTitle: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: 17,
+    color: '#000',
+    textAlign: 'center',
+  },
+  emptyBody: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 14,
+    lineHeight: 19,
+    color: 'rgba(0,0,0,0.6)',
+    textAlign: 'center',
+  },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',

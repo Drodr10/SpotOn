@@ -33,6 +33,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { safeBack } from '@/src/utils/navigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
@@ -45,6 +46,7 @@ import Animated, {
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '@/src/utils/supabase';
+import { normalizeEmail } from '@/src/utils/email';
 
 import signinBg from '@/assets/images/onboardingflow/onboarding.signin.png';
 import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
@@ -92,12 +94,18 @@ export default function SignIn() {
 
   const handleLogin = async () => {
     triggerLightHaptic();
-    if (!email || !password) {
+    // Normalize only — no format check here, so accounts created before
+    // sign-up validation existed (e.g. "alex.r@example") can still sign in.
+    const normalized = normalizeEmail(email);
+    if (!normalized || !password) {
       setError('Please fill in all fields.');
       return;
     }
     setLoading(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: err } = await supabase.auth.signInWithPassword({
+      email: normalized,
+      password,
+    });
     setLoading(false);
     if (err) {
       setError(err.message);
@@ -115,8 +123,10 @@ export default function SignIn() {
       <SafeAreaView style={styles.backWrap} edges={['top']}>
         <TouchableOpacity
           style={styles.backPill}
-          onPress={withLightHaptic(() => router.back())}
+          onPress={withLightHaptic(() => safeBack('/Intro'))}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={BACK_PILL_ICON} color="#000" />
         </TouchableOpacity>

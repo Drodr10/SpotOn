@@ -27,6 +27,7 @@ import {
   AppState,
   Image,
   Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -56,6 +57,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
 import { slideIn, slideOut } from '@/src/components/activity/motion';
+import { sheetBottom } from '@/src/constants/sheet';
 import cameraanalogImg from '@/assets/images/cameraanalog.png';
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
@@ -162,7 +164,13 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   const denied = permission !== null && !granted && permission.status !== 'undetermined';
   const blocked = (denied || cameraError) && photo === null;
   const mountCamera = ready && granted && !cameraError;
-  const cardHeight = Math.round(Math.min(winH * 0.72, winH - insets.top - HEADER_RESERVE));
+  // iOS: 8pt from the screen bottom (card runs under the home indicator, as
+  // designed). Android edge-to-edge: 8dp above the navigation bar so the system
+  // gesture handle / buttons never draw over the controls. See sheet.ts.
+  const cardBottom = sheetBottom(insets.bottom);
+  const cardHeight = Math.round(
+    Math.min(winH * 0.72, winH - insets.top - HEADER_RESERVE - (cardBottom - EDGE_GAP)),
+  );
   const radius = insets.bottom > 0 ? CORNER_RADIUS : CORNER_RADIUS_SQUARE;
 
   // ── Shared values ──────────────────────────────────────────────────────────
@@ -188,6 +196,27 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
     appear.set(withTiming(1, { duration: 180 }));
     slideIn(sheetY, winH, settled);
   }, [reduceMotion, appear, sheetY, winH]);
+
+  // ── Android: re-assert the resting pose after the permission dialog ────────
+  // On a fresh install the first `requestPermission()` shows the system dialog,
+  // which pauses/resumes the Activity. The Fabric commit that then mounts
+  // <CameraView> resets the card's native opacity/transform to the initial
+  // animated values (opacity 0, translateY = winH), while Reanimated still
+  // believes it last applied 1 / 0 and diffs every same-value update away, so
+  // the card stays invisible over the backdrop until something actually moves
+  // it (the second attempt works because no dialog is shown). Nudging `appear`
+  // to a different value forces the whole animated style (opacity + transform)
+  // to be re-applied. iOS presents the dialog without this lifecycle and has
+  // never shown the bug, so it is left untouched.
+  const reassertPose = useCallback(() => {
+    if (Platform.OS !== 'android' || closing.get()) return;
+    appear.set(0.999);
+    appear.set(withTiming(1, { duration: 100 }));
+  }, [closing, appear]);
+
+  useEffect(() => {
+    if (mountCamera) reassertPose();
+  }, [mountCamera, reassertPose]);
 
   // ── Close paths ────────────────────────────────────────────────────────────
   const runClose = useCallback(
@@ -255,10 +284,13 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   // Coming back from Settings after flipping the switch.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refreshPermission().catch(() => {});
+      if (state === 'active') {
+        refreshPermission().catch(() => {});
+        if (ready) reassertPose();
+      }
     });
     return () => sub.remove();
-  }, [refreshPermission]);
+  }, [refreshPermission, ready, reassertPose]);
 
   // ── Live <-> photo crossfade ───────────────────────────────────────────────
   useEffect(() => {
@@ -274,7 +306,8 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   const handleCameraReady = useCallback(() => {
     setCameraReady(true);
     cameraFade.set(withTiming(1, { duration: reduceMotion ? 150 : 320, easing: EASE_OUT }));
-  }, [cameraFade, reduceMotion]);
+    reassertPose(); // belt and braces for the Android first-grant case above
+  }, [cameraFade, reduceMotion, reassertPose]);
 
   const handleMountError = useCallback(() => {
     // Simulators and camera-less devices land here.
@@ -404,7 +437,10 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
         accessibilityLabel="Close camera"
       />
 
-      <Animated.View style={[styles.sheet, sheetStyle]} pointerEvents="box-none">
+      <Animated.View
+        style={[styles.sheet, { bottom: cardBottom }, sheetStyle]}
+        pointerEvents="box-none"
+      >
         {/* Header sits on the page background, above the card */}
         <View style={styles.headerRow} pointerEvents="none">
           <Image source={cameraanalogImg} style={styles.headerGlyph} resizeMode="contain" />
@@ -556,7 +592,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: EDGE_GAP,
     right: EDGE_GAP,
-    bottom: EDGE_GAP,
   },
 
   // ── Header (on page background) ────────────────────────────────────────────

@@ -17,9 +17,10 @@ import {
   ActivityIndicator,
   Alert,
   useWindowDimensions,
+  Platform,
   ScrollView as RNScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 // ─── Expo Router ─────────────────────────────────────────────────────────────
@@ -68,6 +69,8 @@ import {
 } from '@/src/utils/conversations';
 import DateRangePicker from '@/src/components/DateRangePicker';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { safeBack, useHardwareBack } from '@/src/utils/navigation';
+import { ErrorNote } from '@/src/components/activity/Notes';
 import { usePricingPreview } from '@/src/hooks/usePricingPreview';
 import { getPrimaryRate } from '@/src/utils/listingPrice';
 
@@ -282,7 +285,7 @@ function NearbyLocationCard({
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function SearchScreen() {
-  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const listRef = useRef<FlatList<Listing>>(null);
 
@@ -402,6 +405,9 @@ export default function SearchScreen() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Network/RPC failure — shown as an error with retry, not as "No spots found".
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -414,6 +420,23 @@ export default function SearchScreen() {
    */
   const [viewState, setViewState] = useState<'list' | 'detail' | 'booking'>('list');
   const isDetailView = viewState === 'detail';
+  // Android: the panel and its buttons sit flush with the screen bottom, so
+  // keep them above the system navigation bar. iOS layout is unchanged.
+  const navBarPad = Platform.OS === 'android' ? insets.bottom : 0;
+
+  // Android system back steps the view machine back (booking → detail → list)
+  // instead of leaving the route; the selected listing is kept.
+  useHardwareBack(() => {
+    if (viewState === 'booking') {
+      setViewState('detail');
+      return true;
+    }
+    if (viewState === 'detail') {
+      setViewState('list');
+      return true;
+    }
+    return false;
+  });
   const [detailContentHeight, setDetailContentHeight] = useState(0);
 
   // ─── Animated panel state (Reanimated worklets) ────────────────────────
@@ -441,9 +464,15 @@ export default function SearchScreen() {
   }, []);
 
   const fetchPublishableKey = async () => {
-    const key = await stripe.getKey();
+    // Offline/backend down: don't crash with an unhandled rejection; Reserve
+    // surfaces its own error if the key is still missing at checkout.
+    let key: string | null = null;
+    try {
+      key = await stripe.getKey();
+    } catch (e) {
+      console.warn('[search] publishable key unavailable', e);
+    }
     if (key) setPublishableKey(key);
-    else console.log('Error fetching publishable key');
   };
 
   const initialRegion = {
@@ -482,6 +511,7 @@ export default function SearchScreen() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      setLoadError(false);
 
       // Sort: bookable-now listings first (by distance), then locked/banner
       // listings (by distance). Banner listings always rank below any bookable
@@ -499,15 +529,24 @@ export default function SearchScreen() {
             return a.distance - b.distance;
           });
 
-      const { data: visibleData, error: visibleError } = await supabase.rpc(
-        'get_visible_listings',
-        { p_include_upcoming: true, p_include_active_reserved: true },
-      );
+      let visibleData: any[] | null = null;
+      let visibleError: unknown = null;
+      try {
+        const res = await supabase.rpc('get_visible_listings', {
+          p_include_upcoming: true,
+          p_include_active_reserved: true,
+        });
+        visibleData = res.data;
+        visibleError = res.error;
+      } catch (e) {
+        visibleError = e;
+      }
 
       if (visibleError) {
-        console.error('Supabase get_visible_listings error:', visibleError);
+        console.warn('Supabase get_visible_listings error:', visibleError);
         setListings([]);
         setIsFallback(false);
+        setLoadError(true);
         setLoading(false);
         return;
       }
@@ -528,7 +567,7 @@ export default function SearchScreen() {
       let fallback = false;
 
       if (resolved.length === 0 && (visibleData?.length ?? 0) > 0) {
-        resolved = decorate(visibleData);
+        resolved = decorate(visibleData ?? []);
         fallback = resolved.length > 0;
       }
 
@@ -536,7 +575,7 @@ export default function SearchScreen() {
       setIsFallback(fallback);
       setLoading(false);
     })();
-  }, [searchLat, searchLng, userLat, userLng]);
+  }, [searchLat, searchLng, userLat, userLng, reloadKey]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -549,7 +588,7 @@ export default function SearchScreen() {
       // Use measured content height when available; fall back to fixed constant.
       const targetH =
         detailContentHeight > 0
-          ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
+          ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24 + navBarPad)
           : PANEL_DETAIL_HEIGHT;
       animatePanelHeight(targetH);
       detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
@@ -567,6 +606,7 @@ export default function SearchScreen() {
     PANEL_MIN_HEIGHT,
     PANEL_MAX_HEIGHT,
     sizes.DETAIL_HEADER_HEIGHT,
+    navBarPad,
     animatePanelHeight,
     detailOpacity,
     listOpacity,
@@ -578,7 +618,7 @@ export default function SearchScreen() {
     if (isDetailView && detailContentHeight > 0) {
       const target = Math.min(
         PANEL_MAX_HEIGHT,
-        sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
+        sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24 + navBarPad,
       );
       animatePanelHeight(target);
     }
@@ -587,6 +627,7 @@ export default function SearchScreen() {
     detailContentHeight,
     PANEL_MAX_HEIGHT,
     sizes.DETAIL_HEADER_HEIGHT,
+    navBarPad,
     animatePanelHeight,
   ]);
 
@@ -709,7 +750,16 @@ export default function SearchScreen() {
           style={[styles.map, { width: screenWidth, height: screenHeight }]}
           initialRegion={initialRegion}
           showsUserLocation
-          mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
+          // Android (Google Maps) shows a native My Location button top-right;
+          // edge-to-edge puts the map under the status bar, so pad it down by
+          // the status-bar inset. iOS (Apple Maps) has no such button and
+          // keeps its original 0 top padding.
+          mapPadding={{
+            top: Platform.OS === 'android' ? insets.top : 0,
+            right: 0,
+            bottom: PANEL_MIN_HEIGHT,
+            left: 0,
+          }}
         >
           <Marker
             coordinate={{ latitude: searchLat, longitude: searchLng }}
@@ -740,7 +790,10 @@ export default function SearchScreen() {
                 padding: screenWidth * 0.02,
               },
             ]}
-            onPress={withLightHaptic(() => router.back())}
+            onPress={withLightHaptic(() => safeBack('/Homescreen'))}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={8}
           >
             <Ionicons name="arrow-back" size={sizes.BACK_SIZE} color="#000" />
           </TouchableOpacity>
@@ -757,6 +810,7 @@ export default function SearchScreen() {
               borderTopRightRadius: screenWidth * 0.1,
               paddingHorizontal: sizes.H_PAD,
               paddingTop: sizes.V_PAD * 0.5,
+              paddingBottom: navBarPad,
             },
             animatedPanelStyle,
           ]}
@@ -814,6 +868,13 @@ export default function SearchScreen() {
                 color="#000"
                 style={{ marginTop: screenHeight * 0.08 }}
               />
+            ) : loadError ? (
+              <View style={{ marginTop: screenHeight * 0.04 }}>
+                <ErrorNote
+                  message="We couldn't load spots right now. Check your connection and try again."
+                  onRetry={() => setReloadKey((k) => k + 1)}
+                />
+              </View>
             ) : filteredListings.length === 0 ? (
               <Text
                 style={[
@@ -1016,6 +1077,8 @@ function ListingDetailView({
           ]}
           onPress={withLightHaptic(onBack)}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Back to results"
         >
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -1308,6 +1371,10 @@ function BookingView({
   onPaymentDone: () => void;
 }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Pay/back row: 16 from the screen edge (iOS, unchanged); on Android also
+  // clear the system navigation bar.
+  const bottomBarGap = 16 + (Platform.OS === 'android' ? insets.bottom : 0);
 
   // Mount-time anchor. Still frozen ON PURPOSE, but now only for Schedule mode,
   // which borrows its minutes from it (see the booking-math memo below) — a
@@ -1858,10 +1925,12 @@ function BookingView({
           </RNScrollView>
 
           {/* Bottom bar */}
-          <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
+          <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD, marginBottom: bottomBarGap }]}>
             <TouchableOpacity
               onPress={withLightHaptic(onBack)}
               style={bookingStyles.backCircle}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
               activeOpacity={0.85}
             >
               <Ionicons name="chevron-back" size={22} color="#fff" />
@@ -2205,10 +2274,12 @@ function BookingView({
         </RNScrollView>
 
         {/* Bottom row pinned outside RNScrollView — always visible. */}
-        <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
+        <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD, marginBottom: bottomBarGap }]}>
           <TouchableOpacity
             onPress={withLightHaptic(onBack)}
             style={bookingStyles.backCircle}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             activeOpacity={0.85}
           >
             <Ionicons name="chevron-back" size={22} color="#fff" />
