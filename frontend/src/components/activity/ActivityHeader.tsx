@@ -1,6 +1,10 @@
 /**
- * ActivityHeader — black title pill on the left, round black back button on the
- * right (Figma 746:6 "Header" + "Navigation Icon").
+ * ActivityHeader — title on the left, round black back button on the right
+ * (Figma 746:6 "Header" + "Navigation Icon").
+ *
+ * The title is only drawn as a black pill when it IS a control (the dropdown
+ * variant). A plain title is plain text: testers kept tapping the black
+ * "Activity Details" pill because it matched the back button beside it.
  */
 
 import React from 'react';
@@ -49,11 +53,9 @@ export default function ActivityHeader({ title, menu }: { title: string; menu?: 
           </Text>
         </PillMenu>
       ) : (
-        <View style={styles.pill} accessibilityRole='header'>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-        </View>
+        <Text style={styles.plainTitle} numberOfLines={1} accessibilityRole='header'>
+          {title}
+        </Text>
       )}
       <PressableCard
         onPress={goBack}
@@ -89,6 +91,13 @@ const styles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: SW * 0.05,
     color: '#FFFFFF',
+  },
+  plainTitle: {
+    flexShrink: 1,
+    marginRight: SW * 0.03,
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.07,
+    color: '#000000',
   },
   back: {
     width: HEADER_H,

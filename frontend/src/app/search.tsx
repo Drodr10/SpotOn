@@ -1,3 +1,4 @@
+import { formatPlate } from '@/src/utils/vehicles';
 /**
  * search.tsx — Figma: "Search / Map Screen" (387-82) + listing detail (389-166).
  *
@@ -1245,6 +1246,7 @@ type VehicleProfile = {
   model: string;
   color: string;
   plate_last4?: string | null;
+  plate_state?: string | null;
 };
 
 const HARD_CAP_HOURS = 96; // 4 days
@@ -1412,7 +1414,8 @@ function BookingView({
       setVehiclesLoading(true);
       const { data, error } = await supabase
         .from('vehicles')
-        .select('id, make, model, color, plate_last4')
+        // '*' tolerates a DB without plate_state (20261116140000).
+        .select('*')
         .eq('owner_user_id', currentUserId)
         .order('created_at', { ascending: false });
 
@@ -1796,7 +1799,7 @@ function BookingView({
                         activeOpacity={0.85}
                       >
                         <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
-                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ? formatPlate(v.plate_last4, v.plate_state, true) : 'plate'}`}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -2137,7 +2140,7 @@ function BookingView({
                     activeOpacity={0.85}
                   >
                     <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
-                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ? formatPlate(v.plate_last4, v.plate_state, true) : 'plate'}`}
                     </Text>
                   </TouchableOpacity>
                 );

@@ -26,6 +26,24 @@ export type BookingPaymentResult =
     | { status: 'unavailable'; message: string }
     | { status: 'error'; message: string };
 
+// Onboarding calls had no timeout: a dead tunnel or a backend cold start left the
+// Profile "Setup Payouts" button on "Loading..." forever. 30s leaves room for a
+// cold start while still giving up eventually; AbortError surfaces as a throw.
+const ONBOARDING_TIMEOUT_MS = 30_000;
+
+const fetchWithTimeout = async (url: string, init: RequestInit, ms = ONBOARDING_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (e: any) {
+        if (e?.name === 'AbortError') throw new Error('The server took too long to respond. Please try again.');
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 const getKey = async () : Promise<string | null> => {
     const resp = await fetch(`${API_IP}/stripe/key`, {
         method: "GET",
@@ -139,7 +157,7 @@ const fetchStripeAccountId = async (): Promise<string | null> => {
 
     console.log(`Attempting to create stripe account for user ${user_id}...`)
 
-    const resp = await fetch(`${API_IP}/stripe/create-connect-account`, {
+    const resp = await fetchWithTimeout(`${API_IP}/stripe/create-connect-account`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -173,7 +191,7 @@ const fetchStripeAccountLink = async (): Promise<string | null> => {
         return null;
     }
 
-    const resp = await fetch(`${API_IP}/stripe/create-account-link`, {
+    const resp = await fetchWithTimeout(`${API_IP}/stripe/create-account-link`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -206,7 +224,7 @@ const syncAccount = async (): Promise<{ payoutsEnabled: boolean }> => {
         return { payoutsEnabled: false };
     }
     try {
-        const resp = await fetch(`${API_IP}/stripe/sync-account`, {
+        const resp = await fetchWithTimeout(`${API_IP}/stripe/sync-account`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",

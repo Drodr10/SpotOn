@@ -19,6 +19,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useSegments } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Reanimated, {
@@ -37,7 +38,6 @@ import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLI
 
 import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
 
-import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
 import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
@@ -338,7 +338,7 @@ export default function MenuBar() {
       if (cancelled || !user) return;
 
       // Avatar lives in profiles.avatar_url — that's the source of truth the
-      // Profile page writes to. Falls through to temprofileicon if not set.
+      // Profile page writes to. Falls back to a car icon if not set.
       const { data: profileRow } = await supabase
         .from('profiles')
         .select('avatar_url')
@@ -522,10 +522,27 @@ export default function MenuBar() {
               style={{ width: D.slot, height: barH, alignItems: 'center', justifyContent: 'center' }}
             >
               <Animated.View style={{ transform: [{ scale: scales.profile }] }}>
-                <Image
-                  source={avatarUrl ? { uri: avatarUrl } : profileDefault}
-                  style={{ width: D.profileSize, height: D.profileSize, borderRadius: D.profileSize / 2 }}
-                />
+                {avatarUrl ? (
+                  <Image
+                    source={{ uri: avatarUrl }}
+                    style={{ width: D.profileSize, height: D.profileSize, borderRadius: D.profileSize / 2 }}
+                  />
+                ) : (
+                  // Same car-on-light-disc placeholder as the Profile card
+                  // (replaces the temporary cartoon image).
+                  <View
+                    style={{
+                      width: D.profileSize,
+                      height: D.profileSize,
+                      borderRadius: D.profileSize / 2,
+                      backgroundColor: '#F2F1EE',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name='car-sport' size={D.profileSize * 0.5} color='#1A1A1A' />
+                  </View>
+                )}
               </Animated.View>
             </TouchableOpacity>
 

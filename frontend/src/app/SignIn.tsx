@@ -148,6 +148,10 @@ export default function SignIn() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
+                  // iOS keychain / Android autofill: "username" pairs with the
+                  // password field below so iOS offers and saves credentials.
+                  textContentType="username"
+                  autoComplete="email"
                 />
 
                 <View style={styles.passwordRow}>
@@ -158,6 +162,8 @@ export default function SignIn() {
                     placeholder="Password"
                     placeholderTextColor="rgba(0,0,0,0.45)"
                     secureTextEntry
+                    textContentType="password"
+                    autoComplete="current-password"
                     autoCapitalize="none"
                     autoCorrect={false}
                     returnKeyType="go"

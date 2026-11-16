@@ -357,6 +357,8 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                   placeholderTextColor="rgba(0,0,0,0.45)"
                   autoCapitalize="words"
                   autoCorrect={false}
+                  textContentType="name"
+                  autoComplete="name"
                 />
                 <TextInput
                   style={styles.input}
@@ -367,6 +369,8 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
+                  textContentType="username"
+                  autoComplete="email"
                 />
                 <View style={styles.passwordRow}>
                   <TextInput
@@ -376,6 +380,10 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                     placeholder="Password"
                     placeholderTextColor="rgba(0,0,0,0.45)"
                     secureTextEntry
+                    // "newPassword" makes iOS suggest a strong password and offer
+                    // to save it to the keychain on sign-up.
+                    textContentType="newPassword"
+                    autoComplete="new-password"
                     autoCapitalize="none"
                     autoCorrect={false}
                     returnKeyType="go"

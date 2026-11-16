@@ -13,6 +13,7 @@
  *                  pending_payment -> cancelled    (abandoned checkout)
  */
 
+import { formatPlate } from './vehicles';
 import { Linking, Platform } from 'react-native';
 
 import { supabase } from './supabase';
@@ -77,8 +78,13 @@ export const CANCELLATION_WINDOW_HOURS = 24;
  * policy on `listings` is `is_active = true`), and `reservations_parties_select`
  * resolves the owner through that same table. So deactivating a listing hides
  * its whole booking history from its owner. While this is false we only allow
- * removing listings that have never been booked. Flip to true once an owner
- * SELECT policy exists (see report) to relax that to "no upcoming bookings".
+ * removing listings that have never been booked.
+ *
+ * Migration 20261116130000_listings_owner_select adds that owner SELECT policy,
+ * but do NOT flip this just because it is applied: fetchHostDashboard still
+ * loads only *active* listings (and their bookings), so a removed spot's
+ * earnings would still vanish from Seller Account. Flip only after the
+ * dashboard also reads the owner's inactive listings for bookings/earnings.
  */
 export const OWNER_CAN_READ_INACTIVE_LISTINGS = false;
 
@@ -215,7 +221,8 @@ export async function fetchBookingVehicle(
       if (!booking.vehicleId) return null;
       const { data } = await supabase
         .from('vehicles')
-        .select('make, model, color, license_plate')
+        // '*' tolerates a DB without plate_state (20261116140000).
+        .select('*')
         .eq('id', booking.vehicleId)
         .maybeSingle();
       if (!data) return null;
@@ -223,7 +230,7 @@ export async function fetchBookingVehicle(
         make: data.make,
         model: data.model,
         color: data.color,
-        licensePlate: data.license_plate,
+        licensePlate: formatPlate(data.license_plate, data.plate_state),
       };
     }
     const { data } = await supabase.rpc('get_active_booking_vehicle_for_listing_owner', {
@@ -231,7 +238,12 @@ export async function fetchBookingVehicle(
     });
     const row = data?.[0];
     if (!row) return null;
-    return { make: row.make, model: row.model, color: row.color, licensePlate: row.license_plate };
+    return {
+      make: row.make,
+      model: row.model,
+      color: row.color,
+      licensePlate: formatPlate(row.license_plate, row.plate_state),
+    };
   } catch (err) {
     console.warn('[activity] vehicle lookup failed', err);
     return null;
@@ -381,6 +393,81 @@ export async function deactivateListing(listingId: string, ownerId: string): Pro
   const { data, error } = await supabase
     .from('listings')
     .update({ is_active: false })
+    .eq('id', listingId)
+    .eq('owner_id', ownerId)
+    .select('id');
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+export type RemoveListingResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Re-checks against fresh reservation rows (the caller's list may be stale),
+ * then deactivates. Shared by the Manage Listings swipe and Edit Listing's
+ * "Remove spot" button so both enforce the same rules.
+ */
+export async function removeListingChecked(listingId: string): Promise<RemoveListingResult> {
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId) return { ok: false, message: 'You appear to be signed out. Please sign in again.' };
+    const fresh = await fetchListingBookings(listingId);
+    const reason = listingRemovalBlock(listingId, fresh, Date.now());
+    if (reason) return { ok: false, message: reason };
+    const done = await deactivateListing(listingId, userId);
+    if (!done) return { ok: false, message: 'We couldn’t remove this listing. Please try again.' };
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, message: err?.message ?? 'Something went wrong. Please try again.' };
+  }
+}
+
+// ─── Listing editing ─────────────────────────────────────────────────────────
+
+export type EditableListing = BookingListing & {
+  available_from: string | null;
+  available_until: string | null;
+};
+
+/** The owner's listing by id, or null if it doesn't exist / isn't theirs / isn't readable. */
+export async function fetchEditableListing(
+  listingId: string,
+  ownerId: string,
+): Promise<EditableListing | null> {
+  const { data, error } = await supabase
+    .from('listings')
+    .select(`${LISTING_COLUMNS}, available_from, available_until`)
+    .eq('id', listingId)
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as EditableListing | null) ?? null;
+}
+
+export type ListingPatch = {
+  hourly_rate: number | null;
+  daily_rate: number | null;
+  weekly_rate: number | null;
+  monthly_rate: number | null;
+  price_per_hour: number;
+  available_from: string | null;
+  available_until: string | null;
+};
+
+/**
+ * Writes through the existing `listings_owner_update` RLS policy. Existing
+ * reservations keep their own total_price / platform_fee / host_payout (stored
+ * at booking time by finalize_paid_reservation), so rate changes only affect
+ * future bookings. Returns false if no row changed (RLS denial / not owner).
+ */
+export async function updateListing(
+  listingId: string,
+  ownerId: string,
+  patch: ListingPatch,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('listings')
+    .update(patch)
     .eq('id', listingId)
     .eq('owner_id', ownerId)
     .select('id');

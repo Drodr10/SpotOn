@@ -1,13 +1,16 @@
 /**
  * ListingsSheet — "Your listings currently on the marketplace" (Figma 787:122).
  *
+ * Tapping a row opens Edit Listing (rates, availability, Remove spot) — the
+ * swipe below was the only way to remove a spot and testers never found it.
+ *
  * Each row swipes left (UI-thread pan, 1:1 tracking, rubber-band at the limit):
  *  - a pink delete area is revealed; crossing the threshold ticks a selection
  *    haptic (and ticks again if you pull back), releasing past it asks for
  *    confirmation, then deactivates the listing (listings.is_active = false via
  *    the existing owner-update RLS policy).
  *  - listings that can't be removed safely (see `listingRemovalBlock`) get a
- *    capped, grey "locked" reveal that springs back, plus an explanation on tap.
+ *    capped, grey "locked" reveal that springs back; Edit Listing explains why.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
@@ -73,6 +76,8 @@ type Props = {
   onRemove: (listing: BookingListing) => Promise<RemoveResult>;
   /** Called once the row has finished sliding away after a successful removal. */
   onRemoved: (listingId: string) => void;
+  /** Tap on a row: open the edit screen for that listing. */
+  onEdit: (listing: BookingListing) => void;
 };
 
 function describe(l: BookingListing, bookings: Booking[], now: number) {
@@ -106,12 +111,14 @@ function ListingRow({
   blockedReason,
   onRemove,
   onRemoved,
+  onEdit,
 }: {
   listing: BookingListing;
   caption: string;
   blockedReason: string | null;
   onRemove: Props['onRemove'];
   onRemoved: Props['onRemoved'];
+  onEdit: Props['onEdit'];
 }) {
   const canRemove = blockedReason === null;
   const x = useSharedValue(0);
@@ -232,11 +239,9 @@ function ListingRow({
       <GestureDetector gesture={pan}>
         <Animated.View style={rowStyle}>
           <PressableCard
-            silent={!blockedReason}
-            onPress={() => {
-              if (blockedReason) Alert.alert('This listing can’t be removed yet', blockedReason);
-            }}
-            accessibilityLabel={`${listing.address}, ${rateLabel}. ${caption}. ${
+            disabled={removing}
+            onPress={() => onEdit(listing)}
+            accessibilityLabel={`${listing.address}, ${rateLabel}. ${caption}. Tap to edit. ${
               canRemove ? 'Swipe left to remove.' : 'Cannot be removed yet.'
             }`}
             style={styles.row}
@@ -270,6 +275,7 @@ export default function ListingsSheet({
   now,
   onRemove,
   onRemoved,
+  onEdit,
 }: Props) {
   const rows = useMemo(
     () => listings.map((l) => ({ listing: l, ...describe(l, bookings, now) })),
@@ -280,7 +286,7 @@ export default function ListingsSheet({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title='Your listings currently on the marketplace, swipe to remove them.'
+      title='Your listings on the marketplace. Tap one to edit it, or swipe left to remove it.'
       maxHeightRatio={0.7}
     >
       {rows.length === 0 ? (
@@ -302,6 +308,7 @@ export default function ListingsSheet({
               blockedReason={r.blockedReason}
               onRemove={onRemove}
               onRemoved={onRemoved}
+              onEdit={onEdit}
             />
           ))}
         </ScrollView>

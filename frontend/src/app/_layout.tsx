@@ -56,7 +56,6 @@ export default function RootLayout() {
             <Stack.Screen name="QuickSearch" />
             <Stack.Screen name="Homescreen" />
             <Stack.Screen name="search" />
-            <Stack.Screen name="CreateListing" />
             <Stack.Screen name="CreateListing2" />
             <Stack.Screen name="Messages" />
             <Stack.Screen name="Chat" />
@@ -64,6 +63,7 @@ export default function RootLayout() {
             <Stack.Screen name="RegisterVehicle" />
             <Stack.Screen name="PreviousReservations" />
             <Stack.Screen name="YourSpots" />
+            <Stack.Screen name="EditListing" />
             <Stack.Screen name="ActivityDetails" options={{ animation: 'slide_from_right' }} />
           </Stack>
           <MenuBar />

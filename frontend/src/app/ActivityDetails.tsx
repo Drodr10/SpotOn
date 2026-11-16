@@ -36,7 +36,7 @@ import { LiveLabel } from '@/src/components/activity/RollingText';
 import { ErrorNote, LoadingNote } from '@/src/components/activity/Notes';
 import { useCancelBooking } from '@/src/components/activity/useCancelBooking';
 import { useNow } from '@/src/components/activity/useNow';
-import { CARD_GAP, CARD_W, H_PAD, PAPER, SECTION_GAP, SW } from '@/src/components/activity/layout';
+import { CARD_GAP, CARD_W, H_PAD, PAPER, SECTION_GAP, SW, HEADER_TOP_GAP } from '@/src/components/activity/layout';
 import {
   bookingAddress,
   bookingPhase,
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: {
     paddingHorizontal: H_PAD,
-    paddingTop: SW * 0.02,
+    paddingTop: HEADER_TOP_GAP,
     gap: SECTION_GAP,
   },
   card: {

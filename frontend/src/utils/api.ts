@@ -1,3 +1,4 @@
+import { formatPlate } from './vehicles';
 import { supabase } from "./supabase"
 
 const API_IP = process.env.EXPO_PUBLIC_IP ?? "nulled";
@@ -323,7 +324,7 @@ const getOwnerActiveBookings = async (ownerId: string): Promise<ActiveReservatio
                     make: row.make,
                     model: row.model,
                     color: row.color,
-                    licensePlate: row.license_plate,
+                    licensePlate: formatPlate(row.license_plate, row.plate_state),
                 };
             }
         } catch (vehicleError) {

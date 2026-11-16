@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import {
   View,
@@ -30,6 +30,8 @@ import ReservationInfoCard from '@/src/components/ProfilePageComponents/Reservat
 import PillMenu, { PillMenuBackdrop, pillMenuHostStyleForRows, type PillMenuItem } from '@/src/components/PillMenu';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
 
+import { Ionicons } from '@expo/vector-icons';
+import { formatPlate } from '@/src/utils/vehicles';
 import logoAsset from '@/assets/images/spotonlogo.png';
 import penIcon from '@/assets/images/penicon.png';
 import checkIcon from '@/assets/images/checkmarkicon.png';
@@ -77,6 +79,7 @@ type ProfileData = {
   rating_avg: number;
   created_at: string;
   avatar_url: string | null;
+  stripe_account_id?: string | null;
 };
 
 type VehicleProfile = {
@@ -84,7 +87,9 @@ type VehicleProfile = {
   make: string;
   model: string;
   color: string;
+  license_plate?: string | null;
   plate_last4?: string | null;
+  plate_state?: string | null;
 };
 
 const onSignOut = async () => {
@@ -108,6 +113,14 @@ export default function ProfilePage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [payoutSetup, setPayoutSetup] = useState(false);
+  // Seller-only UI (Seller Account, Setup Payouts) stays hidden until the user
+  // has created a listing — renters were confused by a "Seller account" they
+  // never opted into. Counts removed (inactive) spots too once
+  // 20261116130000_listings_owner_select is applied — a host who removed
+  // every spot may still have earnings. Before that migration RLS only shows
+  // active listings, so such a host falls back to the renter view (Homescreen's
+  // PayoutBanner still covers unpaid earnings).
+  const [hasListings, setHasListings] = useState(false);
   const [stripeOnboardingLoading, setStripeOnboardingLoading] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
 
@@ -118,11 +131,15 @@ export default function ProfilePage() {
   // whatever `deletingAccount` was when the dialog opened, so two quick taps
   // would open two dialogs that both see `false` and both fire a delete.
   const deletingRef = useRef(false);
+  // A Stripe account means they've been a host even if every listing is gone
+  // (or the count query failed) — never strand them away from their earnings.
+  const isSeller = hasListings || !!user?.stripe_account_id;
 
   const loadVehicles = async (ownerUserId: string) => {
     const { data, error } = await supabase
       .from('vehicles')
-      .select('id, make, model, color, plate_last4')
+      // '*' so this keeps working on a DB without plate_state (20261116140000).
+      .select('*')
       .eq('owner_user_id', ownerUserId)
       .order('created_at', { ascending: false });
 
@@ -131,6 +148,18 @@ export default function ProfilePage() {
       return;
     }
     setVehicles((data ?? []) as VehicleProfile[]);
+  };
+
+  const loadHasListings = async (ownerId: string) => {
+    const { count, error } = await supabase
+      .from('listings')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', ownerId);
+    if (error) {
+      console.log('Error checking listings:', error.message);
+      return;
+    }
+    setHasListings((count ?? 0) > 0);
   };
 
   const loadProfile = async () => {
@@ -153,7 +182,10 @@ export default function ProfilePage() {
     // Keep Setup Payouts available until Stripe enables payouts so they can
     // resume after an expired link or missing verification details.
     setPayoutSetup(!!data.payouts_enabled);
-    await loadVehicles(claimsResp.claims.sub);
+    await Promise.all([
+      loadVehicles(claimsResp.claims.sub),
+      loadHasListings(claimsResp.claims.sub),
+    ]);
   };
 
   useEffect(() => {
@@ -168,12 +200,22 @@ export default function ProfilePage() {
     setActiveReservations(data ?? []);
   };
 
-  useFocusEffect(() => {
-    if (claims?.sub) {
-      loadVehicles(claims.sub);
-      loadActiveReservations(claims.sub);
-    }
-  });
+  // useFocusEffect re-runs whenever its callback's identity changes. This was
+  // an inline arrow — a new function every render — so it re-ran after EVERY
+  // render; each run set state, which re-rendered, which re-ran it: an endless
+  // fetch loop (~290 requests/s against Supabase and ~180% CPU while Profile
+  // was open). Memoised on the user id it runs once per focus, as intended.
+  const userId = claims?.sub;
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      loadVehicles(userId);
+      loadActiveReservations(userId);
+      loadHasListings(userId);
+      // The loaders only close over stable setters; userId is the real input.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userId]),
+  );
 
   useEffect(() => {
     if (editingName) nameInput.current?.focus();
@@ -305,19 +347,29 @@ export default function ProfilePage() {
     if (payoutSetup || !claims?.sub || stripeOnboardingLoading) return;
     setStripeOnboardingLoading(true);
 
+    // Every failure path ends in an Alert (mirrors seller/PayoutSheet) — this
+    // used to log and silently reset, which testers read as "does nothing".
     try {
-      await stripe.fetchStripeAccountId();
-      const onboardingLink = await stripe.fetchStripeAccountLink();
-
-      if (onboardingLink) {
-        await WebBrowser.openBrowserAsync(onboardingLink);
-        // Backstop the webhook: sync payout status from Stripe on return.
-        await stripe.syncAccount();
-        await loadProfile();
+      const accountId = await stripe.fetchStripeAccountId();
+      if (!accountId) {
+        Alert.alert("Couldn't set up payouts", 'Could not create a payouts account. Please try again later.');
+        return;
       }
+      const onboardingLink = await stripe.fetchStripeAccountLink();
+      if (!onboardingLink) {
+        Alert.alert("Couldn't set up payouts", 'Could not open Stripe onboarding. Please try again.');
+        return;
+      }
+      await WebBrowser.openBrowserAsync(onboardingLink);
+      // Backstop the webhook: sync payout status from Stripe on return.
+      await stripe.syncAccount();
+      await loadProfile();
     }
-    catch (err) {
+    catch (err: any) {
       console.log("Error starting onboarding process: " + err);
+      // Network failures surface as native stack text ("fetch failed:
+      // UnexpectedException ... Promise.swift"); never show that to a user.
+      Alert.alert("Couldn't set up payouts", "We couldn't reach SpotOn right now. Check your connection and try again.");
     }
     finally { 
       setStripeOnboardingLoading(false); 
@@ -491,7 +543,11 @@ export default function ProfilePage() {
               {user.avatar_url ? (
                 <Image source={{ uri: user.avatar_url }} style={styles.avatar} />
               ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder]} />
+                // No photo yet: a car on a light disc instead of the old solid
+                // black circle, which testers read as a broken image.
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                  <Ionicons name='car-sport' size={AVATAR_SIZE * 0.5} color='#1A1A1A' />
+                </View>
               )}
               {avatarUploading && (
                 <View style={styles.avatarOverlay}>
@@ -562,10 +618,33 @@ export default function ProfilePage() {
               contentContainerStyle={styles.vehicleList}
             >
               {vehicles.map((v) => (
-                <View key={v.id} style={styles.vehicleCard}>
-                  <Text style={styles.vehicleCardText} numberOfLines={2}>
-                    {`${v.make}\n${v.model}`}
-                  </Text>
+                // Tap to edit or remove. Shows the plate prominently — testers
+                // found make/model alone "blank" and couldn't tell cars apart.
+                <TouchableOpacity
+                  key={v.id}
+                  style={styles.vehicleCard}
+                  activeOpacity={0.85}
+                  onPress={withLightHaptic(() =>
+                    router.push({ pathname: '/RegisterVehicle', params: { vehicleId: v.id } } as any),
+                  )}
+                  accessibilityRole='button'
+                  accessibilityLabel={`${v.color} ${v.make} ${v.model}, plate ${v.license_plate ?? v.plate_last4 ?? ''}. Edit`}
+                >
+                  <View style={styles.vehicleInfo}>
+                    <Text style={styles.vehicleCardText} numberOfLines={2}>
+                      {`${v.make}\n${v.model}`}
+                    </Text>
+                    {!!(v.license_plate || v.plate_last4) && (
+                      <View style={styles.plateBadge}>
+                        <Text style={styles.plateBadgeText} numberOfLines={1}>
+                          {formatPlate(v.license_plate ?? v.plate_last4 ?? '', v.plate_state, !v.license_plate)}
+                        </Text>
+                      </View>
+                    )}
+                    {!!v.color && (
+                      <Text style={styles.vehicleColorText} numberOfLines={1}>{v.color}</Text>
+                    )}
+                  </View>
                   <View style={styles.vehicleCarClip}>
                     <Image
                       source={registeredCar}
@@ -573,23 +652,27 @@ export default function ProfilePage() {
                       resizeMode='contain'
                     />
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           )}
 
-          {/* Setup Payouts banner */}
-          <TouchableOpacity 
-            style={styles.banner}
-            activeOpacity={0.85}
-            onPress={withLightHaptic(async () => beginStripeOnboarding())}
-          >
-            <Text style={styles.bannerText}>
-              { stripeOnboardingLoading ? 'Loading...' : 
-                payoutSetup ? 'Payouts\nSetup!' : 'Setup\nPayouts'}
-            </Text>
-            <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
-          </TouchableOpacity>
+          {/* Setup Payouts banner — hosts only, and only while there is setup
+              left to do. Once payouts are enabled the old "Payouts Setup!"
+              state was a pressable that did nothing. */}
+          {isSeller && !payoutSetup && (
+            <TouchableOpacity
+              style={styles.banner}
+              activeOpacity={0.85}
+              disabled={stripeOnboardingLoading}
+              onPress={withLightHaptic(async () => beginStripeOnboarding())}
+            >
+              <Text style={styles.bannerText}>
+                {stripeOnboardingLoading ? 'Loading...' : 'Setup\nPayouts'}
+              </Text>
+              <Image source={cardPayment} style={styles.bannerCard} resizeMode='contain' />
+            </TouchableOpacity>
+          )}
 
           {/* Your Reservations banner — opens history page */}
           <TouchableOpacity
@@ -601,15 +684,19 @@ export default function ProfilePage() {
             <Image source={carParkingIcon} style={styles.bannerCard} resizeMode='contain' />
           </TouchableOpacity>
 
-          {/* Your Seller Account banner — opens spots/bookings page */}
-          <TouchableOpacity
-            style={styles.banner}
-            activeOpacity={0.85}
-            onPress={withLightHaptic(() => router.push('./YourSpots'))}
-          >
-            <Text style={styles.bannerText}>Seller{'\n'}Account</Text>
-            <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
-          </TouchableOpacity>
+          {/* Your Seller Account banner — opens spots/bookings page. Hidden
+              until the user has listed a spot (like a rideshare app hiding
+              "Drive" until you opt in). */}
+          {isSeller && (
+            <TouchableOpacity
+              style={styles.banner}
+              activeOpacity={0.85}
+              onPress={withLightHaptic(() => router.push('./YourSpots'))}
+            >
+              <Text style={styles.bannerText}>Seller{'\n'}Account</Text>
+              <Image source={addListingIcon} style={styles.bannerCard} resizeMode='contain' />
+            </TouchableOpacity>
+          )}
 
           {/* Email card */}
           <View style={styles.emailCard}>
@@ -748,7 +835,9 @@ const styles = StyleSheet.create({
     borderRadius: AVATAR_SIZE / 2,
   },
   avatarPlaceholder: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#F2F1EE',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarOverlay: {
     position: 'absolute',
@@ -820,12 +909,32 @@ const styles = StyleSheet.create({
     paddingLeft: screenWidth * 0.04,
     justifyContent: 'center',
   },
+  vehicleInfo: { maxWidth: '58%', gap: screenWidth * 0.012 },
   vehicleCardText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: screenWidth * 0.035,
     color: '#000000',
     lineHeight: screenWidth * 0.04,
-    maxWidth: '55%',
+  },
+  plateBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    borderRadius: 6,
+    paddingHorizontal: screenWidth * 0.015,
+    paddingVertical: 1,
+  },
+  plateBadgeText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: screenWidth * 0.03,
+    letterSpacing: 0.5,
+    color: '#000000',
+  },
+  vehicleColorText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: screenWidth * 0.028,
+    color: 'rgba(0,0,0,0.6)',
   },
   vehicleCarClip: {
     position: 'absolute',
