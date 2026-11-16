@@ -15,6 +15,11 @@
 -- minutes, so the host just retries. Unrelated columns (address, photo) are
 -- not affected.
 --
+-- Hard DELETE is covered too: the app only deactivates, but
+-- listings_owner_delete lets an owner delete directly, and reservation_holds
+-- cascades on listing delete — which would drop a live hold out from under a
+-- paying renter the same way.
+--
 -- The backend (service_role) is exempt: its only write here is account
 -- deletion deactivating listings, which must not abort halfway through.
 --
@@ -34,10 +39,10 @@ SET search_path = public
 AS $$
 BEGIN
   IF (SELECT auth.role()) = 'service_role' THEN
-    RETURN NEW;
+    RETURN COALESCE(NEW, OLD);
   END IF;
 
-  IF (NEW.hourly_rate, NEW.daily_rate, NEW.weekly_rate, NEW.monthly_rate,
+  IF TG_OP = 'UPDATE' AND (NEW.hourly_rate, NEW.daily_rate, NEW.weekly_rate, NEW.monthly_rate,
       NEW.price_per_hour, NEW.available_from, NEW.available_until, NEW.is_active)
      IS NOT DISTINCT FROM
      (OLD.hourly_rate, OLD.daily_rate, OLD.weekly_rate, OLD.monthly_rate,
@@ -56,7 +61,7 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  RETURN NEW;
+  RETURN COALESCE(NEW, OLD);  -- OLD for DELETE (NEW is NULL there)
 END;
 $$;
 
@@ -66,6 +71,7 @@ DROP TRIGGER IF EXISTS trg_guard_listing_terms_during_checkout ON public.listing
 CREATE TRIGGER trg_guard_listing_terms_during_checkout
 BEFORE UPDATE OF hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour,
                  available_from, available_until, is_active
+   OR DELETE
 ON public.listings
 FOR EACH ROW
 EXECUTE FUNCTION public.guard_listing_terms_during_checkout();
