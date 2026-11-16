@@ -13,7 +13,7 @@
  * total_price / platform_fee / host_payout from booking time.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,11 +25,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CustomFonts } from '@/src/constants/theme';
 import ActivityHeader from '@/src/components/activity/ActivityHeader';
+import { useNow } from '@/src/components/activity/useNow';
 import SectionTab from '@/src/components/activity/SectionTab';
 import PressableCard from '@/src/components/activity/PressableCard';
 import { ListingThumb } from '@/src/components/activity/BookingCards';
@@ -117,13 +118,20 @@ export default function EditListing() {
     }
   }, [listingId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Same load-on-focus pattern as YourSpots (also satisfies
+  // react-hooks/set-state-in-effect, which a plain useEffect(load) trips).
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
+  // "Now" as state (ticks each minute) rather than Date.now() inside useMemo,
+  // which react-hooks/purity rejects. Remove re-checks with fresh data anyway.
+  const now = useNow(60_000);
   const removalBlock = useMemo(
-    () => (listing ? listingRemovalBlock(listing.id, bookings, Date.now()) : null),
-    [listing, bookings],
+    () => (listing ? listingRemovalBlock(listing.id, bookings, now) : null),
+    [listing, bookings, now],
   );
 
   const save = async () => {

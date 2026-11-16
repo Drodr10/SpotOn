@@ -130,6 +130,10 @@ function buildRatePayload(state: {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+// Outside the component: react-hooks/purity can't prove handleSubmit never
+// runs during render, and Date.now() inside a component body is flagged.
+const newListingPhotoName = () => `listing_${Date.now()}.jpg`;
+
 export default function CreateListing2() {
   const router = useRouter();
 
@@ -402,7 +406,7 @@ export default function CreateListing2() {
 
       // Try to upload to Supabase Storage
       if (photoUri) {
-        const fileName = `listing_${Date.now()}.jpg`;
+        const fileName = newListingPhotoName();
         const response = await fetch(photoUri);
         const blob = await response.blob();
         const { data: uploadData, error: uploadError } = await supabase.storage

@@ -212,8 +212,6 @@ export default function ProfilePage() {
       loadVehicles(userId);
       loadActiveReservations(userId);
       loadHasListings(userId);
-      // The loaders only close over stable setters; userId is the real input.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [userId]),
   );
 
