@@ -1,8 +1,6 @@
 import { formatPlate } from './vehicles';
 import { supabase } from "./supabase"
 
-const API_IP = process.env.EXPO_PUBLIC_IP ?? "nulled";
-
 export type ListingForCard = {
     id: string;
     owner_id: string;
@@ -38,64 +36,6 @@ const PLACEHOLDER_LISTING = (listingId: string): ListingForCard => ({
     price_per_hour: null,
     photo_url: '',
 });
-
-/**
- * Create a reservation directly in Supabase. RLS policy
- * `reservations_renter_insert` enforces auth.uid() === renter_id, so the
- * authenticated session must be active. Returns the inserted row or throws.
- */
-const reserveSpot = async (
-    listing_id: string,
-    price: number,
-    renter_id: string,
-    vehicle_id: string,
-    start_time: number,
-    end_time: number,
-) => {
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-        throw new Error(`reserveSpot: no active session (${sessionError?.message ?? 'session null'})`);
-    }
-    if (session.user.id !== renter_id) {
-        throw new Error(`reserveSpot: renter_id ${renter_id} does not match session user ${session.user.id}`);
-    }
-
-    const payload = {
-        listing_id,
-        renter_id,
-        vehicle_id,
-        start_time: new Date(start_time).toISOString(),
-        end_time:   new Date(end_time).toISOString(),
-        total_price: price,
-    };
-
-    const { data, error } = await supabase
-        .from('reservations')
-        .insert(payload)
-        .select()
-        .single();
-
-    if (error || !data) {
-        console.error('[reserveSpot] insert failed', error, payload);
-        throw new Error(`reserveSpot insert failed: ${error?.message ?? 'unknown error'}`);
-    }
-
-    // Fire-and-forget the Flask side effect (conversation RPC, server hooks).
-    // Failures here must not block the reservation from showing on the homepage.
-    if (API_IP !== 'nulled') {
-        fetch(`https://${API_IP}/api/reservations/post-insert`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
-                'ngrok-skip-browser-warning': 'true',
-            },
-            body: JSON.stringify({ reservation_id: data.id }),
-        }).catch((err) => console.warn('[reserveSpot] post-insert hook failed', err));
-    }
-
-    return data;
-};
 
 const fetchListingForReservation = async (listing_id: string): Promise<{ listing: ListingForCard; unavailable: boolean }> => {
     const { data, error } = await supabase
@@ -390,10 +330,9 @@ export type AccountDeletionResult =
  * rejects a mismatch with 403 anyway, and a caller-supplied id is one more way
  * to get it wrong on the one screen where being wrong is unrecoverable.
  *
- * Every non-200 is reported. `reserveSpot` above skips its server hook when the
- * API is unreachable, which is harmless for a fire-and-forget side effect; doing
- * that here would sign the user out and report success while the account still
- * existed, so an unreachable API is an error, never a quiet no-op.
+ * Every non-200 is reported. Skipping the call when the API is unreachable
+ * would sign the user out and report success while the account still existed,
+ * so an unreachable API is an error, never a quiet no-op.
  */
 const deleteAccount = async (): Promise<AccountDeletionResult> => {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -401,9 +340,8 @@ const deleteAccount = async (): Promise<AccountDeletionResult> => {
         return { status: 'error', message: 'You appear to be signed out. Please sign in and try again.' };
     }
 
-    // Read the host here rather than using the module-level API_IP, so the
-    // check and the URL can never disagree. Truthiness, not ??: an empty
-    // EXPO_PUBLIC_IP is unset for our purposes.
+    // Read the host once, so the check and the URL can never disagree.
+    // Truthiness, not ??: an empty EXPO_PUBLIC_IP is unset for our purposes.
     const host = process.env.EXPO_PUBLIC_IP;
     if (!host) {
         return { status: 'error', message: "Can't reach the server right now. Please try again later." };
@@ -483,7 +421,6 @@ const cancelReservation = async (reservationId: string): Promise<CancelReservati
 };
 
 export const api = {
-    reserveSpot,
     cancelReservation,
     getActiveReservation,
     getActiveReservations,
