@@ -171,16 +171,11 @@ const fetchStripeAccountId = async (): Promise<string | null> => {
         return null;
     }
 
+    // The backend stores the id on the profile itself (create-connect-account,
+    // service_role). Clients may not write profiles.stripe_account_id
+    // (20261116180000_security_hardening.sql), so there is nothing to save here.
     const { account_id } = await resp.json();
-    const { error } = await supabase.from("profiles").update({ stripe_account_id: account_id}).eq("id", user_id);
-
-    if (error) {
-        console.log("Error saving stripe account ID for user " + user_id);
-        return null;
-    }
-    console.log("Successfully saved Stripe account ID for user " + user_id)
-
-    return account_id;
+    return account_id ?? null;
 }
 
 const fetchStripeAccountLink = async (): Promise<string | null> => {

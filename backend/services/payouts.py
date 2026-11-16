@@ -300,6 +300,29 @@ def _notify_seller_payout_ready(seller: dict, res: dict):
     )
 
 
+def _cancel_unpaid_pending(reservation_id) -> bool:
+    """Cancel one unpaid, PaymentIntent-less 'pending' reservation.
+
+    Conditional on the row still being in that state, so a row the webhook
+    has meanwhile attached a payment to is left alone. True if cancelled.
+    """
+    try:
+        updated = (
+            supabase.table("reservations")
+            .update({"payout_status": "cancelled", "status": "cancelled"})
+            .eq("id", reservation_id)
+            .eq("status", "pending")
+            .eq("payout_status", "pending_payment")
+            .is_("stripe_payment_intent", "null")
+            .execute()
+            .data
+        )
+    except Exception as err:  # noqa: BLE001
+        print(f"[payouts] could not expire unpaid reservation {reservation_id}: {err}")
+        return False
+    return bool(updated)
+
+
 # ── The periodic sweep (invoked by pg_cron or the fallback scheduler) ────────
 def run_payout_sweep() -> dict:
     """
@@ -307,10 +330,12 @@ def run_payout_sweep() -> dict:
       1. held rows whose session ended  -> payout_ready (+ transfer or notify)
       2. payout_ready older than 30 days -> refund the buyer
       3. abandoned pending_payment rows  -> cancel to free the slot
+         (including unpaid 'pending' rows that never had a PaymentIntent)
     """
     stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
     now = datetime.now(timezone.utc)
-    summary = {"transferred": 0, "notified": 0, "refunded": 0, "expired": 0}
+    summary = {"transferred": 0, "notified": 0, "refunded": 0, "expired": 0,
+               "expired_unpaid": 0}
 
     # 1) Session ended → ready for payout.
     ended = (
@@ -366,6 +391,13 @@ def run_payout_sweep() -> dict:
     for res in abandoned:
         pi_id = res.get("stripe_payment_intent")
         if not pi_id:
+            # Unpaid 'pending' rows with no PaymentIntent at all: left behind by
+            # the retired POST /api/reservations route (and the old client-side
+            # insert). Nothing will ever pay for them, yet they hold the slot.
+            # Only status 'pending' is touched: a row someone marked confirmed
+            # without a PI is not ours to guess about.
+            if res.get("status") == "pending" and _cancel_unpaid_pending(res["id"]):
+                summary["expired_unpaid"] += 1
             continue
         try:
             pi = stripe.PaymentIntent.retrieve(pi_id)

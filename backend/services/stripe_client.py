@@ -431,12 +431,29 @@ def createAccountLink(user_id: str):
         print(f"Error creating account link: {str(err)}")
         return jsonify({"error": str(err)}), 500
 
-def onboardingComplete(user_id: str):
-    supabase.table("profiles").update({"payouts_enabled": True}).eq("id", user_id).execute()
-
 # ── Webhooks ────────────────────────────────────────────────────────────────
+def _unsigned_webhooks_allowed() -> bool:
+    """Local-development escape hatch for the webhook signature check.
+
+    Without STRIPE_WEBHOOK_SECRET nothing proves a webhook came from Stripe, so
+    anyone who can reach /api/stripe/webhook could post a forged
+    payment_intent.succeeded (a booking) or account.updated (payout release).
+    The endpoint therefore refuses every event when the secret is unset,
+    unless ALLOW_UNSIGNED_WEBHOOKS=1 is set explicitly. Never set it on Render
+    or any internet-reachable host; for local testing prefer `stripe listen`,
+    which prints a whsec_ secret to put in STRIPE_WEBHOOK_SECRET instead.
+    Read per call so the flag cannot be baked in at import time.
+    """
+    return os.getenv("ALLOW_UNSIGNED_WEBHOOKS") == "1"
+
+
 def handle_webhook(payload: bytes, sig_header: str):
     stripe.api_key = secretKey
+    if not webhookSecret and not _unsigned_webhooks_allowed():
+        # 500, not 400: this is server misconfiguration, and Stripe retries a
+        # 5xx, so events are delivered once the secret is configured.
+        print("[stripe] ERROR: STRIPE_WEBHOOK_SECRET unset; refusing unsigned webhook")
+        return jsonify({"error": "Webhook signing secret not configured"}), 500
     try:
         # Stripe Event Destination pings are always v2 "thin" events, even
         # though the payment/account events this endpoint consumes are v1
@@ -455,8 +472,9 @@ def handle_webhook(payload: bytes, sig_header: str):
             else:
                 event = stripe.Webhook.construct_event(payload, sig_header, webhookSecret)
         else:
-            # Dev fallback only — set STRIPE_WEBHOOK_SECRET in production.
-            print("[stripe] WARNING: STRIPE_WEBHOOK_SECRET unset; skipping signature check")
+            # Only reachable with ALLOW_UNSIGNED_WEBHOOKS=1 (see above).
+            print("[stripe] WARNING: ALLOW_UNSIGNED_WEBHOOKS=1 and no STRIPE_WEBHOOK_SECRET; "
+                  "skipping signature check (local development only)")
             event = raw_event
     except (ValueError, stripe.error.SignatureVerificationError) as err:
         return jsonify({"error": f"Webhook verification failed: {str(err)}"}), 400

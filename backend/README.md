@@ -49,16 +49,9 @@ Base URL: `http://localhost:5000/api`
 
 ## Reservations
 
-### `POST /reservations`
+### `POST /reservations` (removed)
 
-- **Description**: Creates a booking for a spot and automatically initiates a conversation with the listing owner. Uses a Postgres exclusion constraint to prevent overlapping reservations at the database level.
-- **Body**: `{ listing_id, renter_id, start_time, end_time, total_price }`
-- **Response**: 
-  - `201 Created`: `{ reservation_id, conversation_id, message }`
-  - `400 Bad Request`: Missing required fields
-  - `404 Not Found`: Listing not found
-  - `409 Conflict`: Reservation overlaps with an existing booking (exclusion constraint triggered)
-  - `500 Internal Server Error`: Database error
+- **Response**: always `410 Gone`. It created unpaid `pending` bookings with no PaymentIntent that never expired, so anyone signed in could block a spot's calendar for free. Bookings are created through checkout: `POST /stripe/create-booking-payment`, then the reservation is inserted once paid (webhook / `POST /stripe/finalize-booking`). The payout sweep cancels any leftover unpaid `pending` rows with no PaymentIntent after 30 minutes.
 
 ### `GET /reservations/<user_id>`
 
