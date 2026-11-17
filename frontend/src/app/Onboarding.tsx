@@ -56,6 +56,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '@/src/utils/supabase';
 import { isValidEmail, normalizeEmail } from '@/src/utils/email';
+import { isEmailInUseError } from '@/src/utils/passwordReset';
 
 import signinBg from '@/assets/images/onboardingflow/onboarding.signin.png';
 import mockup1 from '@/assets/images/onboardingflow/onboarding.mockup1.png';
@@ -283,6 +284,9 @@ function SignupStep({ onBack }: { onBack: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // Set (to the normalized address) when sign-up says the email already has an
+  // account: shows "Sign in instead" / "Reset password" under the error.
+  const [inUseEmail, setInUseEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
   const translateY = useSharedValue(SH * 0.45);
@@ -310,6 +314,7 @@ function SignupStep({ onBack }: { onBack: () => void }) {
       return;
     }
     setError('');
+    setInUseEmail('');
     setLoading(true);
     const { error: err } = await supabase.auth.signUp({
       email: normalizeEmail(email),
@@ -318,8 +323,10 @@ function SignupStep({ onBack }: { onBack: () => void }) {
     });
     setLoading(false);
     if (err) {
-      if (err.message === 'User already registered') setError('Email already in use.');
-      else if (err.message === 'Password should be at least 6 characters.')
+      if (isEmailInUseError(err)) {
+        setError('That email already has a SpotOn account.');
+        setInUseEmail(normalizeEmail(email));
+      } else if (err.message === 'Password should be at least 6 characters.')
         setError('Password must be at least 6 characters.');
       else setError(err.message);
       return;
@@ -393,7 +400,11 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                   <TextInput
                     style={styles.input}
                     defaultValue=""
-                    onChangeText={setEmail}
+                    onChangeText={(t) => {
+                      setEmail(t);
+                      // The actions below are for the address that was rejected.
+                      if (inUseEmail) setInUseEmail('');
+                    }}
                     placeholder="Email"
                     placeholderTextColor="rgba(0,0,0,0.45)"
                     autoCapitalize="none"
@@ -437,6 +448,31 @@ function SignupStep({ onBack }: { onBack: () => void }) {
                   </View>
 
                   {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+                  {!!inUseEmail && (
+                    <View style={styles.inUseRow}>
+                      <TouchableOpacity
+                        style={[styles.inUseButton, styles.inUseButtonPrimary]}
+                        activeOpacity={0.85}
+                        onPress={withLightHaptic(() =>
+                          router.push({ pathname: '/SignIn', params: { email: inUseEmail } }),
+                        )}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.inUseText, styles.inUseTextPrimary]}>Sign in instead</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.inUseButton}
+                        activeOpacity={0.85}
+                        onPress={withLightHaptic(() =>
+                          router.push({ pathname: '/ResetPassword', params: { email: inUseEmail } }),
+                        )}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.inUseText}>Reset password</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
 
                   <Text style={styles.legalText}>
                     By signing up you agree to our{' '}
@@ -583,6 +619,24 @@ const styles = StyleSheet.create({
     color: 'rgba(190,0,0,1)',
     marginTop: SW * 0.02,
   },
+
+  inUseRow: { flexDirection: 'row', gap: SW * 0.025, marginTop: SW * 0.03 },
+  inUseButton: {
+    flex: 1,
+    height: INPUT_H * 0.85,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: STROKE_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inUseButtonPrimary: { backgroundColor: '#000' },
+  inUseText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.034,
+    color: '#000',
+  },
+  inUseTextPrimary: { color: '#FFFFFF' },
 
   legalText: {
     fontFamily: CustomFonts.SwitzerLight,

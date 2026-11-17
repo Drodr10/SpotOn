@@ -33,7 +33,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { safeBack } from '@/src/utils/navigation';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -77,7 +77,9 @@ export default function SignIn() {
   const insets = useSafeAreaInsets();
   // Bottom of the back pill plus a margin: the form never rises above this.
   const backClearance = insets.top + BACK_PILL_SIZE + BACK_PILL_MARGIN * 2;
-  const [email, setEmail] = useState('');
+  // Prefilled when arriving from sign-up's "Email already in use → Sign in instead".
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -211,6 +213,17 @@ export default function SignIn() {
                   </View>
 
                   {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+                  <TouchableOpacity
+                    style={styles.forgotWrap}
+                    onPress={withLightHaptic(() =>
+                      router.push({ pathname: '/ResetPassword', params: { email: normalizeEmail(email) } }),
+                    )}
+                    accessibilityRole="button"
+                    hitSlop={8}
+                  >
+                    <Text style={styles.forgotText}>Forgot password?</Text>
+                  </TouchableOpacity>
                 </View>
               </Animated.View>
             </SafeAreaView>
@@ -299,6 +312,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: SW * 0.02,
   },
   arrowIcon: { width: SW * 0.075, height: SW * 0.075 },
+
+  forgotWrap: { alignSelf: 'flex-start', marginTop: SW * 0.035, paddingHorizontal: SW * 0.01 },
+  forgotText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.034,
+    color: 'rgba(0,0,0,0.8)',
+    textDecorationLine: 'underline',
+  },
 
   errorText: {
     fontFamily: CustomFonts.SwitzerLight,

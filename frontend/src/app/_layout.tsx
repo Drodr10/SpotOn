@@ -52,6 +52,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="Intro" />
             <Stack.Screen name="SignIn" />
+            <Stack.Screen name="ResetPassword" />
             <Stack.Screen name="Onboarding" />
             <Stack.Screen name="QuickSearch" />
             <Stack.Screen name="Homescreen" />
