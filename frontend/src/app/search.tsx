@@ -73,6 +73,7 @@ import { safeBack, useHardwareBack } from '@/src/utils/navigation';
 import { ErrorNote } from '@/src/components/activity/Notes';
 import { usePricingPreview } from '@/src/hooks/usePricingPreview';
 import { getPrimaryRate } from '@/src/utils/listingPrice';
+import { getViewerId, withoutOwnListings } from '@/src/utils/ownListings';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Listing {
@@ -551,9 +552,18 @@ export default function SearchScreen() {
         return;
       }
 
+      // Hide the signed-in user's own listings (they can't book them). Done
+      // before the 5mi/fallback logic so an all-own neighbourhood still falls
+      // back to other people's spots. Claims are read here rather than from
+      // currentUserId state, which may not have resolved by the time this runs.
+      const othersListings = withoutOwnListings(
+        (visibleData ?? []) as Listing[],
+        await getViewerId(supabase),
+      );
+
       const latDelta = 0.0724;
       const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
-      const inBox = (visibleData ?? []).filter(
+      const inBox = othersListings.filter(
         (l: any) =>
           l.latitude >= searchLat - latDelta &&
           l.latitude <= searchLat + latDelta &&
@@ -566,8 +576,8 @@ export default function SearchScreen() {
       let resolved: Listing[] = decorate(inBox).filter((l) => l.distance <= 5);
       let fallback = false;
 
-      if (resolved.length === 0 && (visibleData?.length ?? 0) > 0) {
-        resolved = decorate(visibleData ?? []);
+      if (resolved.length === 0 && othersListings.length > 0) {
+        resolved = decorate(othersListings);
         fallback = resolved.length > 0;
       }
 
@@ -1376,9 +1386,8 @@ function BookingView({
   // clear the system navigation bar.
   const bottomBarGap = 16 + (Platform.OS === 'android' ? insets.bottom : 0);
 
-  // Mount-time anchor. Still frozen ON PURPOSE, but now only for Schedule mode,
-  // which borrows its minutes from it (see the booking-math memo below) — a
-  // scheduled start must not drift under the user while they pick an hour.
+  // Mount-time anchor, frozen ON PURPOSE. Only used to seed Schedule mode's
+  // default hour slot once — the seed must not shift under the user.
   const mountTime = useMemo(() => new Date(), []);
 
   // "Now", re-derived on a timer. Current-mode bookings and the picker's floor
@@ -1429,29 +1438,21 @@ function BookingView({
   const [currentHours, setCurrentHours] = useState(1);
 
   // ─── Hourly Schedule state ──────────────────────────────────────────────
-  // When the listing is locked, seed Schedule to the next-available instant
-  // (rounded up to the next hour if there are stray minutes) so the moment the
-  // user taps Schedule they're already positioned on a bookable slot.
-  const initialScheduleStartHour = (() => {
-    if (unavailableNow) {
-      const rounded = new Date(nextAvailableAt!);
-      if (rounded.getMinutes() > 0 || rounded.getSeconds() > 0) {
-        rounded.setHours(rounded.getHours() + 1, 0, 0, 0);
-      }
-      return rounded.getHours();
+  // Schedule books whole hour slots, so seed it to the first full hour at or
+  // after the earliest bookable instant (now, or next-available when the
+  // listing is locked). Rounding up — rather than seeding the current hour —
+  // keeps the default slot from starting in the past. Crossing midnight rolls
+  // the day forward with it.
+  const initialScheduleSlot = (() => {
+    const slot = new Date(unavailableNow ? nextAvailableAt! : mountTime);
+    if (slot.getMinutes() > 0 || slot.getSeconds() > 0 || slot.getMilliseconds() > 0) {
+      slot.setHours(slot.getHours() + 1, 0, 0, 0);
     }
-    return mountTime.getHours();
+    return slot;
   })();
+  const initialScheduleStartHour = initialScheduleSlot.getHours();
   const initialScheduleStartDate = (() => {
-    const base = new Date(earliestStart);
-    // If we bumped the hour past 23 while rounding, roll the day forward.
-    if (unavailableNow) {
-      const n = new Date(nextAvailableAt!);
-      const rolled = n.getMinutes() > 0 || n.getSeconds() > 0;
-      if (rolled && n.getHours() === 23) {
-        base.setDate(base.getDate() + 1);
-      }
-    }
+    const base = new Date(initialScheduleSlot);
     base.setHours(0, 0, 0, 0);
     return base;
   })();
@@ -1588,13 +1589,22 @@ function BookingView({
       const end = new Date(start.getTime() + currentHours * 3600 * 1000);
       return { startDateTime: start, endDateTime: end, hoursBooked: currentHours };
     }
-    // schedule — minutes come from the FROZEN anchor, not the ticking clock, so
-    // a start the user picked stays put instead of creeping forward every 15s.
-    const start = new Date(scheduleStart);
-    start.setHours(startHour, mountTime.getMinutes(), 0, 0);
-    const end = new Date(start.getTime() + (endHour - startHour) * 3600 * 1000);
+    // schedule — start/end sit exactly on the hour slots the wheels show
+    // ("12 AM → 2 AM" books 12:00–2:00). Minutes used to be borrowed from the
+    // mount time, so the summary and the booking read e.g. 12:58–2:58.
+    const slotStart = new Date(scheduleStart);
+    slotStart.setHours(startHour, 0, 0, 0);
+    const end = new Date(slotStart.getTime() + (endHour - startHour) * 3600 * 1000);
+    // If the chosen slot has already begun (the user scrolled back to the
+    // current hour), start from the current minute so they don't pay for time
+    // already gone; the end stays on its slot. Minute precision keeps the price
+    // preview from refetching on every 15s tick.
+    const nowMinute = new Date(now);
+    nowMinute.setSeconds(0, 0);
+    const start =
+      slotStart < nowMinute && end > nowMinute ? nowMinute : slotStart;
     return { startDateTime: start, endDateTime: end, hoursBooked: endHour - startHour };
-  }, [bookingMode, currentHours, now, mountTime, scheduleStart, startHour, endHour]);
+  }, [bookingMode, currentHours, now, scheduleStart, startHour, endHour]);
 
   // ─── Summary line ───────────────────────────────────────────────────────
   const sameDay =

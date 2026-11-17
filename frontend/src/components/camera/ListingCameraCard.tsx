@@ -8,8 +8,18 @@
  * preview: the shutter (centre), photo library (right). After a capture the
  * shutter becomes a checkmark "Continue" and Retake appears on the left.
  *
- * Dismiss: tap the backdrop, or drag the card down (velocity-aware, rubber-
- * banded upward). Both end in `onBack` after the exit animation.
+ * Dismiss: the back button above the card, tap the backdrop, or drag the card
+ * down (velocity-aware, rubber-banded upward). All end in `onBack` after the
+ * exit animation.
+ *
+ * `initialPhoto`: opened again with a photo the user already accepted (they
+ * went back from the price step). The card starts in review — "Continue with
+ * this photo" or Retake — instead of forcing a new capture.
+ *
+ * Once unmounted (the parent closed the card itself, e.g. Android back during
+ * the exit animation), late `onBack` / `onConfirm` calls are dropped, so a
+ * confirm that was still animating out can't move the flow forward after the
+ * user has already gone back.
  *
  * Motion (skills/animate-expo): everything is transform + opacity on the UI
  * thread via Reanimated. Entrance is a critically damped spring (no bounce, no
@@ -98,6 +108,8 @@ type Props = {
   onBack: () => void;
   /** User accepted a photo. Same URI the old launchCameraAsync produced. */
   onConfirm: (uri: string) => void;
+  /** A photo accepted earlier; the card opens reviewing it. */
+  initialPhoto?: string | null;
 };
 
 // ─── Round press-scale button ────────────────────────────────────────────────
@@ -141,7 +153,7 @@ function PressScale({
   );
 }
 
-export default function ListingCameraCard({ onBack, onConfirm }: Props) {
+export default function ListingCameraCard({ onBack, onConfirm, initialPhoto = null }: Props) {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
   const { height: winH } = useWindowDimensions();
@@ -155,9 +167,9 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   const [permission, requestPermission, refreshPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(initialPhoto);
   // Kept after Retake so the preview can fade out instead of vanishing.
-  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [previewUri, setPreviewUri] = useState<string | null>(initialPhoto);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const granted = permission?.granted ?? false;
@@ -178,8 +190,11 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   const dragStart = useSharedValue(0);
   const appear = useSharedValue(0); // sheet opacity
   const closing = useSharedValue(false);
+  // False once unmounted: exit animations still finish after that, and their
+  // parent callbacks must then be dropped (see header comment).
+  const alive = useSharedValue(true);
   const cameraFade = useSharedValue(0); // 0 = camera starting, 1 = live
-  const captured = useSharedValue(0); // 0 = live, 1 = showing a photo
+  const captured = useSharedValue(initialPhoto ? 1 : 0); // 0 = live, 1 = showing a photo
   const flash = useSharedValue(0);
   const squeeze = useSharedValue(1);
 
@@ -219,13 +234,27 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   }, [mountCamera, reassertPose]);
 
   // ── Close paths ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    alive.set(true);
+    return () => alive.set(false);
+  }, [alive]);
+
+  // Parent callbacks run only while still mounted (checked again on the JS
+  // thread, where the unmount happens).
+  const backIfAlive = useCallback(() => {
+    if (alive.get()) onBack();
+  }, [alive, onBack]);
+
   const runClose = useCallback(
     (then: () => void) => {
       if (closing.get()) return;
       closing.set(true);
+      const thenIfAlive = () => {
+        if (alive.get()) then();
+      };
       const done = (finished?: boolean) => {
         'worklet';
-        if (finished) scheduleOnRN(then);
+        if (finished && alive.get()) scheduleOnRN(thenIfAlive);
       };
       if (reduceMotion) {
         appear.set(withTiming(0, { duration: 150 }, done));
@@ -233,7 +262,7 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
         slideOut(sheetY, winH, done);
       }
     },
-    [closing, appear, sheetY, reduceMotion, winH],
+    [closing, alive, appear, sheetY, reduceMotion, winH],
   );
 
   const handleBackdrop = useCallback(() => {
@@ -262,14 +291,14 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
             closing.set(true);
             slideOut(sheetY, winH, (finished) => {
               'worklet';
-              if (finished) scheduleOnRN(onBack);
+              if (finished && alive.get()) scheduleOnRN(backIfAlive);
             });
           } else {
             slideIn(sheetY, winH);
             if (y > 8) scheduleOnRN(triggerLightHaptic); // it snapped home
           }
         }),
-    [dragStart, sheetY, closing, cardHeight, winH, onBack],
+    [dragStart, sheetY, closing, alive, cardHeight, winH, backIfAlive],
   );
 
   // ── Permission: ask once the card has settled ──────────────────────────────
@@ -305,9 +334,12 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleCameraReady = useCallback(() => {
     setCameraReady(true);
+    // Opened reviewing an earlier photo: keep the feed frozen under it until
+    // Retake, as after a fresh capture.
+    if (photo) cameraRef.current?.pausePreview().catch(() => {});
     cameraFade.set(withTiming(1, { duration: reduceMotion ? 150 : 320, easing: EASE_OUT }));
     reassertPose(); // belt and braces for the Android first-grant case above
-  }, [cameraFade, reduceMotion, reassertPose]);
+  }, [cameraFade, reduceMotion, reassertPose, photo]);
 
   const handleMountError = useCallback(() => {
     // Simulators and camera-less devices land here.
@@ -441,17 +473,31 @@ export default function ListingCameraCard({ onBack, onConfirm }: Props) {
         style={[styles.sheet, { bottom: cardBottom }, sheetStyle]}
         pointerEvents="box-none"
       >
-        {/* Header sits on the page background, above the card */}
-        <View style={styles.headerRow} pointerEvents="none">
-          <Image source={cameraanalogImg} style={styles.headerGlyph} resizeMode="contain" />
-          <Animated.Text
-            key={photo ? 'review' : 'live'}
-            entering={TEXT_SWAP}
-            style={styles.headerText}
-            accessibilityRole="header"
+        {/* Header sits on the page background, above the card. The back
+            button matches the listing creator's other steps (iOS has no
+            system back, and the backdrop / drag-down aren't discoverable). */}
+        <View style={styles.headerRow} pointerEvents="box-none">
+          <Pressable
+            onPress={handleBackdrop}
+            style={({ pressed }) => [styles.backCircle, pressed && styles.pillPressed]}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
           >
-            {photo ? 'Looking good? Continue, or retake.' : "Let's add a photo to your listing."}
-          </Animated.Text>
+            <Ionicons name="chevron-back" size={22} color="#fff" />
+          </Pressable>
+          {/* Taps on the label fall through to the backdrop, as before. */}
+          <View style={styles.headerLabel} pointerEvents="none">
+            <Image source={cameraanalogImg} style={styles.headerGlyph} resizeMode="contain" />
+            <Animated.Text
+              key={photo ? 'review' : 'live'}
+              entering={TEXT_SWAP}
+              style={styles.headerText}
+              accessibilityRole="header"
+            >
+              {photo ? 'Looking good? Continue, or retake.' : "Let's add a photo to your listing."}
+            </Animated.Text>
+          </View>
         </View>
 
         <GestureDetector gesture={pan}>
@@ -604,9 +650,24 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     minHeight: 34,
   },
+  headerLabel: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   headerGlyph: {
     width: 30,
     height: 30,
+  },
+  // Same as CreateListing2's backCircle (steps 1 and 3).
+  backCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerText: {
     flex: 1,

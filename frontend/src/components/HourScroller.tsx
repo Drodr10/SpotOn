@@ -14,12 +14,14 @@
  *    rebuilt every render.
  *  - `getItemLayout` lets FlatList skip per-item measurement.
  *  - 60fps target on mobile.
+ *  - The list is rendered under a reset `ScrollView.Context` (see render).
  */
 import React, { useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   FlatList as RNFlatList,
   ListRenderItemInfo,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -41,6 +43,12 @@ import { CustomFonts } from '@/src/constants/theme';
 const AnimatedFlatList = Animated.createAnimatedComponent(
   RNFlatList,
 ) as unknown as typeof RNFlatList;
+
+// RN's `ScrollView.Context` (what RN's Modal resets for its content). It is a
+// static on ScrollView at runtime but missing from the published typings.
+const OuterScrollViewContext = (
+  ScrollView as unknown as { Context?: React.Context<unknown> }
+).Context;
 
 export type HourScrollerRichLabel = { primary: string; secondary?: string };
 
@@ -261,40 +269,56 @@ export default function HourScroller({
 
   const keyExtractor = useCallback((item: number) => String(item), []);
 
+  const list = (
+    <AnimatedFlatList
+      ref={listRef as any}
+      data={items}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem as any}
+      getItemLayout={getItemLayout}
+      showsVerticalScrollIndicator={false}
+      snapToInterval={ITEM_HEIGHT}
+      decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.95}
+      onScroll={scrollHandler}
+      scrollEventThrottle={16}
+      onScrollBeginDrag={handleScrollBeginDrag}
+      onMomentumScrollBegin={handleMomentumScrollBegin}
+      onMomentumScrollEnd={handleMomentumScrollEnd}
+      onScrollEndDrag={handleScrollEndDrag}
+      initialScrollIndex={value - min}
+      contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * half }}
+      windowSize={3}
+      initialNumToRender={visibleCount + 2}
+      maxToRenderPerBatch={visibleCount}
+      removeClippedSubviews={false}
+      bounces
+      overScrollMode="auto"
+      nestedScrollEnabled
+      onScrollToIndexFailed={(info) => {
+        // Should not fire (we provide getItemLayout) but keep a safe fallback.
+        listRef.current?.scrollToOffset({
+          offset: info.index * ITEM_HEIGHT,
+          animated: false,
+        });
+      }}
+    />
+  );
+
   return (
     <View style={[styles.container, { height: containerHeight }, style]}>
-      <AnimatedFlatList
-        ref={listRef as any}
-        data={items}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem as any}
-        getItemLayout={getItemLayout}
-        showsVerticalScrollIndicator={false}
-        snapToInterval={ITEM_HEIGHT}
-        decelerationRate={Platform.OS === 'ios' ? 'fast' : 0.95}
-        onScroll={scrollHandler}
-        scrollEventThrottle={16}
-        onScrollBeginDrag={handleScrollBeginDrag}
-        onMomentumScrollBegin={handleMomentumScrollBegin}
-        onMomentumScrollEnd={handleMomentumScrollEnd}
-        onScrollEndDrag={handleScrollEndDrag}
-        initialScrollIndex={value - min}
-        contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * half }}
-        windowSize={3}
-        initialNumToRender={visibleCount + 2}
-        maxToRenderPerBatch={visibleCount}
-        removeClippedSubviews={false}
-        bounces
-        overScrollMode="auto"
-        nestedScrollEnabled
-        onScrollToIndexFailed={(info) => {
-          // Should not fire (we provide getItemLayout) but keep a safe fallback.
-          listRef.current?.scrollToOffset({
-            offset: info.index * ITEM_HEIGHT,
-            animated: false,
-          });
-        }}
-      />
+      {/* The wheel is a fixed-height, self-scrolling viewport, so it virtualizes
+          correctly even when the screen places it inside a vertical ScrollView
+          (search's booking view does). RN's dev-only "VirtualizedLists should
+          never be nested inside plain ScrollViews" check reads this context and
+          targets lists that grow unbounded inside their parent — not this case.
+          Resetting the context marks the wheel as its own scroll root, the same
+          thing RN's Modal does for its content. It has no other consumer, so
+          layout and scrolling are unchanged. */}
+      {OuterScrollViewContext ? (
+        <OuterScrollViewContext.Provider value={null}>{list}</OuterScrollViewContext.Provider>
+      ) : (
+        list
+      )}
 
       {/* Selection band — subtle hairlines marking the centered slot. */}
       <View

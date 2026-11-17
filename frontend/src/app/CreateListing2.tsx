@@ -48,6 +48,7 @@ import * as Location from 'expo-location';
 import { CustomFonts } from '@/src/constants/theme';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from '../utils/supabase';
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -184,11 +185,20 @@ export default function CreateListing2() {
   useEffect(() => {
     // Listing creation is zero-friction: no Stripe account required. Sellers set
     // up payouts later, after they've earned money (deferred onboarding).
+    // From the session stored on the device (getSession), not getUser(): a
+    // network blip must not read as "you're signed out" and bounce the user to
+    // the Intro screen. The insert itself is still authorised server-side.
     const initialize = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
+        if (isAuthRetryableFetchError(error)) {
+          // Expired token, offline: still signed in. Retry when the user lists.
+          return;
+        }
         Alert.alert('Authentication Error', 'You need to be logged in to create a listing.', [
           { text: 'OK', onPress: () => router.replace('/Intro') },
         ]);
@@ -423,7 +433,10 @@ export default function CreateListing2() {
         }
       }
 
-      if (!userId) {
+      // Launched offline with an expired token: initialize() couldn't learn
+      // the user yet. Try again now (refreshes the session if back online).
+      const ownerId = userId ?? (await supabase.auth.getSession()).data.session?.user?.id ?? null;
+      if (!ownerId) {
         Alert.alert('Not logged in', 'Please log in before creating a listing.');
         setSubmitting(false);
         return;
@@ -440,7 +453,7 @@ export default function CreateListing2() {
       });
 
       const { error } = await supabase.from('listings').insert({
-        owner_id: userId,
+        owner_id: ownerId,
         address: address,
         latitude: latitude,
         longitude: longitude,
@@ -486,7 +499,9 @@ export default function CreateListing2() {
   };
 
   // Step 3 → step 2 (photo). The photo already taken stays in state until a
-  // new one is confirmed.
+  // new one is confirmed, and the camera card opens showing it. A confirm
+  // still animating out when the user goes back is dropped by the card once it
+  // unmounts, so it can't jump forward to step 3 afterwards.
   const goBackFromScene4 = () => {
     setShowCameraPopup(true);
     setScene(3);
@@ -675,7 +690,13 @@ export default function CreateListing2() {
       {/* Camera pop-up — floating live card + tap-away backdrop, self-animated.
           Mounted only while open so the camera session stops on close. */}
       {showCameraPopup && (
-        <ListingCameraCard onBack={goBackFromScene3} onConfirm={handlePhotoConfirmed} />
+        <ListingCameraCard
+          onBack={goBackFromScene3}
+          onConfirm={handlePhotoConfirmed}
+          // Coming back to this step keeps the photo: the card opens reviewing
+          // it ("Continue with this photo" / Retake) instead of forcing a retake.
+          initialPhoto={photoUri}
+        />
       )}
     </SafeAreaView>
   );

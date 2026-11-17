@@ -36,12 +36,13 @@ import {
   Platform,
   Pressable,
   Keyboard,
+  ScrollView,
   Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -62,7 +63,7 @@ import mockup2 from '@/assets/images/onboardingflow/onboarding.mockup2.png';
 import mockup3 from '@/assets/images/onboardingflow/onboarding.mockup3.png';
 import mockup4 from '@/assets/images/onboardingflow/onboarding.mockup4.png';
 import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
-import enterArrowAsset from '@/assets/images/enter arrow.png';
+import enterArrowAsset from '@/assets/images/enter_arrow.png';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -275,6 +276,9 @@ function IntroStepView({
 
 // ── Final signup step ───────────────────────────────────────────────────────
 function SignupStep({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
+  // Bottom of the back pill plus a margin: the form never rises above this.
+  const backClearance = insets.top + BACK_PILL_SIZE + BACK_PILL_MARGIN * 2;
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -333,6 +337,8 @@ function SignupStep({ onBack }: { onBack: () => void }) {
           style={styles.backPill}
           onPress={withLightHaptic(onBack)}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={BACK_PILL_ICON} color="#000" />
         </TouchableOpacity>
@@ -341,93 +347,112 @@ function SignupStep({ onBack }: { onBack: () => void }) {
       <Pressable style={StyleSheet.absoluteFill} onPress={Keyboard.dismiss}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.kav}
+          style={[styles.kav, { paddingTop: backClearance }]}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
-          {/* Flow layout (not absolute) so KeyboardAvoidingView can push the card up. */}
-          <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
-            <Animated.View style={[styles.cardShadow, cardAnimStyle]}>
-              <View style={[styles.card, styles.cardStroke]}>
-                <View style={styles.headerRow}>
-                  <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
-                </View>
+          {/* Flow layout (not absolute) so KeyboardAvoidingView can push the card up.
+              The scroll area starts below the back button: when the keyboard
+              (plus the QuickType / password bar, an error line, a small phone)
+              leaves too little room, the card scrolls instead of riding up
+              over the back button. */}
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.formScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
+              <Animated.View style={[styles.cardShadow, cardAnimStyle]}>
+                <View style={[styles.card, styles.cardStroke]}>
+                  <View style={styles.headerRow}>
+                    <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
+                  </View>
 
-                <Text style={styles.heading}>
-                  Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s get you started.
-                </Text>
+                  <Text style={styles.heading}>
+                    Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s get you started.
+                  </Text>
 
-                {/* Uncontrolled on purpose (no `value` prop): nothing here ever
-                    sets these fields programmatically, and without a JS-owned
-                    value the native text can't be overwritten by a stale
-                    state echo when input arrives faster than the JS thread
-                    (autofill, the iOS strong-password sheet, a busy JS thread).
-                    onChangeText still mirrors the text into state for submit. */}
-                <TextInput
-                  style={styles.input}
-                  defaultValue=""
-                  onChangeText={setFullName}
-                  placeholder="Name"
-                  placeholderTextColor="rgba(0,0,0,0.45)"
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                  textContentType="name"
-                  autoComplete="name"
-                />
-                <TextInput
-                  style={styles.input}
-                  defaultValue=""
-                  onChangeText={setEmail}
-                  placeholder="Email"
-                  placeholderTextColor="rgba(0,0,0,0.45)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="username"
-                  autoComplete="email"
-                />
-                <View style={styles.passwordRow}>
+                  {/* Uncontrolled on purpose (no `value` prop): nothing here ever
+                      sets these fields programmatically, and without a JS-owned
+                      value the native text can't be overwritten by a stale
+                      state echo when input arrives faster than the JS thread
+                      (autofill, the iOS strong-password sheet, a busy JS thread).
+                      onChangeText still mirrors the text into state for submit. */}
                   <TextInput
-                    style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
+                    style={styles.input}
                     defaultValue=""
-                    onChangeText={setPassword}
-                    placeholder="Password"
+                    onChangeText={setFullName}
+                    placeholder="Name"
                     placeholderTextColor="rgba(0,0,0,0.45)"
-                    secureTextEntry
-                    // "newPassword" makes iOS suggest a strong password and offer
-                    // to save it to the keychain on sign-up.
-                    textContentType="newPassword"
-                    autoComplete="new-password"
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    textContentType="name"
+                    autoComplete="name"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    defaultValue=""
+                    onChangeText={setEmail}
+                    placeholder="Email"
+                    placeholderTextColor="rgba(0,0,0,0.45)"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    returnKeyType="go"
-                    onSubmitEditing={handleSignup}
+                    keyboardType="email-address"
+                    textContentType="username"
+                    autoComplete="email"
                   />
-                  <TouchableOpacity
-                    style={styles.arrowButton}
-                    onPress={handleSignup}
-                    activeOpacity={0.7}
-                    disabled={loading}
-                  >
-                    <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
-                  </TouchableOpacity>
-                </View>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
+                      defaultValue=""
+                      onChangeText={setPassword}
+                      placeholder="Password"
+                      placeholderTextColor="rgba(0,0,0,0.45)"
+                      secureTextEntry
+                      // "newPassword" makes iOS suggest a strong password and offer
+                      // to save it to the keychain on sign-up.
+                      textContentType="newPassword"
+                      autoComplete="new-password"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="go"
+                      onSubmitEditing={handleSignup}
+                    />
+                    <TouchableOpacity
+                      style={styles.arrowButton}
+                      onPress={handleSignup}
+                      activeOpacity={0.7}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign up"
+                      accessibilityState={{ disabled: loading }}
+                    >
+                      {/* The asset used to be "enter arrow.png": iOS didn't load
+                          the image because of the space in its filename, so the
+                          arrow was invisible there (Android was fine). Keep
+                          asset filenames free of spaces. */}
+                      <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
+                    </TouchableOpacity>
+                  </View>
 
-                {!!error && <Text style={styles.errorText}>{error}</Text>}
+                  {!!error && <Text style={styles.errorText}>{error}</Text>}
 
-                <Text style={styles.legalText}>
-                  By signing up you agree to our{' '}
-                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
-                    Terms
-                  </Text>{' '}
-                  and{' '}
-                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
-                    Privacy Policy
+                  <Text style={styles.legalText}>
+                    By signing up you agree to our{' '}
+                    <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
+                      Terms
+                    </Text>{' '}
+                    and{' '}
+                    <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
+                      Privacy Policy
+                    </Text>
+                    .
                   </Text>
-                  .
-                </Text>
-              </View>
-            </Animated.View>
-          </SafeAreaView>
+                </View>
+              </Animated.View>
+            </SafeAreaView>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Pressable>
     </View>
@@ -437,6 +462,8 @@ function SignupStep({ onBack }: { onBack: () => void }) {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   kav: { flex: 1, justifyContent: 'flex-end' },
+  formScroll: { flex: 1 },
+  formScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
 
   // Top-left back pill (search.tsx parity)
   backWrap: { position: 'absolute', top: 0, left: 0, zIndex: 10 },

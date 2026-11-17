@@ -8,6 +8,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  BackHandler,
   Dimensions,
   Image,
   StyleSheet,
@@ -21,7 +22,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { isDaySelectable, startOfLocalDay } from '@/src/utils/dateSelectable';
-import accessibilityImg from '@/assets/images/accessibility.png';
 import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
 import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '@/src/constants/sheet';
 import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '@/src/components/activity/motion';
@@ -123,6 +123,22 @@ export default function DateRangePicker({
       useNativeDriver: true,
     }).start();
   }, [visible, slideAnim]);
+
+  // Android system back closes the picker instead of falling through to the
+  // screen (which would e.g. drop the whole booking view in search). This is
+  // an overlay, not a Modal, so nothing else intercepts back for it. Registered
+  // only while visible — after the screen's own focus handler — so it runs
+  // first and consumes the event. While confirm is disabled (a submit is in
+  // flight) back is swallowed without closing, matching CreateListing2's own
+  // guard. BackHandler is a no-op on iOS.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!confirmDisabled) onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, confirmDisabled, onClose]);
 
   // Re-sync internal state when initial values change while picker is hidden
   useEffect(() => {
@@ -247,7 +263,7 @@ export default function DateRangePicker({
 
       {/* Helper row */}
       <View style={styles.helperRow}>
-        <Image source={accessibilityImg} style={styles.helperIcon} />
+        <Ionicons name="calendar-outline" size={16} color="#fff" style={styles.helperIcon} />
         <Text style={styles.helperText}>{helperText}</Text>
       </View>
 
@@ -403,10 +419,7 @@ const styles = StyleSheet.create({
     paddingRight: W * 0.12, // leave room for the logo
   },
   helperIcon: {
-    width: 16,
-    height: 16,
-    marginTop: 2,
-    tintColor: '#fff',
+    marginTop: 1,
   },
   helperText: {
     fontFamily: CustomFonts.SwitzerLight,

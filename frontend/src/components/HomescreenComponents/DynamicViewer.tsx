@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '../../utils/supabase';
 import { CustomFonts } from '../../constants/theme';
 import { getPrimaryRate } from '../../utils/listingPrice';
+import { getViewerId, withoutOwnListings } from '../../utils/ownListings';
 
 interface NearbyListing {
   id: string;
@@ -136,7 +137,12 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
       return;
     }
 
-    const withPhoto = (visibleData ?? []).filter(
+    // Hide the signed-in user's own listings — they can't book them.
+    const othersListings = withoutOwnListings(
+      (visibleData ?? []) as { owner_id?: string | null }[],
+      await getViewerId(supabase),
+    );
+    const withPhoto = othersListings.filter(
       (l: any) => l.photo_url && String(l.photo_url).trim() !== '',
     );
 

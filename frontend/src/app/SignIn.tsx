@@ -29,12 +29,13 @@ import {
   Platform,
   Pressable,
   Keyboard,
+  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { safeBack } from '@/src/utils/navigation';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -50,7 +51,7 @@ import { normalizeEmail } from '@/src/utils/email';
 
 import signinBg from '@/assets/images/onboardingflow/onboarding.signin.png';
 import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
-import enterArrowAsset from '@/assets/images/enter arrow.png';
+import enterArrowAsset from '@/assets/images/enter_arrow.png';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -73,6 +74,9 @@ const BACK_PILL_ICON      = SW * 0.06;
 const BACK_PILL_MARGIN    = SW * 0.04;
 
 export default function SignIn() {
+  const insets = useSafeAreaInsets();
+  // Bottom of the back pill plus a margin: the form never rises above this.
+  const backClearance = insets.top + BACK_PILL_SIZE + BACK_PILL_MARGIN * 2;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -135,64 +139,82 @@ export default function SignIn() {
       <Pressable style={StyleSheet.absoluteFill} onPress={Keyboard.dismiss}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.kav}
+          style={[styles.kav, { paddingTop: backClearance }]}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
-          <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
-            <Animated.View style={[styles.cardShadow, cardAnimStyle]}>
-              <View style={styles.card}>
-                <View style={styles.headerRow}>
-                  <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
-                </View>
+          {/* Scroll area starts below the back button, so with little room
+              (keyboard + QuickType bar, an error line, a small phone) the card
+              scrolls instead of riding up over it. Same as Sign Up. */}
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.formScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
+              <Animated.View style={[styles.cardShadow, cardAnimStyle]}>
+                <View style={styles.card}>
+                  <View style={styles.headerRow}>
+                    <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
+                  </View>
 
-                <Text style={styles.heading}>
-                  Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s sign you in.
-                </Text>
+                  <Text style={styles.heading}>
+                    Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s sign you in.
+                  </Text>
 
-                <TextInput
-                  style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="Email"
-                  placeholderTextColor="rgba(0,0,0,0.45)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  // iOS keychain / Android autofill: "username" pairs with the
-                  // password field below so iOS offers and saves credentials.
-                  textContentType="username"
-                  autoComplete="email"
-                />
-
-                <View style={styles.passwordRow}>
                   <TextInput
-                    style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Password"
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Email"
                     placeholderTextColor="rgba(0,0,0,0.45)"
-                    secureTextEntry
-                    textContentType="password"
-                    autoComplete="current-password"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    returnKeyType="go"
-                    onSubmitEditing={handleLogin}
+                    keyboardType="email-address"
+                    // iOS keychain / Android autofill: "username" pairs with the
+                    // password field below so iOS offers and saves credentials.
+                    textContentType="username"
+                    autoComplete="email"
                   />
-                  <TouchableOpacity
-                    style={styles.arrowButton}
-                    onPress={handleLogin}
-                    activeOpacity={0.7}
-                    disabled={loading}
-                  >
-                    <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
-                  </TouchableOpacity>
-                </View>
 
-                {!!error && <Text style={styles.errorText}>{error}</Text>}
-              </View>
-            </Animated.View>
-          </SafeAreaView>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="Password"
+                      placeholderTextColor="rgba(0,0,0,0.45)"
+                      secureTextEntry
+                      textContentType="password"
+                      autoComplete="current-password"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="go"
+                      onSubmitEditing={handleLogin}
+                    />
+                    <TouchableOpacity
+                      style={styles.arrowButton}
+                      onPress={handleLogin}
+                      activeOpacity={0.7}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign in"
+                      accessibilityState={{ disabled: loading }}
+                    >
+                      {/* The asset used to be "enter arrow.png": iOS didn't load
+                          the image because of the space in its filename, so the
+                          arrow was invisible there (Android was fine). Keep
+                          asset filenames free of spaces. */}
+                      <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {!!error && <Text style={styles.errorText}>{error}</Text>}
+                </View>
+              </Animated.View>
+            </SafeAreaView>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Pressable>
     </View>
@@ -202,6 +224,8 @@ export default function SignIn() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
   kav: { flex: 1, justifyContent: 'flex-end' },
+  formScroll: { flex: 1 },
+  formScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
 
   // Top-left back pill
   backWrap: { position: 'absolute', top: 0, left: 0, zIndex: 10 },

@@ -13,6 +13,34 @@ Notifications.setNotificationHandler({
   }),
 });
 
+function easProjectId(): string | undefined {
+  return (
+    (Constants.expoConfig as any)?.extra?.eas?.projectId ??
+    (Constants as any)?.easConfig?.projectId
+  );
+}
+
+/**
+ * This device's Expo push token, obtained exactly as
+ * registerForPushNotifications obtains the one it saves, but without ever
+ * prompting: null on web, without notification permission, without an EAS
+ * projectId, or on any error. Used at sign-out to clear the profile's token
+ * only when it is this device's (see utils/signOut.ts).
+ */
+export async function getThisDevicePushToken(): Promise<string | null> {
+  try {
+    if (Platform.OS === 'web') return null;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return null;
+    const projectId = easProjectId();
+    if (!projectId) return null;
+    return (await Notifications.getExpoPushTokenAsync({ projectId })).data || null;
+  } catch (err) {
+    console.log('[push] could not read this device token', err);
+    return null;
+  }
+}
+
 /**
  * Obtain the device's Expo push token and store it on the signed-in user's
  * profile so the backend can notify them when a session ends. Fails safe:
@@ -34,9 +62,7 @@ export async function registerForPushNotifications(): Promise<void> {
       return;
     }
 
-    const projectId =
-      (Constants.expoConfig as any)?.extra?.eas?.projectId ??
-      (Constants as any)?.easConfig?.projectId;
+    const projectId = easProjectId();
     if (!projectId) {
       console.log('[push] no EAS projectId configured; skipping token registration');
       return;

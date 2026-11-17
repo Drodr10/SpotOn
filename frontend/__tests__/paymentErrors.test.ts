@@ -47,6 +47,19 @@ describe('paymentSheetErrorCopy', () => {
     );
   });
 
+  it('never promises "not charged" when the connection dropped mid-confirm', () => {
+    for (const err of [
+      { code: 'Failed', type: 'api_connection_error' },
+      { code: 'Timeout', message: 'x' },
+    ]) {
+      const c = paymentSheetErrorCopy(err);
+      expect(c.message).not.toMatch(/weren't charged|not charged/i);
+      expect(c.message).toBe(
+        "We couldn't confirm your payment. Check Activity before trying again — if the booking is there, you're all set.",
+      );
+    }
+  });
+
   it('handles a missing error', () => {
     expect(paymentSheetErrorCopy(undefined).title).toBe('Payment not completed');
   });

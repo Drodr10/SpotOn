@@ -117,8 +117,15 @@ function statusLine(conv: Conversation) {
     // Scheduled but not yet started.
     return <Text style={styles.subtitle}>Reservation starting {formatStart(start)}</Text>;
   }
-  const when = conv.reservation ? conv.reservation.start : new Date(conv.updated_at);
-  return <Text style={styles.subtitle}>Booking Confirmed {formatDate(when)}</Text>;
+  // No ongoing/upcoming reservation with this person (finished, cancelled, or
+  // a pre-booking enquiry). Don't claim a booking: show the last message, or a
+  // neutral label with the conversation's last activity.
+  const preview = conv.last_message?.trim();
+  return (
+    <Text style={styles.subtitle} numberOfLines={1}>
+      {preview || `Conversation · ${formatDate(new Date(conv.updated_at))}`}
+    </Text>
+  );
 }
 
 /** Pick the more relevant of two active reservations for the same person:

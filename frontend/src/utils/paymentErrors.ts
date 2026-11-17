@@ -22,9 +22,14 @@ export interface PaymentErrorCopy {
   message: string;
 }
 
+const CONNECTION_UNCERTAIN_MESSAGE =
+  "We couldn't confirm your payment. Check Activity before trying again — if the booking is there, you're all set.";
+
 const GENERIC: PaymentErrorCopy = {
   title: 'Payment not completed',
-  message: "Something went wrong and you weren't charged. Please try again.",
+  // Unknown failure: we can't know whether Stripe captured the payment, so
+  // point at Activity instead of promising nothing was charged.
+  message: "Something went wrong. Check Activity before trying again — if the booking is there, you're all set.",
 };
 
 /** Error from initPaymentSheet: the form never opened, nothing was charged. */
@@ -53,10 +58,13 @@ export function paymentSheetErrorCopy(err: PaymentSheetErrorLike | null | undefi
     return { title: 'Payment declined', message: human };
   }
 
+  // A timeout / connection drop during confirm is ambiguous: the confirm may
+  // have reached Stripe and succeeded, so never promise "you weren't charged".
+  // Point the payer at Activity first so a retry doesn't double-book.
   if (err.code === 'Timeout' || err.type === 'api_connection_error') {
     return {
       title: 'Payment timed out',
-      message: "We couldn't reach the payment service. Check your connection and try again. You weren't charged.",
+      message: CONNECTION_UNCERTAIN_MESSAGE,
     };
   }
 

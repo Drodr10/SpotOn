@@ -460,9 +460,15 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* 'padding' on both platforms. Android runs edge-to-edge, where
+          adjustResize no longer shrinks the window, so without this the
+          keyboard simply covered the composer (and the composer dropped its
+          nav-bar margin onto the gesture bar). KeyboardAvoidingView pads by the
+          real overlap between this view and the keyboard's top edge, so it is
+          also correct (zero) on any device that does still resize. */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         <FlatList
