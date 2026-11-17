@@ -211,4 +211,7 @@ test('Profile fetches vehicles, listings and reservations a bounded number of ti
   }).toEqual(snapshot);
 
   await screen.unmount();
-});
+  // The first render of the whole Profile screen (jest-expo transform, many
+  // native mocks) can take >5s on a cold CI runner; that's start-up cost, not
+  // the loop this test guards — the loop is caught by the call counts above.
+}, 30_000);
