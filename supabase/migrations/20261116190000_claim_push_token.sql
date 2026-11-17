@@ -19,10 +19,32 @@
 --   allowed by 20261116180000's column grant). The new build falls back to
 --   that update if this function isn't deployed yet.
 --
--- NOT AUTO-DEPLOYED: apply to the hosted project manually; any order relative
--- to the other 20261116 migrations.
+-- Security precondition
+--   Treating the token as proof of ownership is only sound while tokens are
+--   secret. Before 20261116160000 every profile's expo_push_token was readable
+--   by anyone (profiles_select_public), so an attacker could have read a
+--   victim's token and claimed it — stopping the victim's pushes and sending
+--   their own to the victim's phone. Expo tokens are long and random, so
+--   guessing isn't practical; reading was the only route. This migration
+--   therefore REFUSES to run while that public read policy still exists, and
+--   pgTAP checks that no signed-in user can read another user's token.
+--
+-- NOT AUTO-DEPLOYED: apply to the hosted project manually, AFTER
+-- 20261116160000_profiles_privacy.sql (enforced below).
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_policy
+    WHERE polrelid = 'public.profiles'::regclass
+      AND polname = 'profiles_select_public'
+  ) THEN
+    RAISE EXCEPTION 'Apply 20261116160000_profiles_privacy.sql first: push tokens are still publicly readable, which would make claim_push_token abusable.';
+  END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION public.claim_push_token(p_token text)
 RETURNS void

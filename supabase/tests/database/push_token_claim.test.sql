@@ -1,7 +1,7 @@
 -- claim_push_token (20261116190000): a push token lives on exactly one profile.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(8);
+SELECT plan(10);
 
 INSERT INTO auth.users (id, email, aud, role) VALUES
   ('00000000-0000-4000-8000-0000000000e1', 'pa@test.local', 'authenticated', 'authenticated'),
@@ -20,6 +20,13 @@ SELECT ok(NOT has_function_privilege('anon', 'public.claim_push_token(text)', 'E
 SELECT ok(has_function_privilege('authenticated', 'public.claim_push_token(text)', 'EXECUTE'), 'signed-in users can call claim_push_token');
 SELECT is((SELECT prosecdef FROM pg_proc WHERE oid = 'public.claim_push_token(text)'::regprocedure), true, 'runs as definer (needs to clear other rows)');
 SELECT isnt((SELECT proconfig FROM pg_proc WHERE oid = 'public.claim_push_token(text)'::regprocedure), NULL, 'search_path is pinned');
+
+-- Tokens must stay secret for claiming to be safe: C can't see anyone else's.
+SET LOCAL role authenticated;
+SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-0000000000e3","role":"authenticated"}', true);
+SELECT is((SELECT count(*)::int FROM public.profiles WHERE expo_push_token = 'ExponentPushToken[shared]'), 0, 'a signed-in user cannot read another user''s push token');
+SELECT is((SELECT count(*)::int FROM public.profiles WHERE id <> '00000000-0000-4000-8000-0000000000e3'), 0, 'a signed-in user cannot read other profiles at all');
+RESET role;
 
 -- B signs in on the shared phone.
 SET LOCAL role authenticated;
