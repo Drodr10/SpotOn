@@ -62,18 +62,12 @@ const SUB_SIZE = screenWidth * 0.032;
 const BANNER_HEIGHT = screenWidth * 0.22;
 const BANNER_TEXT = screenWidth * 0.045;
 const VEHICLE_CARD_HEIGHT = screenWidth * 0.22;
-// A lone car spans the full content width like the banners around it; with
-// several, each card is narrower so the next one peeks in and the row reads
-// as scrollable.
-const VEHICLE_CARD_WIDTH_SINGLE = screenWidth - H_PAD * 2;
-const VEHICLE_CARD_WIDTH_MULTI = screenWidth * 0.68;
+const VEHICLE_CARD_WIDTH = screenWidth * 0.5;
 const BANNER_IMAGE_RIGHT = screenWidth * 0.015;
-// registeredCar.avif is 1536x1024 (3:2). The image box keeps that ratio and
-// sits inside the card, so `contain` shows the whole car — the old box was
-// wider than its clip and cut the car off at the card's right edge.
-const VEHICLE_CAR_IMAGE_ASPECT = 1536 / 1024;
-const VEHICLE_CAR_IMAGE_HEIGHT = VEHICLE_CARD_HEIGHT * 0.92;
-const VEHICLE_CAR_IMAGE_WIDTH = VEHICLE_CAR_IMAGE_HEIGHT * VEHICLE_CAR_IMAGE_ASPECT;
+const VEHICLE_CAR_VISIBLE_RATIO = 0.6;
+const VEHICLE_CAR_IMAGE_WIDTH = VEHICLE_CARD_WIDTH;
+const VEHICLE_CAR_IMAGE_HEIGHT = VEHICLE_CARD_HEIGHT * 1.3;
+const VEHICLE_CAR_CLIP_WIDTH = VEHICLE_CAR_IMAGE_WIDTH * VEHICLE_CAR_VISIBLE_RATIO;
 const EMAIL_ICON = screenWidth * 0.09;
 const EDIT_ICON = screenWidth * 0.05;
 const PROFILE_LOGO = screenWidth * 0.13;
@@ -666,13 +660,7 @@ export default function ProfilePage() {
                 // found make/model alone "blank" and couldn't tell cars apart.
                 <TouchableOpacity
                   key={v.id}
-                  style={[
-                    styles.vehicleCard,
-                    {
-                      width:
-                        vehicles.length === 1 ? VEHICLE_CARD_WIDTH_SINGLE : VEHICLE_CARD_WIDTH_MULTI,
-                    },
-                  ]}
+                  style={styles.vehicleCard}
                   activeOpacity={0.85}
                   onPress={withLightHaptic(() =>
                     router.push({ pathname: '/RegisterVehicle', params: { vehicleId: v.id } } as any),
@@ -695,11 +683,13 @@ export default function ProfilePage() {
                       <Text style={styles.vehicleColorText} numberOfLines={1}>{v.color}</Text>
                     )}
                   </View>
-                  <Image
-                    source={registeredCar}
-                    style={styles.vehicleCarImage}
-                    resizeMode='contain'
-                  />
+                  <View style={styles.vehicleCarClip}>
+                    <Image
+                      source={registeredCar}
+                      style={styles.vehicleCarImage}
+                      resizeMode='contain'
+                    />
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -941,17 +931,15 @@ const styles = StyleSheet.create({
     paddingRight: H_PAD,
   },
   vehicleCard: {
+    width: VEHICLE_CARD_WIDTH,
     height: VEHICLE_CARD_HEIGHT,
     borderRadius: CARD_RADIUS,
     backgroundColor: '#F4F4F4',
     overflow: 'hidden',
     paddingLeft: screenWidth * 0.04,
-    paddingRight: screenWidth * 0.02,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: screenWidth * 0.02,
+    justifyContent: 'center',
   },
-  vehicleInfo: { flex: 1, gap: screenWidth * 0.012 },
+  vehicleInfo: { maxWidth: '58%', gap: screenWidth * 0.012 },
   vehicleCardText: {
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: screenWidth * 0.035,
@@ -978,7 +966,18 @@ const styles = StyleSheet.create({
     fontSize: screenWidth * 0.028,
     color: 'rgba(0,0,0,0.6)',
   },
+  vehicleCarClip: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: VEHICLE_CAR_CLIP_WIDTH,
+    overflow: 'hidden',
+  },
   vehicleCarImage: {
+    position: 'absolute',
+    left: 0,
+    top: (VEHICLE_CARD_HEIGHT - VEHICLE_CAR_IMAGE_HEIGHT) / 2,
     width: VEHICLE_CAR_IMAGE_WIDTH,
     height: VEHICLE_CAR_IMAGE_HEIGHT,
   },
