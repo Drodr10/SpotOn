@@ -27,7 +27,34 @@ function easProjectId(): string | undefined {
  * projectId, or on any error. Used at sign-out to clear the profile's token
  * only when it is this device's (see utils/signOut.ts).
  */
+// The token this device last registered, kept on the phone (expo-sqlite
+// localStorage, installed by utils/supabase.ts) so sign-out can find it with
+// no network and no notification permission — a lookup that fails there would
+// leave the previous user's pushes arriving on a shared phone.
+const CACHED_TOKEN_KEY = 'spoton.pushToken';
+
+type KV = { getItem(k: string): string | null; setItem(k: string, v: string): void };
+const kv = (): KV | undefined => (globalThis as { localStorage?: KV }).localStorage;
+
+export function readCachedPushToken(): string | null {
+  try {
+    return kv()?.getItem(CACHED_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function cachePushToken(token: string): void {
+  try {
+    kv()?.setItem(CACHED_TOKEN_KEY, token);
+  } catch {
+    // Storage unavailable: sign-out falls back to a live lookup.
+  }
+}
+
 export async function getThisDevicePushToken(): Promise<string | null> {
+  const cached = readCachedPushToken();
+  if (cached) return cached;
   try {
     if (Platform.OS === 'web') return null;
     const { status } = await Notifications.getPermissionsAsync();
@@ -71,11 +98,17 @@ export async function registerForPushNotifications(): Promise<void> {
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !token) return;
+    cachePushToken(token);
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ expo_push_token: token })
-      .eq('id', user.id);
+    // claim_push_token (20261116190000) saves the token on this user AND
+    // removes it from any other profile, so one phone never delivers another
+    // person's notifications. Falls back to a plain update on a database that
+    // doesn't have the function yet.
+    const claimed = await supabase.rpc('claim_push_token', { p_token: token });
+    let error = claimed.error;
+    if (error && /claim_push_token|function|schema cache/i.test(error.message)) {
+      error = (await supabase.from('profiles').update({ expo_push_token: token }).eq('id', user.id)).error;
+    }
     if (error) console.log('[push] failed to save token', error.message);
     else console.log('[push] token registered');
   } catch (err) {

@@ -14,9 +14,11 @@ export const PUSH_TOKEN_CLEAR_TIMEOUT_MS = 3000;
  * Only clears the column if it still holds THIS device's token. The profile
  * keeps one token (the last device to register), so signing out on phone A
  * must not wipe phone B's registration. The match is part of the UPDATE's
- * WHERE, so it is atomic with the write. If this device's token can't be
- * determined (no permission, no projectId, web, error) nothing is cleared:
- * a device that can't get a token never registered one.
+ * WHERE, so it is atomic with the write. The token comes from the copy saved
+ * on the phone at registration (no network or permission needed), falling
+ * back to a live lookup. As a second layer, claim_push_token removes a token
+ * from every other profile when someone registers it, so even a failed clear
+ * here can't route the previous user's pushes to the next user's phone.
  *
  * Best-effort: never throws and never waits longer than the timeout.
  */
