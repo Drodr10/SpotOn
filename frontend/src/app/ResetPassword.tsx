@@ -363,8 +363,11 @@ export default function ResetPassword() {
                       <View style={styles.inputRow}>
                         <TextInput
                           key="code"
-                          // Spaced digits, but not a spaced-out placeholder.
-                          style={[styles.input, styles.inputWithArrow, !!codeText && styles.codeInput]}
+                          // No letterSpacing here (or on any TextInput): iOS Fabric
+                          // recycles the native text field, and the kerning stuck
+                          // to whichever input reused it next — e.g. QuickSearch's
+                          // placeholder rendered "W h e r e  A r e …" after a reset.
+                          style={[styles.input, styles.inputWithArrow]}
                           defaultValue=""
                           onChangeText={handleCodeChange}
                           placeholder="6-digit code"
@@ -580,7 +583,6 @@ const styles = StyleSheet.create({
   },
   inputWithArrow: { paddingRight: SW * 0.13, marginBottom: 0 },
   inputReadOnly: { color: 'rgba(0,0,0,0.55)', backgroundColor: 'rgba(3,3,3,0.05)' },
-  codeInput: { letterSpacing: SW * 0.012 },
   inputRow: { position: 'relative', justifyContent: 'center' },
   arrowButton: {
     position: 'absolute',

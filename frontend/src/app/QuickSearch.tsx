@@ -414,7 +414,7 @@ export default function QuickSearch() {
                 onSubmitEditing={handleSubmit}
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
-                placeholder="Where Are We Going Today?"
+                placeholder="Where are we going today?"
                 placeholderTextColor="rgba(0,0,0,0.5)"
                 returnKeyType="search"
               />
