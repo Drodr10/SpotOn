@@ -23,7 +23,7 @@ import { CustomFonts } from '../constants/theme';
 import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from './activity/motion';
 import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '../constants/sheet';
 import { paymentSheetErrorCopy, paymentSheetInitErrorCopy } from '../utils/paymentErrors';
-import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle_disc.png';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 

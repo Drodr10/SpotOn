@@ -5,7 +5,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect } from "react";
 import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, initialWindowMetrics } from "react-native-safe-area-context";
 import MenuBar from "../components/MenuBar";
 import { setAvatarUrl } from "../utils/avatar";
 import { supabase } from "../utils/supabase";
@@ -46,14 +46,18 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
-      <SafeAreaProvider>
+      {/* initialMetrics: insets are known on the first frame, so nothing positioned
+          from useSafeAreaInsets() renders at 0 and then jumps. */}
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <View style={{ flex: 1, position: "relative" }}>
           <Stack screenOptions={{ headerShown: false, animation: 'none' }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="Intro" />
             <Stack.Screen name="SignIn" />
             <Stack.Screen name="ResetPassword" />
-            <Stack.Screen name="Onboarding" />
+            {/* Cross-fade in from Intro (dark photo) instead of a hard cut, so
+                the first frame never shows a half-drawn screen. */}
+            <Stack.Screen name="Onboarding" options={{ animation: 'fade' }} />
             <Stack.Screen name="QuickSearch" />
             <Stack.Screen name="Homescreen" />
             <Stack.Screen name="search" />

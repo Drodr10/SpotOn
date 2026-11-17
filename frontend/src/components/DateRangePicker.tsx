@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { isDaySelectable, startOfLocalDay } from '@/src/utils/dateSelectable';
-import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
+import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle_disc.png';
 import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '@/src/constants/sheet';
 import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '@/src/components/activity/motion';
 

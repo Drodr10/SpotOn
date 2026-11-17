@@ -526,7 +526,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.18,
     shadowRadius: 22,
-    elevation: 12,
+    // No elevation on Android: it draws the shadow under the 80% fill, which
+    // shows through as a lighter "box" inside the card. The stroke outlines it.
+    elevation: Platform.OS === 'android' ? 0 : 12,
   },
   card: {
     width: '100%',

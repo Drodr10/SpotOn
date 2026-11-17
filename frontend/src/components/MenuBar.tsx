@@ -45,7 +45,7 @@ import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
 import messagesBlack from '../../assets/images/menubar/messages_black.png';
 import addWhite from '../../assets/images/menubar/add_white.png';
-import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle_disc.png';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ▼▼▼ SIZE CONTROLS ▼▼▼
