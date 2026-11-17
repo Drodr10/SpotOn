@@ -71,8 +71,11 @@ describe('describeSendCodeError', () => {
     expect(describeSendCodeError(null)).toBeNull();
   });
 
+  it('treats the per-account send limit as sent, so it can\'t reveal that the account exists', () => {
+    expect(describeSendCodeError({ status: 429, code: 'over_email_send_rate_limit' })).toBeNull();
+  });
+
   it.each([
-    { status: 429, code: 'over_email_send_rate_limit' },
     { status: 429, code: 'over_request_rate_limit' },
     { status: 429 },
   ])('maps rate limiting %p to friendly copy', (err) => {
@@ -112,7 +115,7 @@ describe('describeUpdatePasswordError', () => {
 
   it('maps weak_password to the minimum length', () => {
     expect(describeUpdatePasswordError({ status: 422, code: 'weak_password' })).toBe(
-      `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+      `That password is too weak. Use at least ${MIN_PASSWORD_LENGTH} characters and mix letters and numbers.`,
     );
   });
 

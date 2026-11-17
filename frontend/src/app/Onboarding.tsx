@@ -302,8 +302,12 @@ function IntroPager({
       else x.value = raw;
     })
     .onEnd((e) => {
-      const from = Math.round(-dragStartX.value / SW);
       const projected = e.translationX + e.velocityX * SWIPE_VELOCITY_PROJECTION;
+      // If the drag began mid-slide (e.g. right after tapping Continue), round
+      // toward the direction of the swipe so a fling back lands one page back
+      // instead of skipping past page 1 and leaving onboarding.
+      const startPage = -dragStartX.value / SW;
+      const from = projected > 0 ? Math.ceil(startPage - 0.001) : Math.floor(startPage + 0.001);
       let target = from;
       if (projected < -SW * SWIPE_COMMIT_FRACTION) target = from + 1;
       else if (projected > SW * SWIPE_COMMIT_FRACTION) target = from - 1;

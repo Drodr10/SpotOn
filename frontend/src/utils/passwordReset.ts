@@ -112,6 +112,11 @@ function isNetworkError(err: AuthErrorLike): boolean {
  */
 export function describeSendCodeError(err: AuthErrorLike): string | null {
   if (!err) return null;
+  // over_email_send_rate_limit only happens for an EXISTING account (Supabase
+  // returns 200 straight away for unknown emails), so showing it would reveal
+  // that the account exists. Treat it as sent: the earlier code is still valid
+  // and the code screen offers Resend after its cooldown.
+  if (err.code === 'over_email_send_rate_limit') return null;
   if (isRateLimited(err)) return RATE_LIMIT_MESSAGE;
   if (isNetworkError(err)) return NETWORK_MESSAGE;
   return null;
@@ -130,7 +135,9 @@ export function describeUpdatePasswordError(err: AuthErrorLike): string {
   if (isRateLimited(err)) return RATE_LIMIT_MESSAGE;
   if (err?.code === 'same_password') return 'That’s your current password. Choose a new one.';
   if (err?.code === 'weak_password') {
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    // The hosted project may require more than length (digits, symbols…), so
+    // don't claim length is the only rule.
+    return `That password is too weak. Use at least ${MIN_PASSWORD_LENGTH} characters and mix letters and numbers.`;
   }
   if (err?.code === 'session_not_found' || err?.code === 'session_expired' || err?.status === 401) {
     return 'Your reset session expired. Go back and request a new code.';

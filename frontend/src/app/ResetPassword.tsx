@@ -11,9 +11,11 @@
  *                  normal sign-in.
  *
  * Back (pill or Android system back) steps back through the flow. Leaving the
- * password step without finishing signs the recovery session out again, so an
- * abandoned reset doesn't leave the phone signed in to an account whose
- * password the user still doesn't know.
+ * password step in-app without finishing signs the recovery session out again.
+ * If the app is killed on the password step, the session survives and the user
+ * is signed in on relaunch without having set a password — equivalent to an
+ * emailed-code sign-in (the code proves inbox control), so accepted; they can
+ * reset again any time.
  *
  * The email needs {{ .Token }} in the "Reset password" template — see
  * supabase/templates/recovery.html (hosted: paste it in the dashboard).
@@ -274,6 +276,8 @@ export default function ResetPassword() {
     // verifyOtp reports PASSWORD_RECOVERY, not SIGNED_IN, so the root layout's
     // push registration didn't run. Do it here, as a sign-in would have.
     registerForPushNotifications();
+    // Drop Intro/SignIn from the stack so Android back can't return to them.
+    if (router.canDismiss()) router.dismissAll();
     router.replace('/QuickSearch');
   };
 
