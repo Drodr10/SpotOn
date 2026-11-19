@@ -58,6 +58,7 @@ import ListingCameraCard from '@/src/components/camera/ListingCameraCard';
 import { triggerLightHaptic, triggerSelectionHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { formatReverseGeocodeAddress } from '@/src/utils/geocode';
 import { safeBack, useHardwareBack } from '@/src/utils/navigation';
+import { uploadListingPhoto } from '@/src/utils/listingPhoto';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 import addLocationImg from '@/assets/images/add_location.png';
@@ -136,9 +137,6 @@ function buildRatePayload(state: {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-// Outside the component: react-hooks/purity can't prove handleSubmit never
-// runs during render, and Date.now() inside a component body is flagged.
-const newListingPhotoName = () => `listing_${Date.now()}.jpg`;
 
 export default function CreateListing2() {
   const router = useRouter();
@@ -415,31 +413,28 @@ export default function CreateListing2() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      let photoUrl = photoUri ?? '';
-
-      // Try to upload to Supabase Storage
-      if (photoUri) {
-        const fileName = newListingPhotoName();
-        const response = await fetch(photoUri);
-        const blob = await response.blob();
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('listing-photos')
-          .upload(fileName, blob, { contentType: 'image/jpeg' });
-        if (!uploadError && uploadData) {
-          const { data: publicData } = supabase.storage
-            .from('listing-photos')
-            .getPublicUrl(uploadData.path);
-          photoUrl = publicData.publicUrl;
-        }
-      }
-
       // Launched offline with an expired token: initialize() couldn't learn
       // the user yet. Try again now (refreshes the session if back online).
       const ownerId = userId ?? (await supabase.auth.getSession()).data.session?.user?.id ?? null;
       if (!ownerId) {
         Alert.alert('Not logged in', 'Please log in before creating a listing.');
-        setSubmitting(false);
         return;
+      }
+
+      // Fail loudly: saving the local path instead (the old fallback) made a
+      // listing whose photo no other phone could load.
+      let photoUrl: string | null = null;
+      if (photoUri) {
+        try {
+          photoUrl = await uploadListingPhoto(supabase, ownerId, photoUri);
+        } catch (uploadErr) {
+          console.warn('[CreateListing2] photo upload failed:', uploadErr);
+          Alert.alert(
+            "Couldn't upload your photo",
+            'Check your connection and tap "List my spot" again. Your listing has not been created yet.',
+          );
+          return;
+        }
       }
 
       const ratePayload = buildRatePayload({

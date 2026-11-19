@@ -19,6 +19,8 @@ import { supabase } from '../../utils/supabase';
 import { CustomFonts } from '../../constants/theme';
 import { getPrimaryRate } from '../../utils/listingPrice';
 import { getViewerId, withoutOwnListings } from '../../utils/ownListings';
+import { displayablePhotoUrl } from '../../utils/listingPhoto';
+import placeholderImageAsset from '@/assets/images/mapimageplaceholder.png';
 
 interface NearbyListing {
   id: string;
@@ -142,9 +144,10 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
       (visibleData ?? []) as { owner_id?: string | null }[],
       await getViewerId(supabase),
     );
-    const withPhoto = othersListings.filter(
-      (l: any) => l.photo_url && String(l.photo_url).trim() !== '',
-    );
+    // Every listing, not just ones with a photo: until the listing-photos
+    // bucket existed, no production listing had a loadable photo, so a
+    // photo-only slider was empty. Cards without one show the placeholder.
+    const candidates = othersListings;
 
     const mapRows = (rows: any[]): NearbyListing[] =>
       rows
@@ -154,7 +157,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
         }))
         .sort((a: NearbyListing, b: NearbyListing) => a.distance - b.distance);
 
-    const allDecorated = mapRows(withPhoto);
+    const allDecorated = mapRows(candidates);
     let resolved: NearbyListing[] = allDecorated.filter((l) => l.distance <= 5);
     let isFallback = false;
 
@@ -260,7 +263,7 @@ export default function DynamicViewer({ onFallback }: DynamicViewerProps = {}) {
       >
         {/* Background image — fills the entire card, no overlays */}
         <Image
-          source={{ uri: item.photo_url }}
+          source={displayablePhotoUrl(item.photo_url) ? { uri: displayablePhotoUrl(item.photo_url)! } : placeholderImageAsset}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />

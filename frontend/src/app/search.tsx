@@ -74,6 +74,7 @@ import { ErrorNote } from '@/src/components/activity/Notes';
 import { usePricingPreview } from '@/src/hooks/usePricingPreview';
 import { getPrimaryRate } from '@/src/utils/listingPrice';
 import { getViewerId, withoutOwnListings } from '@/src/utils/ownListings';
+import { displayablePhotoUrl } from '@/src/utils/listingPhoto';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Listing {
@@ -1003,7 +1004,8 @@ function ListingDetailView({
   onContinue: () => void;
   onContentHeight: (h: number) => void;
 }) {
-  const imgSource = listing.photo_url ? { uri: listing.photo_url } : placeholderImageAsset;
+  const photo = displayablePhotoUrl(listing.photo_url);
+  const imgSource = photo ? { uri: photo } : placeholderImageAsset;
   const actionButtonHeight = screenWidth * 0.11;
   const bannerLabel = getBannerLabel(listing);
   return (
