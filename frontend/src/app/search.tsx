@@ -1,3 +1,4 @@
+import { formatPlate } from '@/src/utils/vehicles';
 /**
  * search.tsx — Figma: "Search / Map Screen" (387-82) + listing detail (389-166).
  *
@@ -16,9 +17,10 @@ import {
   ActivityIndicator,
   Alert,
   useWindowDimensions,
+  Platform,
   ScrollView as RNScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 // ─── Expo Router ─────────────────────────────────────────────────────────────
@@ -67,8 +69,12 @@ import {
 } from '@/src/utils/conversations';
 import DateRangePicker from '@/src/components/DateRangePicker';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { safeBack, useHardwareBack } from '@/src/utils/navigation';
+import { ErrorNote } from '@/src/components/activity/Notes';
 import { usePricingPreview } from '@/src/hooks/usePricingPreview';
 import { getPrimaryRate } from '@/src/utils/listingPrice';
+import { getViewerId, withoutOwnListings } from '@/src/utils/ownListings';
+import { displayablePhotoUrl } from '@/src/utils/listingPhoto';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Listing {
@@ -281,7 +287,7 @@ function NearbyLocationCard({
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function SearchScreen() {
-  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const listRef = useRef<FlatList<Listing>>(null);
 
@@ -401,6 +407,9 @@ export default function SearchScreen() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [isFallback, setIsFallback] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Network/RPC failure — shown as an error with retry, not as "No spots found".
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -413,6 +422,23 @@ export default function SearchScreen() {
    */
   const [viewState, setViewState] = useState<'list' | 'detail' | 'booking'>('list');
   const isDetailView = viewState === 'detail';
+  // Android: the panel and its buttons sit flush with the screen bottom, so
+  // keep them above the system navigation bar. iOS layout is unchanged.
+  const navBarPad = Platform.OS === 'android' ? insets.bottom : 0;
+
+  // Android system back steps the view machine back (booking → detail → list)
+  // instead of leaving the route; the selected listing is kept.
+  useHardwareBack(() => {
+    if (viewState === 'booking') {
+      setViewState('detail');
+      return true;
+    }
+    if (viewState === 'detail') {
+      setViewState('list');
+      return true;
+    }
+    return false;
+  });
   const [detailContentHeight, setDetailContentHeight] = useState(0);
 
   // ─── Animated panel state (Reanimated worklets) ────────────────────────
@@ -440,9 +466,15 @@ export default function SearchScreen() {
   }, []);
 
   const fetchPublishableKey = async () => {
-    const key = await stripe.getKey();
+    // Offline/backend down: don't crash with an unhandled rejection; Reserve
+    // surfaces its own error if the key is still missing at checkout.
+    let key: string | null = null;
+    try {
+      key = await stripe.getKey();
+    } catch (e) {
+      console.warn('[search] publishable key unavailable', e);
+    }
     if (key) setPublishableKey(key);
-    else console.log('Error fetching publishable key');
   };
 
   const initialRegion = {
@@ -481,6 +513,7 @@ export default function SearchScreen() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      setLoadError(false);
 
       // Sort: bookable-now listings first (by distance), then locked/banner
       // listings (by distance). Banner listings always rank below any bookable
@@ -498,22 +531,40 @@ export default function SearchScreen() {
             return a.distance - b.distance;
           });
 
-      const { data: visibleData, error: visibleError } = await supabase.rpc(
-        'get_visible_listings',
-        { p_include_upcoming: true, p_include_active_reserved: true },
-      );
+      let visibleData: any[] | null = null;
+      let visibleError: unknown = null;
+      try {
+        const res = await supabase.rpc('get_visible_listings', {
+          p_include_upcoming: true,
+          p_include_active_reserved: true,
+        });
+        visibleData = res.data;
+        visibleError = res.error;
+      } catch (e) {
+        visibleError = e;
+      }
 
       if (visibleError) {
-        console.error('Supabase get_visible_listings error:', visibleError);
+        console.warn('Supabase get_visible_listings error:', visibleError);
         setListings([]);
         setIsFallback(false);
+        setLoadError(true);
         setLoading(false);
         return;
       }
 
+      // Hide the signed-in user's own listings (they can't book them). Done
+      // before the 5mi/fallback logic so an all-own neighbourhood still falls
+      // back to other people's spots. Claims are read here rather than from
+      // currentUserId state, which may not have resolved by the time this runs.
+      const othersListings = withoutOwnListings(
+        (visibleData ?? []) as Listing[],
+        await getViewerId(supabase),
+      );
+
       const latDelta = 0.0724;
       const lngDelta = 0.0724 / Math.cos((searchLat * Math.PI) / 180);
-      const inBox = (visibleData ?? []).filter(
+      const inBox = othersListings.filter(
         (l: any) =>
           l.latitude >= searchLat - latDelta &&
           l.latitude <= searchLat + latDelta &&
@@ -526,8 +577,8 @@ export default function SearchScreen() {
       let resolved: Listing[] = decorate(inBox).filter((l) => l.distance <= 5);
       let fallback = false;
 
-      if (resolved.length === 0 && (visibleData?.length ?? 0) > 0) {
-        resolved = decorate(visibleData);
+      if (resolved.length === 0 && othersListings.length > 0) {
+        resolved = decorate(othersListings);
         fallback = resolved.length > 0;
       }
 
@@ -535,7 +586,7 @@ export default function SearchScreen() {
       setIsFallback(fallback);
       setLoading(false);
     })();
-  }, [searchLat, searchLng, userLat, userLng]);
+  }, [searchLat, searchLng, userLat, userLng, reloadKey]);
 
   useEffect(() => {
     fetchPublishableKey();
@@ -548,7 +599,7 @@ export default function SearchScreen() {
       // Use measured content height when available; fall back to fixed constant.
       const targetH =
         detailContentHeight > 0
-          ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24)
+          ? Math.min(PANEL_MAX_HEIGHT, sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24 + navBarPad)
           : PANEL_DETAIL_HEIGHT;
       animatePanelHeight(targetH);
       detailOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
@@ -566,6 +617,7 @@ export default function SearchScreen() {
     PANEL_MIN_HEIGHT,
     PANEL_MAX_HEIGHT,
     sizes.DETAIL_HEADER_HEIGHT,
+    navBarPad,
     animatePanelHeight,
     detailOpacity,
     listOpacity,
@@ -577,7 +629,7 @@ export default function SearchScreen() {
     if (isDetailView && detailContentHeight > 0) {
       const target = Math.min(
         PANEL_MAX_HEIGHT,
-        sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24,
+        sizes.DETAIL_HEADER_HEIGHT + detailContentHeight + 24 + navBarPad,
       );
       animatePanelHeight(target);
     }
@@ -586,6 +638,7 @@ export default function SearchScreen() {
     detailContentHeight,
     PANEL_MAX_HEIGHT,
     sizes.DETAIL_HEADER_HEIGHT,
+    navBarPad,
     animatePanelHeight,
   ]);
 
@@ -708,7 +761,16 @@ export default function SearchScreen() {
           style={[styles.map, { width: screenWidth, height: screenHeight }]}
           initialRegion={initialRegion}
           showsUserLocation
-          mapPadding={{ top: 0, right: 0, bottom: PANEL_MIN_HEIGHT, left: 0 }}
+          // Android (Google Maps) shows a native My Location button top-right;
+          // edge-to-edge puts the map under the status bar, so pad it down by
+          // the status-bar inset. iOS (Apple Maps) has no such button and
+          // keeps its original 0 top padding.
+          mapPadding={{
+            top: Platform.OS === 'android' ? insets.top : 0,
+            right: 0,
+            bottom: PANEL_MIN_HEIGHT,
+            left: 0,
+          }}
         >
           <Marker
             coordinate={{ latitude: searchLat, longitude: searchLng }}
@@ -739,7 +801,10 @@ export default function SearchScreen() {
                 padding: screenWidth * 0.02,
               },
             ]}
-            onPress={withLightHaptic(() => router.back())}
+            onPress={withLightHaptic(() => safeBack('/Homescreen'))}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={8}
           >
             <Ionicons name="arrow-back" size={sizes.BACK_SIZE} color="#000" />
           </TouchableOpacity>
@@ -756,6 +821,7 @@ export default function SearchScreen() {
               borderTopRightRadius: screenWidth * 0.1,
               paddingHorizontal: sizes.H_PAD,
               paddingTop: sizes.V_PAD * 0.5,
+              paddingBottom: navBarPad,
             },
             animatedPanelStyle,
           ]}
@@ -813,6 +879,13 @@ export default function SearchScreen() {
                 color="#000"
                 style={{ marginTop: screenHeight * 0.08 }}
               />
+            ) : loadError ? (
+              <View style={{ marginTop: screenHeight * 0.04 }}>
+                <ErrorNote
+                  message="We couldn't load spots right now. Check your connection and try again."
+                  onRetry={() => setReloadKey((k) => k + 1)}
+                />
+              </View>
             ) : filteredListings.length === 0 ? (
               <Text
                 style={[
@@ -931,7 +1004,8 @@ function ListingDetailView({
   onContinue: () => void;
   onContentHeight: (h: number) => void;
 }) {
-  const imgSource = listing.photo_url ? { uri: listing.photo_url } : placeholderImageAsset;
+  const photo = displayablePhotoUrl(listing.photo_url);
+  const imgSource = photo ? { uri: photo } : placeholderImageAsset;
   const actionButtonHeight = screenWidth * 0.11;
   const bannerLabel = getBannerLabel(listing);
   return (
@@ -1015,6 +1089,8 @@ function ListingDetailView({
           ]}
           onPress={withLightHaptic(onBack)}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Back to results"
         >
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
@@ -1245,6 +1321,7 @@ type VehicleProfile = {
   model: string;
   color: string;
   plate_last4?: string | null;
+  plate_state?: string | null;
 };
 
 const HARD_CAP_HOURS = 96; // 4 days
@@ -1306,10 +1383,13 @@ function BookingView({
   onPaymentDone: () => void;
 }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Pay/back row: 16 from the screen edge (iOS, unchanged); on Android also
+  // clear the system navigation bar.
+  const bottomBarGap = 16 + (Platform.OS === 'android' ? insets.bottom : 0);
 
-  // Mount-time anchor. Still frozen ON PURPOSE, but now only for Schedule mode,
-  // which borrows its minutes from it (see the booking-math memo below) — a
-  // scheduled start must not drift under the user while they pick an hour.
+  // Mount-time anchor, frozen ON PURPOSE. Only used to seed Schedule mode's
+  // default hour slot once — the seed must not shift under the user.
   const mountTime = useMemo(() => new Date(), []);
 
   // "Now", re-derived on a timer. Current-mode bookings and the picker's floor
@@ -1360,29 +1440,21 @@ function BookingView({
   const [currentHours, setCurrentHours] = useState(1);
 
   // ─── Hourly Schedule state ──────────────────────────────────────────────
-  // When the listing is locked, seed Schedule to the next-available instant
-  // (rounded up to the next hour if there are stray minutes) so the moment the
-  // user taps Schedule they're already positioned on a bookable slot.
-  const initialScheduleStartHour = (() => {
-    if (unavailableNow) {
-      const rounded = new Date(nextAvailableAt!);
-      if (rounded.getMinutes() > 0 || rounded.getSeconds() > 0) {
-        rounded.setHours(rounded.getHours() + 1, 0, 0, 0);
-      }
-      return rounded.getHours();
+  // Schedule books whole hour slots, so seed it to the first full hour at or
+  // after the earliest bookable instant (now, or next-available when the
+  // listing is locked). Rounding up — rather than seeding the current hour —
+  // keeps the default slot from starting in the past. Crossing midnight rolls
+  // the day forward with it.
+  const initialScheduleSlot = (() => {
+    const slot = new Date(unavailableNow ? nextAvailableAt! : mountTime);
+    if (slot.getMinutes() > 0 || slot.getSeconds() > 0 || slot.getMilliseconds() > 0) {
+      slot.setHours(slot.getHours() + 1, 0, 0, 0);
     }
-    return mountTime.getHours();
+    return slot;
   })();
+  const initialScheduleStartHour = initialScheduleSlot.getHours();
   const initialScheduleStartDate = (() => {
-    const base = new Date(earliestStart);
-    // If we bumped the hour past 23 while rounding, roll the day forward.
-    if (unavailableNow) {
-      const n = new Date(nextAvailableAt!);
-      const rolled = n.getMinutes() > 0 || n.getSeconds() > 0;
-      if (rolled && n.getHours() === 23) {
-        base.setDate(base.getDate() + 1);
-      }
-    }
+    const base = new Date(initialScheduleSlot);
     base.setHours(0, 0, 0, 0);
     return base;
   })();
@@ -1412,7 +1484,8 @@ function BookingView({
       setVehiclesLoading(true);
       const { data, error } = await supabase
         .from('vehicles')
-        .select('id, make, model, color, plate_last4')
+        // '*' tolerates a DB without plate_state (20261116140000).
+        .select('*')
         .eq('owner_user_id', currentUserId)
         .order('created_at', { ascending: false });
 
@@ -1518,13 +1591,22 @@ function BookingView({
       const end = new Date(start.getTime() + currentHours * 3600 * 1000);
       return { startDateTime: start, endDateTime: end, hoursBooked: currentHours };
     }
-    // schedule — minutes come from the FROZEN anchor, not the ticking clock, so
-    // a start the user picked stays put instead of creeping forward every 15s.
-    const start = new Date(scheduleStart);
-    start.setHours(startHour, mountTime.getMinutes(), 0, 0);
-    const end = new Date(start.getTime() + (endHour - startHour) * 3600 * 1000);
+    // schedule — start/end sit exactly on the hour slots the wheels show
+    // ("12 AM → 2 AM" books 12:00–2:00). Minutes used to be borrowed from the
+    // mount time, so the summary and the booking read e.g. 12:58–2:58.
+    const slotStart = new Date(scheduleStart);
+    slotStart.setHours(startHour, 0, 0, 0);
+    const end = new Date(slotStart.getTime() + (endHour - startHour) * 3600 * 1000);
+    // If the chosen slot has already begun (the user scrolled back to the
+    // current hour), start from the current minute so they don't pay for time
+    // already gone; the end stays on its slot. Minute precision keeps the price
+    // preview from refetching on every 15s tick.
+    const nowMinute = new Date(now);
+    nowMinute.setSeconds(0, 0);
+    const start =
+      slotStart < nowMinute && end > nowMinute ? nowMinute : slotStart;
     return { startDateTime: start, endDateTime: end, hoursBooked: endHour - startHour };
-  }, [bookingMode, currentHours, now, mountTime, scheduleStart, startHour, endHour]);
+  }, [bookingMode, currentHours, now, scheduleStart, startHour, endHour]);
 
   // ─── Summary line ───────────────────────────────────────────────────────
   const sameDay =
@@ -1796,7 +1878,7 @@ function BookingView({
                         activeOpacity={0.85}
                       >
                         <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
-                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                          {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ? formatPlate(v.plate_last4, v.plate_state, true) : 'plate'}`}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -1855,10 +1937,12 @@ function BookingView({
           </RNScrollView>
 
           {/* Bottom bar */}
-          <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
+          <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD, marginBottom: bottomBarGap }]}>
             <TouchableOpacity
               onPress={withLightHaptic(onBack)}
               style={bookingStyles.backCircle}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
               activeOpacity={0.85}
             >
               <Ionicons name="chevron-back" size={22} color="#fff" />
@@ -2137,7 +2221,7 @@ function BookingView({
                     activeOpacity={0.85}
                   >
                     <Text style={[bookingStyles.vehicleChipText, selected && bookingStyles.vehicleChipTextSelected]}>
-                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ?? 'plate'}`}
+                      {`${v.color} ${v.make} ${v.model} • ${v.plate_last4 ? formatPlate(v.plate_last4, v.plate_state, true) : 'plate'}`}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -2202,10 +2286,12 @@ function BookingView({
         </RNScrollView>
 
         {/* Bottom row pinned outside RNScrollView — always visible. */}
-        <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD }]}>
+        <View style={[bookingStyles.bottomBar, { paddingHorizontal: sizes.H_PAD, marginBottom: bottomBarGap }]}>
           <TouchableOpacity
             onPress={withLightHaptic(onBack)}
             style={bookingStyles.backCircle}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             activeOpacity={0.85}
           >
             <Ionicons name="chevron-back" size={22} color="#fff" />

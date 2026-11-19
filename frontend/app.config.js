@@ -45,6 +45,9 @@ module.exports = {
     ],
     'expo-font',
     'expo-web-browser',
+    // Pill-shaped Android autofill highlight instead of the default yellow
+    // rectangle (see the plugin for details). Android only.
+    './plugins/withAutofillHighlight',
   ],
   android: {
     ...app.expo.android,

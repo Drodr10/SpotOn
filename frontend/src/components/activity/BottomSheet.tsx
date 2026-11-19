@@ -37,7 +37,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic } from '@/src/utils/haptics';
 import { project, rubberband, slideIn, slideOut } from './motion';
 import { SW } from './layout';
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
+import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '@/src/constants/sheet';
 
 type Props = {
   visible: boolean;
@@ -157,7 +157,8 @@ export default function BottomSheet({
         onLayout={(e) => sheetH.set(e.nativeEvent.layout.height)}
         style={[
           styles.sheet,
-          { bottom: SHEET_BOTTOM, maxHeight: H * maxHeightRatio },
+          // Android floats above the nav bar; iOS unchanged (see sheet.ts).
+          { bottom: sheetBottom(insets.bottom), maxHeight: H * maxHeightRatio },
           sheetStyle,
         ]}
         accessibilityViewIsModal
@@ -172,7 +173,7 @@ export default function BottomSheet({
           </View>
         </GestureDetector>
         {children}
-        <View style={{ height: sheetBottomPad(insets.bottom) }} />
+        <View style={{ height: sheetContentPad(insets.bottom) }} />
       </Animated.View>
     </View>
   );

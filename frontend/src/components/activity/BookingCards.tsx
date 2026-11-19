@@ -26,6 +26,7 @@ import {
 import PressableCard from './PressableCard';
 import { LiveLabel } from './RollingText';
 import { CARD_W } from './layout';
+import { displayablePhotoUrl } from '../../utils/listingPhoto';
 
 const BORDER = Math.max(2, CARD_W * 0.008);
 const RADIUS = CARD_W * 0.12;
@@ -53,7 +54,8 @@ export function ListingThumb({
   size: number;
   radius: number;
 }) {
-  if (!uri) {
+  const photo = displayablePhotoUrl(uri);
+  if (!photo) {
     return (
       <View style={[styles.thumbFallback, { width: size, height: size, borderRadius: radius }]}>
         <Ionicons name='car-outline' size={size * 0.5} color='rgba(0,0,0,0.45)' />
@@ -62,7 +64,7 @@ export function ListingThumb({
   }
   return (
     <Image
-      source={{ uri }}
+      source={{ uri: photo }}
       style={{ width: size, height: size, borderRadius: radius, backgroundColor: 'rgba(0,0,0,0.08)' }}
       contentFit='cover'
       transition={200}
@@ -110,9 +112,9 @@ export function ActiveBookingCard({
       style={[styles.card, { padding: P }]}
     >
       <View style={{ height: photoH }}>
-        {booking.listing?.photo_url ? (
+        {displayablePhotoUrl(booking.listing?.photo_url) ? (
           <Image
-            source={{ uri: booking.listing.photo_url }}
+            source={{ uri: displayablePhotoUrl(booking.listing?.photo_url)! }}
             style={[StyleSheet.absoluteFill, { borderRadius: RADIUS * 0.8 }]}
             contentFit='cover'
             transition={250}

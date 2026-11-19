@@ -27,6 +27,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Dimensions,
   Pressable,
   StyleProp,
@@ -132,6 +133,19 @@ export function PillMenuPanel({ open, pillWidth, pillHeight, items, minWidth = 0
       );
     }
   }, [open, reduced, progress, unmount]);
+
+  // Android system back (button or edge swipe) closes an open menu instead of
+  // leaving the screen; returning true consumes the event. Registered only
+  // while open, so it sits on top of the screen's/navigator's own handlers.
+  // BackHandler is a no-op on iOS, which has no system back.
+  useEffect(() => {
+    if (!open || !onClose) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [open, onClose]);
 
   const animatedStyle = useAnimatedStyle(() => {
     const p = progress.get();

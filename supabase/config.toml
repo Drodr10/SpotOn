@@ -238,6 +238,14 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Password reset: the app asks for the 6-digit code (otp_length above), so the
+# email must show {{ .Token }} rather than Supabase's default link-only body.
+# This only affects the LOCAL stack; on hosted the same template has to be
+# pasted into Dashboard > Authentication > Emails > Reset Password.
+[auth.email.template.recovery]
+subject = "Your SpotOn reset code"
+content_path = "./supabase/templates/recovery.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

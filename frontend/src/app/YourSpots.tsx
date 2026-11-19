@@ -7,7 +7,8 @@
  *   Active       a booking of one of your spots happening now (live countdown)
  *   Scheduled    upcoming bookings of your spots
  *   Past         finished / cancelled bookings (compact rows)
- *   Manage Listings -> dark sheet; swipe a listing left to remove it
+ *   Manage Listings -> dark sheet; tap a listing to edit it (EditListing),
+ *                swipe it left to remove it
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
@@ -23,20 +24,18 @@ import { ActiveBookingCard, CompactBookingRow } from '@/src/components/activity/
 import { EmptyNote, ErrorNote, LoadingNote } from '@/src/components/activity/Notes';
 import { openBookingDetails } from '@/src/components/activity/nav';
 import { useNow } from '@/src/components/activity/useNow';
-import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW } from '@/src/components/activity/layout';
+import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW, HEADER_TOP_GAP } from '@/src/components/activity/layout';
 import StatCards from '@/src/components/seller/StatCards';
 import PayoutSheet from '@/src/components/seller/PayoutSheet';
 import ListingsSheet, { type RemoveResult } from '@/src/components/seller/ListingsSheet';
 import {
   computeEarnings,
-  deactivateListing,
   fetchHostDashboard,
-  fetchListingBookings,
   fetchPayoutsEnabled,
   getChatTarget,
   getCurrentUserId,
   groupBookings,
-  listingRemovalBlock,
+  removeListingChecked,
   type Booking,
   type BookingListing,
   type HostDashboard,
@@ -97,20 +96,14 @@ export default function YourSpots() {
     }
   }, []);
 
-  const removeListing = useCallback(async (listing: BookingListing): Promise<RemoveResult> => {
-    try {
-      const userId = await getCurrentUserId();
-      if (!userId) return { ok: false, message: 'You appear to be signed out. Please sign in again.' };
-      // Re-check against fresh rows: the on-screen list may be stale.
-      const fresh = await fetchListingBookings(listing.id);
-      const reason = listingRemovalBlock(listing.id, fresh, Date.now());
-      if (reason) return { ok: false, message: reason };
-      const done = await deactivateListing(listing.id, userId);
-      if (!done) return { ok: false, message: 'We couldn’t remove this listing. Please try again.' };
-      return { ok: true };
-    } catch (err: any) {
-      return { ok: false, message: err?.message ?? 'Something went wrong. Please try again.' };
-    }
+  const removeListing = useCallback(
+    (listing: BookingListing): Promise<RemoveResult> => removeListingChecked(listing.id),
+    [],
+  );
+
+  const editListing = useCallback((listing: BookingListing) => {
+    setListingsOpen(false);
+    router.push({ pathname: '/EditListing', params: { listingId: listing.id } } as any);
   }, []);
 
   const onRemoved = useCallback((listingId: string) => {
@@ -242,6 +235,7 @@ export default function YourSpots() {
         now={now}
         onRemove={removeListing}
         onRemoved={onRemoved}
+        onEdit={editListing}
       />
       <PayoutSheet
         visible={payoutsOpen}
@@ -259,7 +253,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: {
     paddingHorizontal: H_PAD,
-    paddingTop: SW * 0.02,
+    paddingTop: HEADER_TOP_GAP,
     gap: SECTION_GAP,
   },
   section: { gap: CARD_GAP },

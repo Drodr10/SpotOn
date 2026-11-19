@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from services.supabase_client import supabase
-from services.auth import token_required
+from services.auth import token_required, optional_user_id
 
 listings_bp = Blueprint('listings', __name__)
 
@@ -33,7 +33,16 @@ def get_listing(listing_id):
     response = supabase.table("listings").select("*").eq("id", listing_id).execute()
     if not response.data:
         return jsonify({"error": "Listing not found"}), 404
-    return jsonify(response.data[0]), 200
+    listing = response.data[0]
+    # A deactivated listing (owner took it down, or account deletion) is only
+    # visible to its owner. Everyone else gets the same 404 as a missing id,
+    # so the endpoint does not reveal that it exists. This runs as
+    # service_role, so the listings RLS policies do not apply here.
+    if not listing.get("is_active"):
+        caller = optional_user_id()
+        if not caller or caller != listing.get("owner_id"):
+            return jsonify({"error": "Listing not found"}), 404
+    return jsonify(listing), 200
 
 @listings_bp.route('/listings', methods=['POST'])
 @token_required

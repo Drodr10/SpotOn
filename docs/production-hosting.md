@@ -144,6 +144,13 @@ webhook backstop is quietly gone.
 Copy the endpoint's signing secret into `STRIPE_WEBHOOK_SECRET`. It is generated
 per endpoint — it is not the same value as your local `stripe listen` secret.
 
+If `STRIPE_WEBHOOK_SECRET` is missing, the webhook endpoint now answers **500 to
+every event** (Stripe keeps retrying, and the deploy logs say
+`STRIPE_WEBHOOK_SECRET unset; refusing unsigned webhook`). It used to skip the
+signature check instead, which let anyone forge a payment or payout event.
+`ALLOW_UNSIGNED_WEBHOOKS=1` turns the old behaviour back on for local
+development only — **never set it on Render.**
+
 ## Frontend
 
 Set `EXPO_PUBLIC_IP` to the **bare hostname** — no scheme, no `/api`:

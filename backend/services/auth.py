@@ -55,3 +55,22 @@ def token_required(f):
         return f(current_user_id, *args, **kwargs)
 
     return decorated_function
+
+
+def optional_user_id():
+    """The caller's user id if the request carries a VALID bearer token, else None.
+
+    For public endpoints that show the owner a little more than everyone else
+    (e.g. their own inactive listing). Anything short of a valid token
+    (missing, malformed, expired, wrong signature) is treated as anonymous,
+    never as an error, so the public response is unchanged.
+    """
+    parts = request.headers.get("Authorization", "").split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    try:
+        signing_key = jwks_client.get_signing_key_from_jwt(parts[1])
+        data = jwt.decode(parts[1], signing_key.key, algorithms=["ES256"], audience="authenticated")
+    except Exception:  # noqa: BLE001 - jwt errors and JWKS fetch failures alike
+        return None
+    return data.get("sub") or None

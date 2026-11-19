@@ -22,6 +22,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
+import { displayablePhotoUrl } from '@/src/utils/listingPhoto';
 
 import auraGradient from '@/assets/images/profilePage/aura_gradient.png';
 
@@ -101,7 +102,7 @@ export default function ReservationInfoCard({
   endTime,
   startTime,
   totalPrice,
-  photoUrl,
+  photoUrl: rawPhotoUrl,
   secondaryLineOverride,
   pillLabel,
   hideNavArrow,
@@ -109,6 +110,7 @@ export default function ReservationInfoCard({
   width: widthOverride,
 }: ReservationInfoCardProps) {
   const { width: screenWidth } = useWindowDimensions();
+  const photoUrl = displayablePhotoUrl(rawPhotoUrl);
 
   const W = widthOverride ?? screenWidth * 0.86;
   const RADIUS = W * 0.085;

@@ -1,23 +1,32 @@
 /**
  * index.tsx — App entry point.
- * Immediately redirects to the Intro (login) screen on launch.
+ * Sends a signed-in user to QuickSearch and everyone else to the Intro
+ * (Sign Up / Sign In) screen. "Signed in" comes from the session persisted on
+ * the device, so launching without a connection doesn't look like a sign-out
+ * (see utils/authLaunch.ts).
  */
 
-// ─── React ───────────────────────────────────────────────────────────────
-import  { useEffect, } from 'react';
-import { Redirect, router } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { View } from 'react-native';
+import { Redirect } from 'expo-router';
 
-// ─── Auth & Supabase ───────────────────────────────────────────────────────────────
-import { supabase } from '../utils/supabase';
+import { hasPersistedSession } from '../utils/authLaunch';
 
 export default function Index() {
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
-  // Checks for existing session on app launch and navigates to Homescreen if found
-  supabase.auth.getClaims().then(({ data }) => {
-    if (data) {
-      router.replace('/QuickSearch');
-    }
-  });
+  useEffect(() => {
+    let alive = true;
+    hasPersistedSession().then((yes) => {
+      if (alive) setSignedIn(yes);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  return <Redirect href="/Intro" />;
+  // A local storage read: resolves within a frame or two. Render a blank page
+  // until then instead of flashing the Intro screen at a signed-in user.
+  if (signedIn === null) return <View style={{ flex: 1, backgroundColor: '#DCDBD8' }} />;
+  return <Redirect href={signedIn ? '/QuickSearch' : '/Intro'} />;
 }

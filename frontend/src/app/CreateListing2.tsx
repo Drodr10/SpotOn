@@ -1,13 +1,17 @@
 /**
- * CreateListing2 — 5-scene listing creation flow.
+ * CreateListing2 — 3-step listing creation flow.
  *
- * Scene 1: Welcome / Intro
- * Scene 2: Pick Location (map)
- * Scene 3: Camera pop-up (overlay on scene 2)
- * Scene 4: Price Picker — single select page; Continue cycles through
- *          rate popup (daily for hourly / monthly for weekly) → totals
- *          popup (earnings breakdown) → calendar.
- * Scene 5: Calendar pop-up (overlay on scene 4)
+ * Step 1 (scene 2): Pick location (map). Carries the one-line intro that used
+ *                   to be its own Welcome scene.
+ * Step 2 (scene 3): Camera card on the plain page background.
+ * Step 3 (scene 4): Price & availability — main rate, optional secondary rate
+ *                   (daily for hourly / monthly for weekly), availability dates
+ *                   and an earnings summary, all on one screen. "List my spot"
+ *                   submits (opening the date picker first if no dates are set).
+ *
+ * Scene numbers are kept from the old 5-scene flow so the history reads cleanly.
+ * Testers found the old flow (Welcome → Location → Photo → Price → rate popup →
+ * totals popup → calendar, ~7 Continues) long, and the fee notice abrupt.
  *
  * Rates stored per listing: hourly, daily, weekly, monthly.
  */
@@ -20,19 +24,16 @@ import {
   Image,
   TouchableOpacity,
   Switch,
+  Platform,
   StyleSheet,
   Dimensions,
   Alert,
-  Animated,
   PanResponder,
-  Platform,
-  Modal,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 import { useRouter } from 'expo-router';
-import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '../components/activity/motion';
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
@@ -43,15 +44,11 @@ import MapView, { Marker, Region } from 'react-native-maps';
 // ─── Location ─────────────────────────────────────────────────────────────────
 import * as Location from 'expo-location';
 
-// ─── Reduced motion ───────────────────────────────────────────────────────────
-
-// ─── Web Browser ──────────────────────────────────────────────────────────────
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { CustomFonts } from '@/src/constants/theme';
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from '../utils/supabase';
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -59,30 +56,28 @@ import DateRangePicker from '@/src/components/DateRangePicker';
 import FilterToggle from '@/src/components/FilterToggle';
 import ListingCameraCard from '@/src/components/camera/ListingCameraCard';
 import { triggerLightHaptic, triggerSelectionHaptic, withLightHaptic } from '@/src/utils/haptics';
+import { formatReverseGeocodeAddress } from '@/src/utils/geocode';
+import { safeBack, useHardwareBack } from '@/src/utils/navigation';
+import { uploadListingPhoto } from '@/src/utils/listingPhoto';
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
-import carparkingImg from '@/assets/images/carparking.png';
-import accessibilityImg from '@/assets/images/accessibility.png';
 import addLocationImg from '@/assets/images/add_location.png';
-import calendarImg from '@/assets/images/calendar.png';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
-import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
 import addlistingimageAsset from '@/assets/images/addlistingimage.png';
 import dailyTagAsset from '@/assets/images/DailyTag.png';
 import monthlyTagAsset from '@/assets/images/MonthlyTag.png';
 
-// Stripe
-
 // ─── Sizing ───────────────────────────────────────────────────────────────────
-const { width: W, height: H } = Dimensions.get('window');
+const { width: W } = Dimensions.get('window');
 const H_PAD = W * 0.06;
 const BOTTOM_ACTION_HEIGHT = 50;
+
+// Helper-row glyph per step (location → photo → price). Replaces a stock
+// "accessibility" figure that testers read as a stray person icon.
+const STEP_ICONS = ['location-outline', 'camera-outline', 'pricetag-outline'] as const;
 const BOTTOM_ACTION_RADIUS = BOTTOM_ACTION_HEIGHT / 2;
-const PRICE_IMAGE_SIZE = Math.min(W * 0.82, H * 0.34);
-// Off-screen Y offset for rate / totals popups. Using the full screen height
-// guarantees the card is fully translated below the viewport on any device,
-// regardless of card height or safe-area inset.
-const POPUP_OFFSCREEN_Y = H;
+const TAG_H = W * 0.065;
+const TAG_W = TAG_H * 2;
 
 // Default region — Gainesville, FL
 const GAINESVILLE: Region = {
@@ -91,6 +86,21 @@ const GAINESVILLE: Region = {
   latitudeDelta: 0.04,
   longitudeDelta: 0.04,
 };
+
+// Suggested secondary rates (same formulas the old daily/monthly popups used):
+// daily = 7 hours at 20% off, monthly = 4 weeks at 20% off.
+const suggestedDailyRate = (hourly: number) => Math.round(hourly * 7 * 0.8 * 4) / 4;
+const suggestedMonthlyRate = (weekly: number) => Math.round(weekly * 4 * 0.8 * 2) / 2;
+
+// TODO(fee-model): this screen tells hosts SpotOn takes 15% OUT of their price
+// on every tier. backend/utils/pricing.py (calculate_final_price / _fee_rate)
+// instead ADDS the fee on top for the renter (host_payout = subtotal) and uses
+// 7% for weekly/monthly. The team hasn't decided which is intended — the copy
+// and math here are unchanged from the old totals popup until they do.
+const DISPLAY_FEE_RATE = 0.15;
+
+const formatShortDate = (d: Date) =>
+  d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 // ─── Rate payload builder ─────────────────────────────────────────────────────
 function buildRatePayload(state: {
@@ -127,12 +137,13 @@ function buildRatePayload(state: {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
 export default function CreateListing2() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
 
   // ── Scene state ────────────────────────────────────────────────────────────
-  const [scene, setScene] = useState(1);
+  // 2 = location, 3 = photo (camera card over the map), 4 = price & availability.
+  const [scene, setScene] = useState<2 | 3 | 4>(2);
 
   // ── Collected data ─────────────────────────────────────────────────────────
   const [latitude, setLatitude] = useState<number | null>(null);
@@ -140,71 +151,52 @@ export default function CreateListing2() {
   const [address, setAddress] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [pricePerHour, setPricePerHour] = useState(3.0);
-  const [pricePerDay, setPricePerDay] = useState<number | null>(null);
   const [pricePerWeek, setPricePerWeek] = useState(50);
-  // pricePerMonth is derived: pricePerWeek * 4 * 0.8 (20% monthly discount)
   const [periodType, setPeriodType] = useState<0 | 1>(0); // 0 = Hourly, 1 = Weekly
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
 
-  // ── Daily / Monthly rate popups ────────────────────────────────────────────
-  const [userId, setUserId] = useState<string | null>(null);
-  // Always enabled — Stripe onboarding is no longer required to create a listing.
-  const [stripeEnabled] = useState(true);
-  const [showDailyPopup, setShowDailyPopup] = useState(false);
-  const [dailyEnabled, setDailyEnabled] = useState(true);
-  const [dailyRateAccepted, setDailyRateAccepted] = useState(false);
-  const [showMonthlyPopup, setShowMonthlyPopup] = useState(false);
-  const [monthlyEnabled, setMonthlyEnabled] = useState(true);
-  const [monthlyRateAccepted, setMonthlyRateAccepted] = useState(false);
-  const [pricePerMonth, setPricePerMonth] = useState<number | null>(null);
+  // ── Secondary rates (inline, optional) ─────────────────────────────────────
+  // On by default with a suggested value — the old popup also opened switched
+  // on and its Continue accepted it, so this keeps the same default outcome.
+  const [pricePerDay, setPricePerDay] = useState<number | null>(suggestedDailyRate(3.0));
+  const [dailyRateAccepted, setDailyRateAccepted] = useState(true);
+  const [pricePerMonth, setPricePerMonth] = useState<number | null>(suggestedMonthlyRate(50));
+  const [monthlyRateAccepted, setMonthlyRateAccepted] = useState(true);
 
-  // ── Totals (earnings breakdown) popup ──────────────────────────────────────
-  const [showTotalsPopup, setShowTotalsPopup] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
   // ── Pop-up visibility ──────────────────────────────────────────────────────
   const [showCameraPopup, setShowCameraPopup] = useState(false);
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // 'edit' = opened from the Availability row, just saves the dates.
+  // 'submit' = opened by "List my spot" with no dates yet; confirming lists it.
+  const [calendarMode, setCalendarMode] = useState<'edit' | 'submit'>('edit');
   const [submitting, setSubmitting] = useState(false);
-
+  // State updates land a render late; two taps in one frame would both see
+  // submitting=false and insert two listings. The ref is synchronous.
+  const submittingRef = useRef(false);
 
   // ── Map ref for animating to location ─────────────────────────────────────
   const mapRef = useRef<MapView>(null);
 
-  // ── Pop-up animations ──────────────────────────────────────────────────────
-  const dailyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
-  const monthlyPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
-  const totalsPopupAnim = useRef(new Animated.Value(POPUP_OFFSCREEN_Y)).current;
-
-  // Bottom pop-ups share the menu-bar slide: 650ms, ease-out up / ease-in down.
-  const openPopup = (anim: Animated.Value) => {
-    anim.setValue(POPUP_OFFSCREEN_Y);
-    Animated.timing(anim, {
-      toValue: 0,
-      duration: SLIDE_MS,
-      easing: RN_EASE_OUT_SLIDE,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const closePopup = (anim: Animated.Value, cb: () => void) => {
-    Animated.timing(anim, {
-      toValue: POPUP_OFFSCREEN_Y,
-      duration: SLIDE_MS,
-      easing: RN_EASE_IN_SLIDE,
-      useNativeDriver: true,
-    }).start(cb);
-  };
-
   useEffect(() => {
     // Listing creation is zero-friction: no Stripe account required. Sellers set
     // up payouts later, after they've earned money (deferred onboarding).
+    // From the session stored on the device (getSession), not getUser(): a
+    // network blip must not read as "you're signed out" and bounce the user to
+    // the Intro screen. The insert itself is still authorised server-side.
     const initialize = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
+        if (isAuthRetryableFetchError(error)) {
+          // Expired token, offline: still signed in. Retry when the user lists.
+          return;
+        }
         Alert.alert('Authentication Error', 'You need to be logged in to create a listing.', [
           { text: 'OK', onPress: () => router.replace('/Intro') },
         ]);
@@ -222,22 +214,21 @@ export default function CreateListing2() {
     cb?.();
   };
 
-  // ── Price PanResponder ─────────────────────────────────────────────────────
-  // Two separate refs so toggling Hourly↔Weekly preserves each value.
-  // periodTypeRef mirrors state so the PanResponder (built once via useRef)
-  // reads the current mode without stale-closure bugs.
+  // ── Price PanResponders ────────────────────────────────────────────────────
+  // Built once via useRef, so they read refs (not state) to avoid stale
+  // closures. Separate refs keep Hourly and Weekly values when toggling.
   const priceRef = useRef(3.0);
   const priceWeekRef = useRef(50);
-  const pricePerDayRef = useRef(0);
-  const pricePerMonthRef = useRef(0);
+  const pricePerDayRef = useRef(suggestedDailyRate(3.0));
+  const pricePerMonthRef = useRef(suggestedMonthlyRate(50));
   const periodTypeRef = useRef<0 | 1>(0);
+  // Until the host drags a secondary rate themselves, it follows the main rate
+  // (what the old popup did by recomputing its default each time it opened).
+  const dailyTouched = useRef(false);
+  const monthlyTouched = useRef(false);
   const lastY = useRef<number | null>(null);
   const lastYDaily = useRef<number | null>(null);
   const lastYMonthly = useRef<number | null>(null);
-  // Tracks whether popup was already shown+dismissed so Continue skips it on second press
-  const dailyPopupDone = useRef(false);
-  const monthlyPopupDone = useRef(false);
-  const totalsPopupDone = useRef(false);
 
   const pricePanResponder = useRef(
     PanResponder.create({
@@ -257,10 +248,18 @@ export default function CreateListing2() {
           const delta = steps * 0.25 * dir;
           priceRef.current = Math.max(0, Math.round((priceRef.current + delta) * 4) / 4);
           setPricePerHour(priceRef.current);
+          if (!dailyTouched.current) {
+            pricePerDayRef.current = suggestedDailyRate(priceRef.current);
+            setPricePerDay(pricePerDayRef.current);
+          }
         } else {
           const delta = steps * 1 * dir;
           priceWeekRef.current = Math.max(0, Math.round(priceWeekRef.current + delta));
           setPricePerWeek(priceWeekRef.current);
+          if (!monthlyTouched.current) {
+            pricePerMonthRef.current = suggestedMonthlyRate(priceWeekRef.current);
+            setPricePerMonth(pricePerMonthRef.current);
+          }
         }
         triggerSelectionHaptic();
       },
@@ -285,6 +284,7 @@ export default function CreateListing2() {
         lastYDaily.current = e.nativeEvent.pageY;
         const dir = dy > 0 ? 1 : -1;
         const delta = steps * 0.25 * dir;
+        dailyTouched.current = true;
         pricePerDayRef.current = Math.max(0, Math.round((pricePerDayRef.current + delta) * 4) / 4);
         setPricePerDay(pricePerDayRef.current);
         triggerSelectionHaptic();
@@ -310,6 +310,7 @@ export default function CreateListing2() {
         lastYMonthly.current = e.nativeEvent.pageY;
         const dir = dy > 0 ? 1 : -1;
         const delta = steps * 0.5 * dir;
+        monthlyTouched.current = true;
         pricePerMonthRef.current = Math.max(0, Math.round((pricePerMonthRef.current + delta) * 2) / 2);
         setPricePerMonth(pricePerMonthRef.current);
         triggerSelectionHaptic();
@@ -330,9 +331,8 @@ export default function CreateListing2() {
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (results.length > 0) {
-        const r = results[0];
-        const parts = [r.streetNumber, r.street, r.city, r.region].filter(Boolean);
-        setAddress(parts.join(', '));
+        const formatted = formatReverseGeocodeAddress(results[0]);
+        setAddress(formatted);
       }
     } catch (_) {}
   };
@@ -354,9 +354,8 @@ export default function CreateListing2() {
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (results.length > 0) {
-        const r = results[0];
-        const parts = [r.streetNumber, r.street, r.city, r.region].filter(Boolean);
-        setAddress(parts.join(', '));
+        const formatted = formatReverseGeocodeAddress(results[0]);
+        setAddress(formatted);
       }
     } catch (_) {}
   };
@@ -382,52 +381,60 @@ export default function CreateListing2() {
     });
   };
 
+  // Same checks, same messages as before; shared by "List my spot" (so the date
+  // picker never opens over an invalid price) and handleSubmit itself.
+  const validatePrices = () => {
+    if (periodType === 0 && pricePerHour <= 0) {
+      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+      return false;
+    }
+    if (periodType === 0 && dailyRateAccepted && (pricePerDay === null || pricePerDay <= 0)) {
+      Alert.alert('Invalid daily rate', 'Please set a daily rate greater than $0.00.');
+      return false;
+    }
+    if (periodType === 1 && pricePerWeek <= 0) {
+      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
+      return false;
+    }
+    if (periodType === 1 && monthlyRateAccepted && (pricePerMonth === null || pricePerMonth <= 0)) {
+      Alert.alert('Invalid monthly rate', 'Please set a monthly rate greater than $0.00.');
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (dateRange?: { start: Date | null; end: Date | null }) => {
     // Calendar's onConfirm calls setStartDate/setEndDate + handleSubmit synchronously,
     // so this render still sees the old state. Prefer the freshly-picked dates.
     const chosenStart = dateRange?.start ?? startDate;
     const chosenEnd = dateRange?.end ?? endDate;
-    if (periodType === 0 && pricePerHour <= 0) {
-      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
-      return;
-    }
-    if (periodType === 0 && dailyRateAccepted && (pricePerDay === null || pricePerDay <= 0)) {
-      Alert.alert('Invalid daily rate', 'Please set a daily rate greater than $0.00.');
-      return;
-    }
-    if (periodType === 1 && pricePerWeek <= 0) {
-      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
-      return;
-    }
-    if (periodType === 1 && monthlyRateAccepted && (pricePerMonth === null || pricePerMonth <= 0)) {
-      Alert.alert('Invalid monthly rate', 'Please set a monthly rate greater than $0.00.');
-      return;
-    }
+    if (submittingRef.current || !validatePrices()) return;
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
-      let photoUrl = photoUri ?? '';
-
-      // Try to upload to Supabase Storage
-      if (photoUri) {
-        const fileName = `listing_${Date.now()}.jpg`;
-        const response = await fetch(photoUri);
-        const blob = await response.blob();
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('listing-photos')
-          .upload(fileName, blob, { contentType: 'image/jpeg' });
-        if (!uploadError && uploadData) {
-          const { data: publicData } = supabase.storage
-            .from('listing-photos')
-            .getPublicUrl(uploadData.path);
-          photoUrl = publicData.publicUrl;
-        }
+      // Launched offline with an expired token: initialize() couldn't learn
+      // the user yet. Try again now (refreshes the session if back online).
+      const ownerId = userId ?? (await supabase.auth.getSession()).data.session?.user?.id ?? null;
+      if (!ownerId) {
+        Alert.alert('Not logged in', 'Please log in before creating a listing.');
+        return;
       }
 
-      if (!userId) {
-        Alert.alert('Not logged in', 'Please log in before creating a listing.');
-        setSubmitting(false);
-        return;
+      // Fail loudly: saving the local path instead (the old fallback) made a
+      // listing whose photo no other phone could load.
+      let photoUrl: string | null = null;
+      if (photoUri) {
+        try {
+          photoUrl = await uploadListingPhoto(supabase, ownerId, photoUri);
+        } catch (uploadErr) {
+          console.warn('[CreateListing2] photo upload failed:', uploadErr);
+          Alert.alert(
+            "Couldn't upload your photo",
+            'Check your connection and tap "List my spot" again. Your listing has not been created yet.',
+          );
+          return;
+        }
       }
 
       const ratePayload = buildRatePayload({
@@ -441,7 +448,7 @@ export default function CreateListing2() {
       });
 
       const { error } = await supabase.from('listings').insert({
-        owner_id: userId,
+        owner_id: ownerId,
         address: address,
         latitude: latitude,
         longitude: longitude,
@@ -463,13 +470,12 @@ export default function CreateListing2() {
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Something went wrong.');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   // ── Scene navigation helpers ────────────────────────────────────────────────
-
-  const goToScene2 = () => setScene(2);
 
   const goToScene3 = () => {
     if (latitude === null || longitude === null) {
@@ -480,50 +486,6 @@ export default function CreateListing2() {
     setScene(3);
   };
 
-  const goToScene4 = () => {
-    closeCameraPopup(() => {
-      setShowCameraPopup(false);
-      setScene(4);
-    });
-  };
-
-  const goToScene5 = () => {
-    if (periodType === 0) {
-      if (pricePerHour <= 0) {
-        Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
-        return;
-      }
-      if (!dailyPopupDone.current) {
-        openDailyPopup();
-        return;
-      }
-      if (!totalsPopupDone.current) {
-        openTotalsPopup();
-        return;
-      }
-      dailyPopupDone.current = false;
-      totalsPopupDone.current = false;
-      setShowCalendarPopup(true);
-      return;
-    }
-    // Weekly path
-    if (pricePerWeek <= 0) {
-      Alert.alert('Invalid price', 'Please set a price greater than $0.00.');
-      return;
-    }
-    if (!monthlyPopupDone.current) {
-      openMonthlyPopup();
-      return;
-    }
-    if (!totalsPopupDone.current) {
-      openTotalsPopup();
-      return;
-    }
-    monthlyPopupDone.current = false;
-    totalsPopupDone.current = false;
-    setShowCalendarPopup(true);
-  };
-
   const goBackFromScene3 = () => {
     closeCameraPopup(() => {
       setShowCameraPopup(false);
@@ -531,90 +493,60 @@ export default function CreateListing2() {
     });
   };
 
-  const goBackFromScene5 = () => {
-    // DateRangePicker handles its own slide-out animation when `visible` flips to false.
-    setShowCalendarPopup(false);
+  // Step 3 → step 2 (photo). The photo already taken stays in state until a
+  // new one is confirmed, and the camera card opens showing it. A confirm
+  // still animating out when the user goes back is dropped by the card once it
+  // unmounts, so it can't jump forward to step 3 afterwards.
+  const goBackFromScene4 = () => {
+    setShowCameraPopup(true);
+    setScene(3);
   };
 
-  // ── Daily popup helpers ─────────────────────────────────────────────────────
+  // Android system back walks the steps (3 → 2 → 1) instead of dropping the
+  // whole flow; on step 1 it leaves the screen as usual. An open date picker
+  // closes first.
+  useHardwareBack(() => {
+    if (showCalendarPopup) {
+      if (!submitting) setShowCalendarPopup(false);
+      return true;
+    }
+    if (scene === 4) {
+      goBackFromScene4();
+      return true;
+    }
+    if (scene === 3) {
+      goBackFromScene3();
+      return true;
+    }
+    return false;
+  });
 
-  const openDailyPopup = () => {
-    const defaultDaily = Math.round(pricePerHour * 7 * 0.8 * 4) / 4;
-    setPricePerDay(defaultDaily);
-    pricePerDayRef.current = defaultDaily;
-    setDailyEnabled(true);
-    setDailyRateAccepted(false);
-    setShowDailyPopup(true);
-    openPopup(dailyPopupAnim);
+  // "List my spot". A start date has always been required (the picker can't
+  // confirm without one), so with none set yet the picker opens in submit mode
+  // and its confirm lists the spot — no extra step when dates are already set.
+  const handleListPress = () => {
+    if (submitting || !validatePrices()) return;
+    if (!startDate) {
+      setCalendarMode('submit');
+      setShowCalendarPopup(true);
+      return;
+    }
+    handleSubmit();
   };
 
-  const dismissDailyPopup = (accepted = true, onDone?: () => void) => {
-    // Mark done synchronously so a quick follow-up Continue press is not lost
-    // while the slide-down animation is still in flight.
-    dailyPopupDone.current = true;
-    setDailyRateAccepted(accepted);
-    closePopup(dailyPopupAnim, () => {
-      setShowDailyPopup(false);
-      onDone?.();
-    });
+  const openAvailabilityPicker = () => {
+    setCalendarMode('edit');
+    setShowCalendarPopup(true);
   };
 
   const handleDailyToggle = (val: boolean) => {
     triggerLightHaptic();
-    setDailyEnabled(val);
-    if (!val) {
-      setPricePerDay(null);
-      pricePerDayRef.current = 0;
-      dismissDailyPopup(false);
-    }
-  };
-
-  // ── Monthly popup helpers ───────────────────────────────────────────────────
-
-  const openMonthlyPopup = () => {
-    const defaultMonthly = Math.round(pricePerWeek * 4 * 0.8 * 2) / 2;
-    setPricePerMonth(defaultMonthly);
-    pricePerMonthRef.current = defaultMonthly;
-    setMonthlyEnabled(true);
-    setMonthlyRateAccepted(false);
-    setShowMonthlyPopup(true);
-    openPopup(monthlyPopupAnim);
-  };
-
-  const dismissMonthlyPopup = (accepted = true, onDone?: () => void) => {
-    // See dismissDailyPopup: set ref synchronously to avoid a lost Continue press.
-    monthlyPopupDone.current = true;
-    setMonthlyRateAccepted(accepted);
-    closePopup(monthlyPopupAnim, () => {
-      setShowMonthlyPopup(false);
-      onDone?.();
-    });
+    setDailyRateAccepted(val);
   };
 
   const handleMonthlyToggle = (val: boolean) => {
     triggerLightHaptic();
-    setMonthlyEnabled(val);
-    if (!val) {
-      setPricePerMonth(null);
-      pricePerMonthRef.current = 0;
-      dismissMonthlyPopup(false);
-    }
-  };
-
-  // ── Totals popup helpers ────────────────────────────────────────────────────
-
-  const openTotalsPopup = () => {
-    setShowTotalsPopup(true);
-    openPopup(totalsPopupAnim);
-  };
-
-  const dismissTotalsPopup = (onDone?: () => void) => {
-    // Set ref synchronously so the next Continue press immediately advances.
-    totalsPopupDone.current = true;
-    closePopup(totalsPopupAnim, () => {
-      setShowTotalsPopup(false);
-      onDone?.();
-    });
+    setMonthlyRateAccepted(val);
   };
 
   const renderCalendarOverlay = () => (
@@ -622,14 +554,25 @@ export default function CreateListing2() {
       visible={showCalendarPopup}
       initialStart={startDate}
       initialEnd={endDate}
-      helperText="Finally, let's add the date."
-      confirmLabel={submitting ? 'Creating...' : 'Looking good!'}
+      helperText={
+        calendarMode === 'submit'
+          ? "Last thing: when is your spot available?"
+          : 'When is your spot available?'
+      }
+      confirmLabel={
+        calendarMode === 'submit' ? (submitting ? 'Creating...' : 'List my spot') : 'Save dates'
+      }
       confirmDisabled={submitting}
-      onClose={goBackFromScene5}
+      // DateRangePicker handles its own slide-out animation when `visible` flips to false.
+      onClose={() => setShowCalendarPopup(false)}
       onConfirm={(start, end) => {
         setStartDate(start);
         setEndDate(end);
-        handleSubmit({ start, end });
+        if (calendarMode === 'submit') {
+          handleSubmit({ start, end });
+        } else {
+          setShowCalendarPopup(false);
+        }
       }}
     />
   );
@@ -638,12 +581,18 @@ export default function CreateListing2() {
   // Shared scene layout wrapper
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const renderSharedHeader = (helperText: string) => (
+  const renderSharedHeader = (helperText: string, step: number) => (
     <View style={styles.headerRow}>
       <View style={styles.headerLeft}>
         <Text style={styles.titleText}>Listing Creator</Text>
+        <Text style={styles.stepText}>Step {step} of 3</Text>
         <View style={styles.helperRow}>
-          <Image source={accessibilityImg} style={styles.accessibilityIcon} />
+          <Ionicons
+            name={STEP_ICONS[step - 1] ?? 'information-circle-outline'}
+            size={18}
+            color="#333"
+            style={styles.helperIcon}
+          />
           <Text style={styles.helperText}>{helperText}</Text>
         </View>
       </View>
@@ -654,41 +603,39 @@ export default function CreateListing2() {
   const renderBottomButtons = (
     onBack: () => void,
     onContinue: () => void,
-    continueLabel = stripeEnabled ? 'Continue' : 'Set Up Payouts',
+    continueLabel = 'Continue',
+    continueDisabled = false,
   ) => (
     <View style={styles.bottomRow}>
-      <TouchableOpacity style={styles.backCircle} onPress={withLightHaptic(onBack)} activeOpacity={0.8}>
+      <TouchableOpacity
+        style={styles.backCircle}
+        onPress={withLightHaptic(onBack)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.continueBtn} onPress={stripeEnabled ? withLightHaptic(onContinue) : () => {} } activeOpacity={0.8}>
+      <TouchableOpacity
+        style={[styles.continueBtn, continueDisabled && styles.continueBtnDisabled]}
+        onPress={withLightHaptic(onContinue)}
+        disabled={continueDisabled}
+        activeOpacity={0.8}
+      >
         <Text style={styles.continueBtnText}>{continueLabel}</Text>
       </TouchableOpacity>
     </View>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 1 — Welcome
-  // ─────────────────────────────────────────────────────────────────────────────
-  const renderScene1 = () => (
-    <SafeAreaView style={styles.safeArea}>
-      {renderSharedHeader(
-        "Let's get you set up real quick. It only takes a few minutes to list your spot and start making money."
-      )}
-      <View style={styles.centerContent}>
-        <Image source={carparkingImg} style={styles.carparkingImg} resizeMode="contain" />
-      </View>
-      {renderBottomButtons(() => router.back(), goToScene2)}
-    </SafeAreaView>
-  );
+  const locationHelper =
+    "List your spot in about a minute. Tap and hold on the map to drop a pin, or use your current location.";
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 2 — Pick Location
+  // Scene 2 — Pick Location (first step; absorbs the old Welcome intro)
   // ─────────────────────────────────────────────────────────────────────────────
   const renderScene2 = () => (
     <SafeAreaView style={styles.safeArea}>
-      {renderSharedHeader(
-        'Pick your spot location by either tapping and holding on the map, or choose your current location.'
-      )}
+      {renderSharedHeader(locationHelper, 1)}
       <View style={styles.mapWrapper}>
         <MapView
           ref={mapRef}
@@ -713,11 +660,13 @@ export default function CreateListing2() {
           style={styles.currentLocBtn}
           onPress={withLightHaptic(handleCurrentLocation)}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Use my current location"
         >
           <Image source={addLocationImg} style={styles.addLocationIcon} resizeMode="contain" />
         </TouchableOpacity>
       </View>
-      {renderBottomButtons(() => setScene(1), goToScene3)}
+      {renderBottomButtons(() => safeBack('/Homescreen'), goToScene3)}
     </SafeAreaView>
   );
 
@@ -726,238 +675,147 @@ export default function CreateListing2() {
   // ─────────────────────────────────────────────────────────────────────────────
   const renderScene3 = () => (
     <SafeAreaView style={styles.safeArea}>
-      {/* Dimmed map background */}
-      {renderSharedHeader(
-        'Pick your spot location by either tapping and holding on the map, or choose your current location.'
-      )}
-      <View style={[styles.mapWrapper, { opacity: 0.35 }]}>
-        <MapView
-          style={styles.map}
-          initialRegion={
-            latitude !== null && longitude !== null
-              ? { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-              : GAINESVILLE
-          }
-          scrollEnabled={false}
-          zoomEnabled={false}
-        >
-          {latitude !== null && longitude !== null && (
-            <Marker coordinate={{ latitude, longitude }} />
-          )}
-        </MapView>
-      </View>
+      {renderSharedHeader('Snap a photo of your spot so renters know where to park.', 2)}
+      {/* Solid page background, like steps 1 and 3. This used to be the step-1
+          map at 35% opacity, but the camera card's header ("Let's add a photo
+          to your listing.") floats above the card and the map's street labels
+          showed through behind it. */}
+      <View style={styles.photoBackdrop} />
 
       {/* Camera pop-up — floating live card + tap-away backdrop, self-animated.
           Mounted only while open so the camera session stops on close. */}
       {showCameraPopup && (
-        <ListingCameraCard onBack={goBackFromScene3} onConfirm={handlePhotoConfirmed} />
+        <ListingCameraCard
+          onBack={goBackFromScene3}
+          onConfirm={handlePhotoConfirmed}
+          // Coming back to this step keeps the photo: the card opens reviewing
+          // it ("Continue with this photo" / Retake) instead of forcing a retake.
+          initialPhoto={photoUri}
+        />
       )}
     </SafeAreaView>
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Shared rate popup renderer (daily & monthly share the same structure)
+  // Scene 4 — Price & availability. Everything that used to be three popups and
+  // a calendar step lives inline here. No ScrollView on purpose: the prices are
+  // adjusted by vertical swipes, which a ScrollView would steal. The decorative
+  // image shrinks to whatever room is left instead.
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const renderRatePopup = (opts: {
-    visible: boolean;
-    anim: Animated.Value;
-    tagImage: any;
-    enabled: boolean;
-    onToggle: (v: boolean) => void;
-    bodyText: string;
-    price: number;
-    panHandlers: any;
-    onContinue: () => void;
-  }) => {
-    if (!opts.visible) return null;
-    const TAG_H = W * 0.075;
-    const TAG_W = TAG_H * 2;
+  const renderSecondaryRate = () => {
+    const isHourly = periodType === 0;
+    const enabled = isHourly ? dailyRateAccepted : monthlyRateAccepted;
+    const price = (isHourly ? pricePerDay : pricePerMonth) ?? 0;
     return (
-      <Animated.View
-        style={[
-          styles.ratePopup,
-          {
-            bottom: SHEET_BOTTOM,
-            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
-            transform: [{ translateY: opts.anim }],
-          },
-        ]}
-      >
-        {/* Header row */}
-        <View style={styles.ratePopupHeader}>
-          {/* Tag image left-aligned, same distance as body text (card padding) */}
-          <Image source={opts.tagImage} style={[styles.rateTagImage, { width: TAG_W, height: TAG_H }]} resizeMode="contain" />
-          <Switch
-            value={opts.enabled}
-            onValueChange={opts.onToggle}
-            trackColor={{ false: 'rgba(255,255,255,0.25)', true: 'rgba(255,255,255,0.85)' }}
-            thumbColor={opts.enabled ? '#000' : 'rgba(255,255,255,0.9)'}
-            ios_backgroundColor="rgba(255,255,255,0.25)"
-            style={styles.rateSwitch}
-          />
-          {/* SpotOn logo circle — height matches tag */}
-          <Image
-            source={spotonLogoCircleAsset}
-            style={[styles.ratePopupLogo, { width: TAG_H, height: TAG_H }]}
-            resizeMode="contain"
-          />
+      <View style={styles.rateCard}>
+        <View style={styles.rateCardLeft}>
+          <View style={styles.rateCardHeader}>
+            <Image
+              source={isHourly ? dailyTagAsset : monthlyTagAsset}
+              style={{ width: TAG_W, height: TAG_H }}
+              resizeMode="contain"
+            />
+            <Switch
+              value={enabled}
+              onValueChange={isHourly ? handleDailyToggle : handleMonthlyToggle}
+              // Opaque colours: Android draws translucent tracks over this
+              // black card as an invisible track with a clipped white thumb.
+              // Android's thumb also overhangs the track, so a black ON thumb
+              // vanishes into the card — use white-on-green there instead.
+              trackColor={{ false: '#5A5A5A', true: Platform.OS === 'android' ? '#34C759' : '#FFFFFF' }}
+              thumbColor={enabled ? (Platform.OS === 'android' ? '#FFFFFF' : '#000000') : '#E6E6E6'}
+              ios_backgroundColor="#5A5A5A"
+              style={styles.rateSwitch}
+              accessibilityLabel={isHourly ? 'Offer a daily rate' : 'Offer a monthly rate'}
+            />
+          </View>
+          <Text style={styles.rateCardBody}>
+            {isHourly
+              ? 'Optional: a daily price encourages longer stays.'
+              : 'Optional: a monthly price encourages longer stays.'}
+          </Text>
         </View>
-
-        <Text style={styles.ratePopupBody}>{opts.bodyText}</Text>
-
-        {/* Price scroller */}
-        <View style={styles.ratePriceContainer} {...opts.panHandlers}>
-          <Text style={styles.ratePriceText}>${opts.price.toFixed(2)}</Text>
-        </View>
-
-        <Text style={styles.ratePopupSubtext}>
-          recommended for this listing, you can scroll to adjust
-        </Text>
-
-        {/* Continue — dismisses popup; user then presses original Continue */}
-        <TouchableOpacity
-          style={styles.ratePopupContinue}
-          onPress={withLightHaptic(opts.onContinue)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.ratePopupContinueText}>Continue</Text>
-        </TouchableOpacity>
-      </Animated.View>
+        {enabled && (
+          <View
+            style={styles.rateCardPrice}
+            {...(isHourly ? dailyPanResponder.panHandlers : monthlyPanResponder.panHandlers)}
+          >
+            <Text style={styles.rateCardPriceText}>${price.toFixed(2)}</Text>
+            <Text style={styles.rateCardHint}>swipe to adjust</Text>
+          </View>
+        )}
+      </View>
     );
   };
 
-  const renderDailyPopup = () =>
-    renderRatePopup({
-      visible: showDailyPopup,
-      anim: dailyPopupAnim,
-      tagImage: dailyTagAsset,
-      enabled: dailyEnabled,
-      onToggle: handleDailyToggle,
-      bodyText:
-        'In addition, you can decide to set a daily price to influence buyers to extend reservations for longer.',
-      price: pricePerDay ?? 0,
-      panHandlers: dailyPanResponder.panHandlers,
-      onContinue: () => dismissDailyPopup(true),
-    });
+  const renderAvailabilityRow = () => {
+    let value = 'Choose dates';
+    if (startDate && endDate) value = `${formatShortDate(startDate)} – ${formatShortDate(endDate)}`;
+    else if (startDate) value = `From ${formatShortDate(startDate)}`;
+    return (
+      <TouchableOpacity
+        style={styles.availabilityRow}
+        onPress={withLightHaptic(openAvailabilityPicker)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`Availability: ${value}`}
+      >
+        <Ionicons name="calendar-outline" size={20} color="#000" />
+        <Text style={styles.availabilityLabel}>Available</Text>
+        <Text style={[styles.availabilityValue, !startDate && styles.availabilityPlaceholder]} numberOfLines={1}>
+          {value}
+        </Text>
+        <Ionicons name="chevron-forward" size={18} color="rgba(0,0,0,0.5)" />
+      </TouchableOpacity>
+    );
+  };
 
-  const renderMonthlyPopup = () =>
-    renderRatePopup({
-      visible: showMonthlyPopup,
-      anim: monthlyPopupAnim,
-      tagImage: monthlyTagAsset,
-      enabled: monthlyEnabled,
-      onToggle: handleMonthlyToggle,
-      bodyText:
-        'In addition, you can decide to set a monthly price to influence buyers to extend reservations for longer.',
-      price: pricePerMonth ?? 0,
-      panHandlers: monthlyPanResponder.panHandlers,
-      onContinue: () => dismissMonthlyPopup(true),
-    });
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Totals popup — earnings breakdown rendered as a card-style popup that
-  // animates up from below. Primary section is the user's selected period
-  // (Hourly or Weekly); secondary section (Daily or Monthly) is shown only
-  // after the user accepts that popup with Continue.
-  // ─────────────────────────────────────────────────────────────────────────────
-  const renderTotalsPopup = () => {
-    if (!showTotalsPopup) return null;
+  // Compact replacement for the old totals popup + mid-flow fee notice. Same
+  // numbers and wording ("SpotOn fee (15%)", "You earn") — see TODO(fee-model).
+  const renderEarningsSummary = () => {
     const fmt = (n: number) => `$${n.toFixed(2)}`;
     const isHourly = periodType === 0;
-    const LOGO = W * 0.075;
-
-    const primaryLabel = isHourly ? 'Hourly' : 'Weekly';
-    const primaryGross = isHourly ? pricePerHour : pricePerWeek;
-    const primaryFee = primaryGross * 0.15;
-    const primaryNet = primaryGross - primaryFee;
-
+    const rows: { label: string; gross: number }[] = [
+      { label: isHourly ? 'Hourly' : 'Weekly', gross: isHourly ? pricePerHour : pricePerWeek },
+    ];
     const showSecondary = isHourly ? dailyRateAccepted : monthlyRateAccepted;
-    const secondaryLabel = isHourly ? 'Daily' : 'Monthly';
-    const secondaryGross = (isHourly ? pricePerDay : pricePerMonth) ?? 0;
-    const secondaryFee = secondaryGross * 0.15;
-    const secondaryNet = secondaryGross - secondaryFee;
-
+    if (showSecondary) {
+      rows.push({
+        label: isHourly ? 'Daily' : 'Monthly',
+        gross: (isHourly ? pricePerDay : pricePerMonth) ?? 0,
+      });
+    }
     return (
-      <Animated.View
-        style={[
-          styles.ratePopup,
-          styles.totalsPopup,
-          {
-            bottom: SHEET_BOTTOM,
-            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
-            transform: [{ translateY: totalsPopupAnim }],
-          },
-        ]}
-      >
-        <Image
-          source={spotonLogoCircleAsset}
-          style={[styles.totalsLogo, { width: LOGO, height: LOGO }]}
-          resizeMode="contain"
-        />
-
-        <Text style={styles.breakdownSectionTitle}>{primaryLabel}</Text>
-        <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>Gross</Text>
-          <Text style={styles.breakdownValue}>{fmt(primaryGross)}</Text>
-        </View>
-        <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>SpotOn fee (15%)</Text>
-          <Text style={styles.breakdownValue}>- {fmt(primaryFee)}</Text>
-        </View>
-        <View style={styles.breakdownDivider} />
-        <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownTotalLabel}>You earn</Text>
-          <Text style={styles.breakdownTotalValue}>{fmt(primaryNet)}</Text>
-        </View>
-
-        {showSecondary && (
-          <>
-            <View style={{ height: W * 0.035 }} />
-            <Text style={styles.breakdownSectionTitle}>{secondaryLabel}</Text>
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Gross</Text>
-              <Text style={styles.breakdownValue}>{fmt(secondaryGross)}</Text>
+      <View style={styles.summaryCard}>
+        {rows.map((r, i) => {
+          const fee = r.gross * DISPLAY_FEE_RATE;
+          return (
+            <View key={r.label} style={[styles.summaryRow, i > 0 && styles.summaryRowDivided]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.summaryLabel}>{r.label}</Text>
+                <Text style={styles.summaryDetail}>
+                  {fmt(r.gross)} − SpotOn fee (15%) {fmt(fee)}
+                </Text>
+              </View>
+              <View style={styles.summaryEarnWrap}>
+                <Text style={styles.summaryEarnLabel}>You earn</Text>
+                <Text style={styles.summaryEarnValue}>{fmt(r.gross - fee)}</Text>
+              </View>
             </View>
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>SpotOn fee (15%)</Text>
-              <Text style={styles.breakdownValue}>- {fmt(secondaryFee)}</Text>
-            </View>
-            <View style={styles.breakdownDivider} />
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownTotalLabel}>You earn</Text>
-              <Text style={styles.breakdownTotalValue}>{fmt(secondaryNet)}</Text>
-            </View>
-          </>
-        )}
-
-        <View style={{ height: W * 0.035 }} />
-        <TouchableOpacity
-          style={styles.ratePopupContinue}
-          onPress={withLightHaptic(() => dismissTotalsPopup())}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.ratePopupContinueText}>Continue</Text>
-        </TouchableOpacity>
-      </Animated.View>
+          );
+        })}
+      </View>
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 4 — Price Picker. Single select page; daily/monthly rate popup and
-  // totals popup are rendered as overlays driven by Continue presses.
-  // ─────────────────────────────────────────────────────────────────────────────
-  const renderScene4 = () => renderScene4Select();
-
-  const renderScene4Select = () => {
+  const renderScene4 = () => {
     const isHourly = periodType === 0;
     const displayPrice = isHourly ? pricePerHour : pricePerWeek;
     const unitLabel = isHourly ? '/hour' : '/week';
-    const feeAmount = displayPrice * 0.15;
-    const profit = displayPrice - feeAmount;
     return (
       <SafeAreaView style={styles.safeArea}>
-        {renderSharedHeader("Finally let's set your price and dates.")}
+        {renderSharedHeader('Set your price and when your spot is available.', 3)}
         <View style={styles.selectContent}>
           <View style={styles.productImageWrap}>
             <Image
@@ -985,56 +843,28 @@ export default function CreateListing2() {
               <Text style={styles.perHourText}>{unitLabel}</Text>
             </View>
             <Text style={styles.swipeHint}>Swipe up / down to adjust</Text>
-            {isHourly && (
-              <Text style={styles.feeNotice}>
-                Please note SpotOn will take ${feeAmount.toFixed(2)} (15%), so your profit will be ${profit.toFixed(2)} /hour.
-              </Text>
-            )}
           </View>
+          {renderSecondaryRate()}
+          {renderAvailabilityRow()}
+          {renderEarningsSummary()}
         </View>
         {renderBottomButtons(
-          () => {
-            dailyPopupDone.current = false;
-            monthlyPopupDone.current = false;
-            totalsPopupDone.current = false;
-            setDailyRateAccepted(false);
-            setMonthlyRateAccepted(false);
-            setPricePerDay(null);
-            setPricePerMonth(null);
-            pricePerDayRef.current = 0;
-            pricePerMonthRef.current = 0;
-            setScene(2);
-          },
-          goToScene5
+          goBackFromScene4,
+          handleListPress,
+          submitting ? 'Creating...' : 'List my spot',
+          submitting,
         )}
-        {renderDailyPopup()}
-        {renderMonthlyPopup()}
-        {renderTotalsPopup()}
         {renderCalendarOverlay()}
       </SafeAreaView>
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Scene 5 — Legacy path retained for safety; calendar now renders as overlay in Scene 4.
-  // ─────────────────────────────────────────────────────────────────────────────
-  const renderScene5 = () => (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.scene5Dim} pointerEvents="none">
-        {renderScene4Select()}
-      </View>
-      {renderCalendarOverlay()}
-    </SafeAreaView>
-  );
-
   // ─── Render ───────────────────────────────────────────────────────────────
   switch (scene) {
-    case 1: return renderScene1();
-    case 2: return renderScene2();
     case 3: return renderScene3();
     case 4: return renderScene4();
-    case 5: return renderScene5();
-    default: return renderScene1();
+    case 2:
+    default: return renderScene2();
   }
 }
 
@@ -1062,6 +892,12 @@ const styles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: 22,
     color: '#000',
+  },
+  stepText: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: 12,
+    color: 'rgba(0,0,0,0.55)',
+    marginTop: 2,
     marginBottom: W * 0.02,
   },
   helperRow: {
@@ -1069,10 +905,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: W * 0.02,
   },
-  accessibilityIcon: {
-    width: 18,
-    height: 18,
-    marginTop: 2,
+  helperIcon: {
+    marginTop: 0,
   },
   helperText: {
     fontFamily: CustomFonts.SwitzerLight,
@@ -1088,21 +922,7 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
   },
 
-  // ── Content center ─────────────────────────────────────────────────────────
-  centerContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: H_PAD,
-  },
-
-  // ── Scene 1 ────────────────────────────────────────────────────────────────
-  carparkingImg: {
-    width: W * 0.8,
-    height: W * 0.8,
-  },
-
-  // ── Scene 2 / 3 Map ────────────────────────────────────────────────────────
+  // ── Location / photo map ───────────────────────────────────────────────────
   mapWrapper: {
     flex: 1,
     marginHorizontal: H_PAD,
@@ -1113,6 +933,10 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  photoBackdrop: {
+    flex: 1,
+    backgroundColor: '#DCDBD8',
   },
   currentLocBtn: {
     position: 'absolute',
@@ -1157,25 +981,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  continueBtnDisabled: {
+    opacity: 0.6,
+  },
   continueBtnText: {
     fontFamily: CustomFonts.SwitzerSemibold,
     fontSize: 16,
     color: '#fff',
   },
 
-  // ── Pop-ups ────────────────────────────────────────────────────────────────
-  // ── Scene 4 Price ──────────────────────────────────────────────────────────
+  // ── Price & availability ───────────────────────────────────────────────────
+  selectContent: {
+    flex: 1,
+    paddingHorizontal: H_PAD,
+    gap: W * 0.025,
+  },
+  // Decorative; takes only the room left over after the controls, down to zero
+  // on small phones.
+  productImageWrap: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+  },
+  selectControls: {
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  toggleRow: {
+    width: '100%',
+    marginBottom: W * 0.01,
+  },
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingVertical: W * 0.04,
+    paddingVertical: W * 0.02,
     paddingHorizontal: W * 0.1,
   },
   priceText: {
     fontFamily: CustomFonts.BevellierMedium,
-    fontSize: W * 0.16,
+    fontSize: W * 0.15,
     color: '#000',
-    lineHeight: W * 0.18,
+    lineHeight: W * 0.17,
   },
   perHourText: {
     fontFamily: CustomFonts.SwitzerLight,
@@ -1188,261 +1041,128 @@ const styles = StyleSheet.create({
     fontFamily: CustomFonts.SwitzerLight,
     fontSize: W * 0.033,
     color: 'rgba(0,0,0,0.5)',
-    marginTop: W * 0.005,
   },
 
-  // ── Calendar ───────────────────────────────────────────────────────────────
-  calendarContainer: {
-    flex: 1,
-  },
-  calendarNavRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: W * 0.03,
-  },
-  calendarMonthText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 15,
-    color: '#fff',
-  },
-  calendarDaysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: W * 0.02,
-  },
-  calendarDayLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.6)',
-    width: (W - H_PAD * 2) / 7,
-    textAlign: 'center',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  calendarCell: {
-    width: (W - H_PAD * 2) / 7,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 18,
-  },
-  calendarCellSelected: {
-    backgroundColor: '#fff',
-  },
-  calendarCellRange: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-  },
-  calendarDayText: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 13,
-    color: '#fff',
-  },
-  calendarDayTextSelected: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    color: '#000',
-  },
-  calendarRangeHint: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
-    textAlign: 'center',
-    marginTop: W * 0.02,
-    marginBottom: W * 0.02,
-  },
-
-  // ── Scene 4 — Pricing (new design) ─────────────────────────────────────────
-  selectContent: {
-    flex: 1,
-    paddingHorizontal: H_PAD,
-  },
-  productImageWrap: {
-    flex: 1,
-    minHeight: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: W * 0.02,
-    overflow: 'hidden',
-  },
-  productImage: {
-    width: PRICE_IMAGE_SIZE,
-    height: PRICE_IMAGE_SIZE,
-  },
-  preloadImage: {
-    position: 'absolute',
-    width: 1,
-    height: 1,
-    opacity: 0,
-    top: 0,
-    left: 0,
-  },
-  selectControls: {
+  // Secondary (daily / monthly) rate — inline version of the old rate popup.
+  rateCard: {
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: W * 0.02,
-    paddingBottom: W * 0.02,
-  },
-  toggleRow: {
-    width: '100%',
-    marginBottom: W * 0.02,
-  },
-  feeNotice: {
-    fontFamily: CustomFonts.SwitzerLight,
-    fontSize: W * 0.032,
-    color: '#444',
-    textAlign: 'center',
-    marginTop: W * 0.025,
-    paddingHorizontal: W * 0.02,
-    lineHeight: W * 0.045,
-  },
-  breakdownWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: H_PAD,
-    paddingTop: W * 0.02,
-  },
-  breakdownContainer: {
-    width: '100%',
-    paddingVertical: W * 0.06,
-    paddingHorizontal: W * 0.06,
-    borderRadius: W * 0.05,
-    backgroundColor: '#000',
-  },
-  breakdownLogo: {
-    position: 'absolute',
-    top: W * 0.04,
-    right: W * 0.06,
-    opacity: 0.9,
-  },
-  breakdownSectionTitle: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: W * 0.045,
-    color: '#fff',
-    marginBottom: W * 0.02,
-  },
-  breakdownRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: W * 0.012,
+    backgroundColor: '#000',
+    borderRadius: W * 0.05,
+    borderCurve: 'continuous',
+    paddingVertical: W * 0.035,
+    paddingHorizontal: W * 0.05,
+    gap: W * 0.03,
   },
-  breakdownLabel: {
+  rateCardLeft: {
+    flex: 1,
+  },
+  rateCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: W * 0.02,
+    marginBottom: W * 0.015,
+  },
+  // iOS's switch is large next to the "Daily" tag, so it's scaled down there.
+  // Android's is already compact, and scaling it clipped the thumb.
+  rateSwitch: Platform.OS === 'ios'
+    ? {
+        transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }],
+        marginLeft: -W * 0.01, // tighten gap left by Switch's invisible padding
+      }
+    : {},
+  rateCardBody: {
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: W * 0.037,
+    fontSize: W * 0.031,
     color: 'rgba(255,255,255,0.75)',
+    lineHeight: W * 0.043,
   },
-  breakdownValue: {
+  rateCardPrice: {
+    alignItems: 'center',
+    paddingVertical: W * 0.01,
+    paddingHorizontal: W * 0.02,
+  },
+  rateCardPriceText: {
     fontFamily: CustomFonts.BevellierMedium,
-    fontSize: W * 0.04,
+    fontSize: W * 0.075,
     color: '#fff',
   },
-  breakdownDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    marginVertical: W * 0.02,
-  },
-  breakdownTotalLabel: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: W * 0.045,
-    color: '#fff',
-  },
-  breakdownTotalValue: {
-    fontFamily: CustomFonts.BevellierMedium,
-    fontSize: W * 0.05,
-    color: '#fff',
-  },
-  scene5Dim: {
-    ...StyleSheet.absoluteFill,
-    opacity: 0.35,
+  rateCardHint: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: W * 0.026,
+    color: 'rgba(255,255,255,0.55)',
   },
 
-  // ── Rate Popups (Daily + Monthly share these styles) ───────────────────────
-  ratePopup: {
-    position: 'absolute',
-    left: SHEET_INSET,
-    right: SHEET_INSET,
-    backgroundColor: '#000',
-    borderRadius: SHEET_RADIUS,
-    borderCurve: 'continuous',
-    paddingTop: W * 0.07,
-    paddingBottom: W * 0.06,
-    paddingHorizontal: W * 0.08,
-    zIndex: 20,
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-  },
-  ratePopupHeader: {
+  // Availability — a real control, so it reads as a tappable row (chevron).
+  availabilityRow: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    // tag left-aligned, logo pinned right with flex spacer
-    marginBottom: W * 0.03,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+    borderRadius: W * 0.04,
+    borderCurve: 'continuous',
+    paddingVertical: W * 0.035,
+    paddingHorizontal: W * 0.045,
     gap: W * 0.025,
   },
-  rateTagImage: {
-    resizeMode: 'contain',
-  },
-  rateSwitch: {
-    transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }],
-    marginLeft: -W * 0.01, // tighten gap left by Switch's invisible padding
-  },
-  ratePopupLogo: {
-    // size set inline to match tag height
-    opacity: 0.9,
-    marginLeft: 'auto' as any, // push logo to the right edge
-  },
-  ratePopupBody: {
+  availabilityLabel: {
     fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: W * 0.034,
-    color: '#fff',
-    lineHeight: W * 0.05,
-    marginBottom: W * 0.025,
+    fontSize: W * 0.038,
+    color: '#000',
   },
-  ratePriceContainer: {
-    alignItems: 'center',
-    paddingVertical: W * 0.025,
-  },
-  ratePriceText: {
-    fontFamily: CustomFonts.BevellierMedium,
-    fontSize: W * 0.13,
-    color: '#fff',
-    lineHeight: W * 0.15,
-  },
-  ratePopupSubtext: {
+  availabilityValue: {
+    flex: 1,
+    textAlign: 'right',
     fontFamily: CustomFonts.SwitzerLight,
-    fontSize: W * 0.029,
-    color: 'rgba(255,255,255,0.55)',
-    textAlign: 'center',
-    marginBottom: W * 0.04,
+    fontSize: W * 0.036,
+    color: '#000',
   },
-  ratePopupContinue: {
-    height: 44,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ratePopupContinueText: {
-    fontFamily: CustomFonts.SwitzerSemibold,
-    fontSize: 15,
-    color: '#fff',
+  availabilityPlaceholder: {
+    color: 'rgba(0,0,0,0.5)',
   },
 
-  // ── Totals popup overrides ─────────────────────────────────────────────────
-  totalsPopup: {
-    paddingTop: W * 0.08,
+  // Earnings summary — compact replacement for the old totals popup.
+  summaryCard: {
+    flexShrink: 0,
+    borderRadius: W * 0.04,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
+    paddingHorizontal: W * 0.045,
   },
-  totalsLogo: {
-    position: 'absolute',
-    top: W * 0.07,
-    right: W * 0.09,
-    opacity: 0.9,
-    zIndex: 1,
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: W * 0.025,
+    gap: W * 0.03,
+  },
+  summaryRowDivided: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.1)',
+  },
+  summaryLabel: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: W * 0.036,
+    color: '#000',
+  },
+  summaryDetail: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: W * 0.03,
+    color: '#444',
+    marginTop: 2,
+  },
+  summaryEarnWrap: {
+    alignItems: 'flex-end',
+  },
+  summaryEarnLabel: {
+    fontFamily: CustomFonts.SwitzerLight,
+    fontSize: W * 0.028,
+    color: '#444',
+  },
+  summaryEarnValue: {
+    fontFamily: CustomFonts.BevellierMedium,
+    fontSize: W * 0.05,
+    color: '#000',
   },
 });

@@ -8,7 +8,7 @@ import {
 import { router } from 'expo-router';
 
 // ─── Supabase ───────────────────────────────────────────────────────
-import { supabase } from '../utils/supabase'
+import { signOutAndForgetDevice } from '../utils/signOut'
 import { triggerLightHaptic } from '@/src/utils/haptics';
 
 // ─── Responsive sizing ───────────────────────────────────────────────────────
@@ -22,7 +22,8 @@ export default function LogoutButton({}) {
 
     const onSignOut = async () => {
         triggerLightHaptic();
-        await supabase.auth.signOut();
+        // Clears this device's push token first (best-effort, bounded).
+        await signOutAndForgetDevice();
         router.replace('/Intro');
     }
 

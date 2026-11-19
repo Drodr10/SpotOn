@@ -22,7 +22,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { withLightHaptic } from '@/src/utils/haptics';
 
 import introBg from '@/assets/images/onboardingflow/onboarding.intro.png';
-import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
+import spotonLogoAsset from '@/assets/images/spotonlogocircle_disc.png';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 

@@ -8,6 +8,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  BackHandler,
   Dimensions,
   Image,
   StyleSheet,
@@ -20,9 +21,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
-import accessibilityImg from '@/assets/images/accessibility.png';
-import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle.png';
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '@/src/constants/sheet';
+import { isDaySelectable, startOfLocalDay } from '@/src/utils/dateSelectable';
+import spotonLogoCircleAsset from '@/assets/images/spotonlogocircle_disc.png';
+import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '@/src/constants/sheet';
 import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from '@/src/components/activity/motion';
 
 const { width: W } = Dimensions.get('window');
@@ -91,15 +92,15 @@ export default function DateRangePicker({
 }: DateRangePickerProps) {
   // Compare by calendar day only — ignoring time-of-day — so a 3:30 PM minDate
   // still permits picking that same day.
-  const dayOnly = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const minDay = minDate ? dayOnly(minDate) : null;
-  const maxDay = maxDate ? dayOnly(maxDate) : null;
-  const isDayDisabled = (year: number, month: number, day: number) => {
-    const t = dayOnly(new Date(year, month, day));
-    if (minDay !== null && t < minDay) return true;
-    if (maxDay !== null && t > maxDay) return true;
-    return false;
-  };
+  const minDay = minDate ? startOfLocalDay(minDate) : null;
+  const maxDay = maxDate ? startOfLocalDay(maxDate) : null;
+  // Days before today are never pickable (start or end), for every caller.
+  // Refreshed each time the picker opens so a long-lived screen doesn't keep
+  // yesterday's "today". Existing selections (initialStart/initialEnd) are left
+  // alone even if they're in the past — only new taps are gated.
+  const [today, setToday] = useState(() => new Date());
+  const isDayDisabled = (year: number, month: number, day: number) =>
+    !isDaySelectable(new Date(year, month, day), { today, minDate, maxDate });
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SLIDE_OUT_DISTANCE)).current;
 
@@ -123,6 +124,22 @@ export default function DateRangePicker({
     }).start();
   }, [visible, slideAnim]);
 
+  // Android system back closes the picker instead of falling through to the
+  // screen (which would e.g. drop the whole booking view in search). This is
+  // an overlay, not a Modal, so nothing else intercepts back for it. Registered
+  // only while visible — after the screen's own focus handler — so it runs
+  // first and consumes the event. While confirm is disabled (a submit is in
+  // flight) back is swallowed without closing, matching CreateListing2's own
+  // guard. BackHandler is a no-op on iOS.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!confirmDisabled) onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, confirmDisabled, onClose]);
+
   // Re-sync internal state when initial values change while picker is hidden
   useEffect(() => {
     if (!visible) {
@@ -138,9 +155,14 @@ export default function DateRangePicker({
   // at an entirely-greyed grid).
   useEffect(() => {
     if (!visible) return;
+    const now = new Date();
+    setToday(now);
+    // A past initialStart (e.g. EditListing's existing window) stays selected,
+    // but the grid opens on the current month, where days are pickable.
+    const startIsPast = initialStart !== null && startOfLocalDay(initialStart) < startOfLocalDay(now);
     const initialCandidate =
-      initialStart ??
-      (minDate && minDate.getTime() > Date.now() ? minDate : new Date());
+      (startIsPast ? null : initialStart) ??
+      (minDate && minDate.getTime() > now.getTime() ? minDate : now);
     let y = initialCandidate.getFullYear();
     let m = initialCandidate.getMonth();
     if (minDate) {
@@ -225,8 +247,9 @@ export default function DateRangePicker({
       style={[
         styles.card,
         {
-          bottom: SHEET_BOTTOM,
-          paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+          // Android floats above the nav bar; iOS unchanged (see sheet.ts).
+          bottom: sheetBottom(insets.bottom),
+          paddingBottom: W * 0.06 + sheetContentPad(insets.bottom),
           transform: [{ translateY: slideAnim }],
         },
       ]}
@@ -240,7 +263,7 @@ export default function DateRangePicker({
 
       {/* Helper row */}
       <View style={styles.helperRow}>
-        <Image source={accessibilityImg} style={styles.helperIcon} />
+        <Ionicons name="calendar-outline" size={16} color="#fff" style={styles.helperIcon} />
         <Text style={styles.helperText}>{helperText}</Text>
       </View>
 
@@ -396,10 +419,7 @@ const styles = StyleSheet.create({
     paddingRight: W * 0.12, // leave room for the logo
   },
   helperIcon: {
-    width: 16,
-    height: 16,
-    marginTop: 2,
-    tintColor: '#fff',
+    marginTop: 1,
   },
   helperText: {
     fontFamily: CustomFonts.SwitzerLight,
