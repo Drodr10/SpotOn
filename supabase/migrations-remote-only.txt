@@ -8,15 +8,3 @@
 # it merged. Remove both lines when #87 is merged.
 20261116170000  # PR #87: reservations client write lockdown (hotfix)
 20261116200000  # PR #87: listing-photos bucket
-
-# Duplicate history rows from July 2026: the same migrations were applied once
-# under auto-generated timestamps and committed under hand-picked ones (the repo
-# versions are also recorded as applied). Schema is unaffected. Remove these
-# after `supabase migration repair --status reverted <versions>` — `db push`
-# refuses to run while they exist.
-20260710051100  # = 20260705120000_add_deferred_payouts
-20260710054752  # = 20260710120000_add_booking_holds
-20260710060732  # fix_acquire_booking_hold_ambiguous_expires_at (folded into 20260710120000)
-20260711041350  # = 20260711120000_finalize_reservation_better_errors
-20260711051430  # = 20260712120000_add_listing_availability_window
-20260711053133  # = 20260712140000_visible_listings_next_available
