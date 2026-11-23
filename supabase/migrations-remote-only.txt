@@ -1,0 +1,10 @@
+# Versions recorded in production's migration history that have no file in
+# supabase/migrations. The drift check (.github/scripts/migration_drift.py)
+# fails on any remote-only version NOT listed here. Every entry needs a reason,
+# and should be temporary: remove it once the file lands or the history row is
+# repaired. See supabase/MIGRATIONS.md.
+
+# Applied 2026-11-23 from PR #87 (booking hotfix + listing photos bucket) before
+# it merged. Remove both lines when #87 is merged.
+20261116170000  # PR #87: reservations client write lockdown (hotfix)
+20261116200000  # PR #87: listing-photos bucket
