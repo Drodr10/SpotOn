@@ -1,0 +1,96 @@
+# Applies merged migrations to PRODUCTION. Run by hand from the Actions tab
+# ("Run workflow"), only from main, and only after a reviewer approves the
+# `production` environment. See supabase/MIGRATIONS.md.
+#
+# `up_to` exists because some migrations must wait for an app release (e.g. one
+# that older builds can't handle). Everything after `up_to` is left pending.
+name: migrations (deploy to production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      up_to:
+        description: 'Apply pending migrations up to and including this version (e.g. 20261116150000), or "all"'
+        required: true
+      dry_run:
+        description: 'Only show what would be applied'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Never two deploys at once; never cancel one halfway.
+concurrency:
+  group: prod-migrations-deploy
+  cancel-in-progress: false
+
+env:
+  PROJECT_REF: ufyphzxophtiryeaqpkr
+
+jobs:
+  deploy:
+    name: deploy (${{ inputs.dry_run && 'dry run' || 'APPLY' }} up to ${{ inputs.up_to }})
+    runs-on: ubuntu-latest
+    # Required reviewers are configured on this environment in repo settings.
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      UP_TO: ${{ inputs.up_to }}
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Deploy from main only (got $GITHUB_REF). Merge the migration first."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.106.0
+
+      - name: Link production
+        run: supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+
+      # Refuse to deploy on top of changes the repo doesn't know about.
+      - name: No drift
+        run: |
+          set -o pipefail
+          supabase migration list --linked --password "$SUPABASE_DB_PASSWORD" \
+            | python3 .github/scripts/migration_drift.py
+
+      # `db push` applies every pending file, so hold back the ones after
+      # up_to by removing them from this throwaway checkout.
+      - name: Hold back migrations after up_to
+        working-directory: supabase/migrations
+        run: |
+          if [ "$UP_TO" = "all" ]; then echo "applying everything pending"; exit 0; fi
+          if ! printf '%s' "$UP_TO" | grep -Eq '^[0-9]{14}$'; then
+            echo "::error::up_to must be a 14-digit version or \"all\""; exit 1
+          fi
+          if ! ls "${UP_TO}"_*.sql >/dev/null 2>&1; then
+            echo "::error::no migration file starts with $UP_TO"; exit 1
+          fi
+          for f in *.sql; do
+            v="${f%%_*}"
+            if [ "$v" \> "$UP_TO" ]; then echo "holding back $f"; rm "$f"; fi
+          done
+
+      # --include-all: production already has migrations dated after some
+      # pending ones (the Nov 2026 hotfix went in first), which plain
+      # `db push` refuses. File order is still enforced by ci.yml.
+      - name: What would be applied
+        run: supabase db push --linked --include-all --dry-run --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Apply
+        if: ${{ !inputs.dry_run }}
+        run: supabase db push --linked --include-all --yes --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Production after
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -o pipefail
+          supabase migration list --linked --password "$SUPABASE_DB_PASSWORD" \
+            | python3 .github/scripts/migration_drift.py
