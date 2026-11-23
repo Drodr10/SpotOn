@@ -70,99 +70,18 @@ def get_reservations(current_user_id, user_id):
     return jsonify(response.data), 200
 
 
+# Retired. This used to insert a 'pending' reservation through
+# create_reservation_with_conversation with no PaymentIntent behind it. The
+# payout sweep only expires rows that have a PaymentIntent, so those rows never
+# went away: any signed-in user could block any listing's calendar for free.
+# The app never called it; real bookings go through
+# /api/stripe/create-booking-payment and are inserted only once paid
+# (finalize_paid_reservation, from the webhook or /api/stripe/finalize-booking).
+# 410 rather than 404 so an old client or script gets a clear answer. Left
+# unauthenticated on purpose: it does nothing for anyone.
 @reservations_bp.route('/reservations', methods=['POST'])
-@token_required
-def book_spot(current_user_id):
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-
-    # Extract required fields
-    listing_id = data.get("listing_id")
-    vehicle_id = data.get("vehicle_id")
-    start_time = data.get("start_time")
-    end_time = data.get("end_time")
-
-    # Validate required fields (total_price must be computed server-side)
-    if not all([listing_id, vehicle_id, start_time, end_time]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    # Ensure renter can only reserve with their own vehicle.
-    try:
-        vehicle_resp = (
-            supabase.table("vehicles")
-            .select("id, owner_user_id")
-            .eq("id", vehicle_id)
-            .single()
-            .execute()
-        )
-        vehicle_row = vehicle_resp.data
-        if not vehicle_row:
-            return jsonify({"error": "Selected vehicle not found"}), 404
-        if vehicle_row.get("owner_user_id") != current_user_id:
-            return jsonify({"error": "Selected vehicle does not belong to renter"}), 403
-    except Exception:
-        return jsonify({"error": "Selected vehicle not found"}), 404
-
-    # Fetch listing owner and rates. price_per_hour is included for the
-    # pricing engine's legacy fallback.
-    try:
-        listing_resp = supabase.table("listings").select(
-            "owner_id, hourly_rate, daily_rate, weekly_rate, monthly_rate, price_per_hour"
-        ).eq("id", listing_id).single().execute()
-        listing_row = listing_resp.data
-        if not listing_row:
-            return jsonify({"error": "Listing not found"}), 404
-        owner_id = listing_row.get("owner_id")
-    except Exception:
-        return jsonify({"error": "Listing not found"}), 404
-
-    # Server-side price calculation
-    try:
-        price_breakdown = calculate_final_price(listing_row, start_time, end_time)
-    except PricingError as pe:
-        return jsonify({"error": str(pe)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Pricing error: {str(e)}"}), 500
-
-    total_price = price_breakdown["total"]
-    platform_fee = price_breakdown["platform_fee"]
-    host_payout = price_breakdown["host_payout"]
-
-    # Call RPC function (atomic transaction; exclusion constraint handles overlap)
-    try:
-        result = supabase.rpc("create_reservation_with_conversation", {
-            "p_listing_id": listing_id,
-            "p_renter_id": current_user_id,
-            "p_owner_id": owner_id,
-            "p_vehicle_id": vehicle_id,
-            "p_start_time": start_time,
-            "p_end_time": end_time,
-            "p_total_price": str(total_price),
-            "p_platform_fee": str(platform_fee),
-            "p_host_payout": str(host_payout)
-        }).execute()
-
-        response_data = result.data[0] if result.data else {}
-        error_msg = response_data.get("error_message")
-
-        if error_msg:
-            return jsonify({"error": error_msg}), 409
-
-        reservation_id = response_data.get("reservation_id")
-        conversation_id = response_data.get("conversation_id")
-
-        if not reservation_id:
-            return jsonify({"error": "Failed to create reservation"}), 500
-
-        return jsonify({
-            "reservation_id": reservation_id,
-            "conversation_id": conversation_id,
-            "total_price": str(total_price),
-            "platform_fee": str(platform_fee),
-            "host_payout": str(host_payout),
-            "message": "Reservation created successfully and conversation initiated"
-        }), 201
-
-    except Exception as e:
-        return jsonify({"error": f"Database error: {str(e)}"}), 500
+def book_spot():
+    return jsonify({
+        "error": "This endpoint has been removed. Bookings are created through "
+                 "checkout: POST /api/stripe/create-booking-payment.",
+    }), 410

@@ -1,4 +1,5 @@
 import os
+import uuid
 from flask import Blueprint, jsonify, request
 from services.auth import token_required
 from services.stripe_client import (
@@ -10,7 +11,6 @@ from services.stripe_client import (
     createAccountLink,
     sync_connect_account,
     handle_webhook,
-    onboardingComplete,
 )
 from services.payouts import run_payout_sweep, cancel_reservation
 from services.notifications import run_notification_sweep
@@ -106,13 +106,29 @@ def _deep_link_page(target: str, message: str = "Finishing up…"):
     return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+def _valid_uuid(value) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+# Stripe's return_url for hosted onboarding (createAccountLink). It is a plain
+# browser redirect, so there is no bearer token to check and it stays
+# unauthenticated. That is safe because of what it can do:
+#   * the only action is sync_connect_account, which reads the account's real
+#     state FROM Stripe and copies it over; it cannot turn payouts on for an
+#     account Stripe has not enabled, and releasing payout_ready transfers to
+#     an enabled account is exactly what the webhook would do anyway;
+#   * the response is the same page whatever user_id is (unknown, malformed,
+#     no Stripe account, sync failure), so it reveals nothing about which ids
+#     exist. A malformed id is not even looked up.
+# The app's own backstop is the authenticated POST /stripe/sync-account.
 @stripe_bp.route('/stripe/onboarding-complete', methods=['GET'])
 def onboarding_return():
-    # Backstop for the account.updated webhook: if the seller returned with
-    # payouts enabled, release their pending reservations now even if the webhook
-    # was missed. Best-effort — never block the redirect back into the app.
     user_id = request.args.get("user_id")
-    if user_id:
+    if user_id and _valid_uuid(user_id):
         try:
             sync_connect_account(user_id)
         except Exception as err:  # noqa: BLE001

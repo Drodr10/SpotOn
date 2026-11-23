@@ -20,7 +20,7 @@ import {
   Platform,
   UIManager,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import MapView from 'react-native-maps';
@@ -30,7 +30,7 @@ import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '../utils/supabase';
 import spotonLogoAsset from '@/assets/images/spotonlogo.png';
-import profileIconAsset from '@/assets/images/temprofileicon.png';
+import { setAvatarUrl, useAvatarUrl } from '../utils/avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -84,6 +84,14 @@ const SUGGESTION_LAYOUT_ANIM = {
 
 export default function QuickSearch() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const avatarUrl = useAvatarUrl();
+  // Height of the header row (profile pill) below the status bar, measured so
+  // Android's native My Location button can sit just under it.
+  const [headerH, setHeaderH] = useState(0);
+  // react-native-maps 1.27 (Android) NPEs if mapPadding changes after the view
+  // is laid out but before GoogleMap is ready, so only pass it once ready.
+  const [mapReady, setMapReady] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const mapRef = useRef<MapView>(null);
   const mapReadyRef = useRef(false);
@@ -134,12 +142,14 @@ export default function QuickSearch() {
       if (data) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name')
+          .select('full_name, avatar_url')
           .eq('id', data.claims.sub)
           .single();
         if (profile?.full_name) {
           setFirstName(profile.full_name.split(' ')[0]);
         }
+        // Shared store, so the pill matches the MenuBar / Profile avatar.
+        if (profile) setAvatarUrl((profile.avatar_url as string | null) ?? null);
       }
     });
   }, []);
@@ -322,11 +332,22 @@ export default function QuickSearch() {
         initialRegion={GAINESVILLE_REGION}
         onMapReady={() => {
           mapReadyRef.current = true;
+          setMapReady(true);
           mapRef.current?.animateToRegion(region, 0);
         }}
         onRegionChangeComplete={setRegion}
         showsUserLocation={true}
         showsMyLocationButton={true}
+        // Android (Google Maps) draws its native My Location button in the
+        // map's top-right corner. With edge-to-edge the map runs under the
+        // status bar, so pad the map down past the status bar and the profile
+        // pill (also top-right). iOS (Apple Maps) has no native button and
+        // its map chrome already respects the safe area, so it stays unpadded.
+        mapPadding={
+          Platform.OS === 'android' && mapReady
+            ? { top: insets.top + headerH, right: 0, bottom: 0, left: 0 }
+            : undefined
+        }
         onPress={handleMapPress}
         onPanDrag={handleMapPress}
         onLongPress={handleMapLongPress}
@@ -343,12 +364,19 @@ export default function QuickSearch() {
 
       {/* Header overlay — zIndex: 10, profile pill only */}
       <SafeAreaView style={styles.headerSafe} edges={['top']}>
-        <View style={styles.header}>
+        <View style={styles.header} onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}>
           <TouchableOpacity
             style={styles.profilePill}
             onPress={withLightHaptic(() => router.push('/Homescreen'))}
           >
-            <Image source={profileIconAsset} style={styles.avatar} />
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+            ) : (
+              // Same car-on-light-disc placeholder as the MenuBar / Profile card.
+              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                <Ionicons name="car-sport" size={AVATAR_SIZE * 0.5} color="#1A1A1A" />
+              </View>
+            )}
             <Text style={styles.profileName}>{firstName || 'User'}</Text>
           </TouchableOpacity>
         </View>
@@ -358,6 +386,9 @@ export default function QuickSearch() {
       <Animated.View
         style={[
           styles.searchWrapper,
+          // Android edge-to-edge: lift the card above the gesture/nav bar.
+          // iOS keeps the original 10pt (card sits over the home indicator).
+          Platform.OS === 'android' && { bottom: 10 + insets.bottom },
           { transform: [{ translateY: Animated.multiply(keyboardOffset, -1) }] },
         ]}
       >
@@ -383,7 +414,7 @@ export default function QuickSearch() {
                 onSubmitEditing={handleSubmit}
                 onFocus={() => setIsFocused(true)}
                 onBlur={() => setIsFocused(false)}
-                placeholder="Where Are We Going Today?"
+                placeholder="Where are we going today?"
                 placeholderTextColor="rgba(0,0,0,0.5)"
                 returnKeyType="search"
               />
@@ -464,6 +495,11 @@ const styles = StyleSheet.create({
     gap: screenWidth * 0.015,
   },
   avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 999 },
+  avatarPlaceholder: {
+    backgroundColor: '#F2F1EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   profileName: { fontFamily: CustomFonts.SwitzerLight, fontSize: FONT_NAME, color: '#FFF' },
   // Search bar
   searchWrapper: {

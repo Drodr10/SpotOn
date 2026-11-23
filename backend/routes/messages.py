@@ -4,14 +4,20 @@ from services.auth import token_required
 
 messages_bp = Blueprint('messages', __name__)
 
+# What one user may see of another (matches get_public_profiles in the DB).
+PUBLIC_PROFILE_COLUMNS = "id, full_name, avatar_url"
+
 @messages_bp.route('/conversations/<user_id>', methods=['GET'])
 @token_required
 def get_user_chats(current_user_id, user_id):
     if current_user_id != user_id:
         return jsonify({"error": "Forbidden: You can only access your own conversations."}), 403
-    # Get all chat rooms where the user is either the renter or the owner
+    # Get all chat rooms where the user is either the renter or the owner.
+    # The other party's profile is limited to its public fields: profiles(*)
+    # would hand the caller the renter's email, push token and Stripe account
+    # id (this runs as service_role, so RLS does not trim it).
     response = supabase.table("conversations")\
-        .select("*, reservations(*), profiles!renter_id(*)")\
+        .select(f"*, reservations(*), profiles!renter_id({PUBLIC_PROFILE_COLUMNS})")\
         .or_(f"renter_id.eq.{user_id},owner_id.eq.{user_id}")\
         .execute()
     return jsonify(response.data), 200

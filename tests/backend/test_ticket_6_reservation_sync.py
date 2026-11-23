@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Integration tests for Ticket #6: Reservation Sync & Conversation Creation.
-Tests the new endpoints and RPC functions against a live Flask backend.
+Tests the endpoints against a live Flask backend.
 
 These hit a real running server (BASE_URL below) rather than a fake/mock, so
 a test here can only mean one of three things: the backend is unreachable
@@ -102,99 +102,25 @@ def test_listings_with_time_range(backend):
     )
 
 
-def test_create_reservation_basic(backend):
-    """Reservation creation endpoint must be reachable and return one of the
-    documented outcomes for a payload with a random (non-existent) listing_id
-    and renter_id: 201 if the DB somehow accepts it, 404/409 if it correctly
-    rejects the unknown listing or an overlap, or 500 on a surfaced DB error.
-    Anything else (e.g. a 4xx we don't expect, or a non-JSON body) is a real
-    failure of the endpoint's contract.
+def test_create_reservation_route_is_retired(backend):
+    """POST /api/reservations used to create an unpaid 'pending' booking that
+    never expired (free calendar blocking). It is retired: it must answer 410
+    Gone with a JSON explanation, and never create anything.
+
+    The old overlap test here went through that route; the exclusion
+    constraint is exercised by real bookings via finalize_paid_reservation
+    (see supabase/tests/database/reservations_client_write_lockdown.test.sql).
     """
     payload = {
         "listing_id": str(uuid.uuid4()),
-        "renter_id": str(uuid.uuid4()),
+        "vehicle_id": str(uuid.uuid4()),
         "start_time": (datetime.utcnow() + timedelta(days=2)).isoformat() + "Z",
         "end_time": (datetime.utcnow() + timedelta(days=2, hours=2)).isoformat() + "Z",
-        "total_price": 25.00,
     }
 
     resp = requests.post(f"{backend}/reservations", json=payload, timeout=REQUEST_TIMEOUT)
 
-    assert resp.status_code in (201, 404, 409, 500), (
-        f"POST /api/reservations with a random listing_id/renter_id returned "
-        f"an unexpected status {resp.status_code} (expected 201/404/409/500): {resp.text}"
+    assert resp.status_code == 410, (
+        f"POST /api/reservations should be retired (410), got {resp.status_code}: {resp.text}"
     )
-    # The endpoint must always answer with a JSON body, even on error, so
-    # callers (and this test) can inspect why.
-    try:
-        resp.json()
-    except ValueError:
-        pytest.fail(
-            f"POST /api/reservations returned status {resp.status_code} with a "
-            f"non-JSON body: {resp.text!r}"
-        )
-
-
-def test_overlap_detection(backend):
-    """The Postgres exclusion constraint (reservations_no_overlap, requires
-    btree_gist) must reject a second reservation that overlaps a first one on
-    the same listing.
-
-    This replaces the old version of the test, which never actually created a
-    reservation and instead just printed a claim that the constraint exists.
-    """
-    listings_resp = requests.get(f"{backend}/listings", timeout=REQUEST_TIMEOUT)
-    assert listings_resp.status_code == 200, (
-        f"could not fetch listings to set up the overlap test: "
-        f"{listings_resp.status_code}: {listings_resp.text}"
-    )
-    listings = listings_resp.json()
-    if not listings:
-        pytest.skip("backend has no listings to exercise overlap detection against")
-
-    listing_id = listings[0]["id"]
-    renter_id = str(uuid.uuid4())
-
-    # Far-future window so this doesn't collide with unrelated real bookings.
-    start = datetime.utcnow() + timedelta(days=365)
-    end = start + timedelta(hours=2)
-    # Second window starts inside the first and extends past it: a genuine overlap.
-    overlap_start = start + timedelta(minutes=30)
-    overlap_end = overlap_start + timedelta(hours=2)
-
-    def _reservation_payload(s, e):
-        return {
-            "listing_id": listing_id,
-            "renter_id": renter_id,
-            "start_time": s.isoformat() + "Z",
-            "end_time": e.isoformat() + "Z",
-            "total_price": 25.00,
-        }
-
-    first = requests.post(
-        f"{backend}/reservations",
-        json=_reservation_payload(start, end),
-        timeout=REQUEST_TIMEOUT,
-    )
-    if first.status_code != 201:
-        # Can't establish the baseline booking (e.g. renter_id/listing FK
-        # constraints need real seed data we don't have here) — skip rather
-        # than fail, since we haven't yet exercised the invariant we're
-        # actually testing.
-        pytest.skip(
-            f"could not create the baseline reservation needed to test overlap "
-            f"detection (status {first.status_code}: {first.text})"
-        )
-
-    second = requests.post(
-        f"{backend}/reservations",
-        json=_reservation_payload(overlap_start, overlap_end),
-        timeout=REQUEST_TIMEOUT,
-    )
-
-    assert second.status_code in (409, 400), (
-        f"a reservation overlapping an existing one on the same listing "
-        f"({listing_id}) should have been rejected (409/400) by the "
-        f"reservations_no_overlap exclusion constraint, but got "
-        f"{second.status_code}: {second.text}"
-    )
+    assert "create-booking-payment" in resp.json()["error"]

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { CustomFonts } from '@/src/constants/theme';
 import { MENU_BAR_HEIGHT } from '@/src/components/MenuBar';
+import { displayablePhotoUrl } from '@/src/utils/listingPhoto';
 
 import reservationIconAsset from '@/assets/images/reservation_icon.png';
 
@@ -72,7 +73,8 @@ interface ReservationCardProps {
   } | null;
 }
 
-export default function ReservationCard({ address, endTime, totalPrice, photoUrl, vehicleSummary }: ReservationCardProps) {
+export default function ReservationCard({ address, endTime, totalPrice, photoUrl: rawPhotoUrl, vehicleSummary }: ReservationCardProps) {
+  const photoUrl = displayablePhotoUrl(rawPhotoUrl);
   const [timeLeft, setTimeLeft] = useState(() => formatTimeRemaining(endTime));
 
   useEffect(() => {

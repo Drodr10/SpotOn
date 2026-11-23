@@ -22,7 +22,7 @@ import { EmptyNote, ErrorNote, LoadingNote } from '@/src/components/activity/Not
 import { useCancelBooking } from '@/src/components/activity/useCancelBooking';
 import { openBookingDetails } from '@/src/components/activity/nav';
 import { useNow } from '@/src/components/activity/useNow';
-import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW } from '@/src/components/activity/layout';
+import { CARD_GAP, H_PAD, PAPER, SECTION_GAP, SW, HEADER_TOP_GAP } from '@/src/components/activity/layout';
 import {
   canCancelBooking,
   fetchRenterBookings,
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: PAPER },
   scroll: {
     paddingHorizontal: H_PAD,
-    paddingTop: SW * 0.02,
+    paddingTop: HEADER_TOP_GAP,
     gap: SECTION_GAP,
   },
   section: { gap: CARD_GAP },

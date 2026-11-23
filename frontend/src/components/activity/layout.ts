@@ -15,6 +15,12 @@ export const SECTION_GAP = SW * 0.045;
 export const CARD_GAP = SW * 0.035;
 
 export const HEADER_H = SW * 0.125;
+/**
+ * Gap between the top safe-area inset and the header row. The back button sits
+ * top-right, directly under the iOS camera/mic privacy dots, so it needs real
+ * clearance (testers reported it "too high" at SW*0.02 ≈ 8pt).
+ */
+export const HEADER_TOP_GAP = SW * 0.05;
 
 export const INK = '#000000';
 export const PAPER = '#DCDBD8';

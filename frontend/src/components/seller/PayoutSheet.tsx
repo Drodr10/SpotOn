@@ -52,7 +52,9 @@ export default function PayoutSheet({
       await stripe.syncAccount();
       onSetupReturned();
     } catch (err: any) {
-      Alert.alert('Onboarding Error', err?.message ?? 'An unexpected error occurred.');
+      console.log('Payout onboarding failed:', err);
+      // Raw fetch errors are native stack text; keep them out of the UI.
+      Alert.alert("Couldn't set up payouts", "We couldn't reach SpotOn right now. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

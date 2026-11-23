@@ -6,8 +6,9 @@
  *
  * Cards use the QuickSearch floating style: ~80% chalk-grey fill, rounded,
  * margins from edges/bottom — onboarding cards additionally carry a stroke
- * (Figma calls for a visible outline). Slide animations between steps.
- * Top-left back button mirrors the search.tsx back pill.
+ * (Figma calls for a visible outline). Steps 0-3 are a swipeable pager (see
+ * IntroPager); Continue animates the same slide. Top-left back button mirrors
+ * the search.tsx back pill and stays fixed while pages move.
  *
  * ── TUNE ────────────────────────────────────────────────────────────────────
  *  MOCKUP_WIDTH_PCT     Mockup phone width (% of screen width)
@@ -36,24 +37,33 @@ import {
   Platform,
   Pressable,
   Keyboard,
+  ScrollView,
   Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHardwareBack } from '@/src/utils/navigation';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useReducedMotion,
   withSpring,
   withTiming,
+  cancelAnimation,
+  interpolateColor,
   Easing,
   runOnJS,
+  type SharedValue,
 } from 'react-native-reanimated';
 
 import { CustomFonts } from '@/src/constants/theme';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { supabase } from '@/src/utils/supabase';
+import { isValidEmail, normalizeEmail } from '@/src/utils/email';
+import { isEmailInUseError } from '@/src/utils/passwordReset';
 
 import signinBg from '@/assets/images/onboardingflow/onboarding.signin.png';
 import mockup1 from '@/assets/images/onboardingflow/onboarding.mockup1.png';
@@ -61,7 +71,7 @@ import mockup2 from '@/assets/images/onboardingflow/onboarding.mockup2.png';
 import mockup3 from '@/assets/images/onboardingflow/onboarding.mockup3.png';
 import mockup4 from '@/assets/images/onboardingflow/onboarding.mockup4.png';
 import spotonLogoAsset from '@/assets/images/spotonlogocircle.png';
-import enterArrowAsset from '@/assets/images/enter arrow.png';
+import enterArrowAsset from '@/assets/images/enter_arrow.png';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -74,6 +84,12 @@ const MOCKUP_TOP             = SH * MOCKUP_TOP_MARGIN_PCT;
 const STROKE_WIDTH           = 2.0;                        // thicker stroke knob
 const STROKE_COLOR           = 'rgba(0,0,0,1)';
 const CARD_FILL              = 'rgba(220,219,216,0.80)';   // ~80% chalk grey (QuickSearch parity)
+// Android draws a card's elevation shadow *underneath* its fill, so through an
+// 80% fill the shadow shows as a lighter "box" inside darker edges. On the flat
+// beige intro pages the fix is an opaque fill that looks identical:
+// 80% chalk over the #F6F3F1 page = rgb(225,224,221). iOS keeps the real alpha.
+const INTRO_BG               = '#F6F3F1';
+const INTRO_CARD_FILL        = Platform.OS === 'android' ? 'rgb(225,224,221)' : CARD_FILL;
 const CARD_BOTTOM_MARGIN     = SH * 0.00;
 const CARD_SIDE_MARGIN       = SW * 0.05;
 const CARD_RADIUS            = SW * 0.11;                 // matches QuickSearch
@@ -131,6 +147,7 @@ const STEPS: IntroStep[] = [
 ];
 
 export default function Onboarding() {
+  // Index of the intro page to show, or STEPS.length for the sign-up form.
   const [step, setStep] = useState(0);
 
   if (step >= STEPS.length) {
@@ -138,146 +155,340 @@ export default function Onboarding() {
   }
 
   return (
-    <IntroStepView
-      key={step}
-      step={STEPS[step]}
-      index={step}
-      total={STEPS.length}
-      onContinue={() => {
-        triggerLightHaptic();
-        setStep((s) => s + 1);
-      }}
-      onBack={() => {
-        if (step === 0) router.back();
-        else setStep((s) => s - 1);
-      }}
+    <IntroPager
+      initialIndex={step}
+      onIndexChange={setStep}
+      onFinish={() => setStep(STEPS.length)}
+      onExit={() => router.back()}
     />
   );
 }
 
-// ── Intro step (mockup + card) ──────────────────────────────────────────────
-function IntroStepView({
-  step,
-  index,
-  total,
-  onContinue,
-  onBack,
-}: {
-  step: IntroStep;
-  index: number;
-  total: number;
-  onContinue: () => void;
-  onBack: () => void;
-}) {
-  const mockupY = useSharedValue(40);
-  const mockupOpacity = useSharedValue(0);
-  const textX = useSharedValue(40);
-  const textOpacity = useSharedValue(0);
+// ── Intro pages (mockup + card), swipeable ──────────────────────────────────
+// All pages sit side by side in one row that translates horizontally, so a
+// page change never remounts anything (no blank frame between pages) and the
+// row can follow the finger. The back pill is outside the row and stays put.
+//
+//  - Swipe left / Continue: next page. On the last page: same as Get Started.
+//  - Swipe right / back pill: previous page. On the first page: leave
+//    onboarding (same as the back pill).
+//  - Past either end the row rubber-bands; it only commits if released past
+//    the threshold (or flicked).
+const SWIPE_COMMIT_FRACTION = 0.22;   // of screen width
+const SWIPE_VELOCITY_PROJECTION = 0.18; // seconds of release velocity added
+const PAGE_ANIM_MS = 320;
 
+function rubberBand(overshoot: number) {
+  'worklet';
+  // iOS-style resistance: moves less the further it's pulled.
+  const c = 0.55;
+  const d = SW;
+  const sign = overshoot < 0 ? -1 : 1;
+  const x = Math.abs(overshoot);
+  return sign * (1 - 1 / ((x * c) / d + 1)) * d;
+}
+
+function IntroPager({
+  initialIndex,
+  onIndexChange,
+  onFinish,
+  onExit,
+}: {
+  initialIndex: number;
+  onIndexChange: (index: number) => void;
+  onFinish: () => void;
+  onExit: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotion();
+  const total = STEPS.length;
+  const lastX = -(total - 1) * SW;
+
+  const [index, setIndex] = useState(initialIndex);
+  // Row offset in px: page i is fully on screen at x = -i * SW.
+  const x = useSharedValue(-initialIndex * SW);
+  const dragStartX = useSharedValue(0);
+
+  // Entrance: content is drawn at full opacity from the very first frame
+  // (no fade from 0 = no blank frame); it just settles up a little.
+  const enterY = useSharedValue(reduceMotion ? 0 : 28);
   useEffect(() => {
-    mockupY.value = withSpring(0, { damping: 16, stiffness: 95 });
-    mockupOpacity.value = withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) });
-    textX.value = withSpring(0, { damping: 18, stiffness: 110 });
-    textOpacity.value = withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) });
+    if (!reduceMotion) enterY.value = withSpring(0, { damping: 18, stiffness: 120 });
   }, []);
 
-  const mockupStyle = useAnimatedStyle(() => ({
-    opacity: mockupOpacity.value,
-    transform: [{ translateY: mockupY.value }],
-  }));
-  const textStyle = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateX: textX.value }],
-  }));
+  const settle = useCallback(
+    (next: number) => {
+      setIndex(next);
+      onIndexChange(next);
+    },
+    [onIndexChange],
+  );
 
-  const handleContinue = useCallback(() => {
-    mockupOpacity.value = withTiming(0, { duration: 220 });
-    mockupY.value = withTiming(-30, { duration: 240, easing: Easing.in(Easing.cubic) });
-    textOpacity.value = withTiming(0, { duration: 200 });
-    textX.value = withTiming(-50, { duration: 220, easing: Easing.in(Easing.cubic) }, () => {
-      runOnJS(onContinue)();
+  // Called from the gesture (UI thread) once a swipe commits.
+  const onSwipeCommit = useCallback(
+    (target: number, from: number) => {
+      if (target < 0) {
+        triggerLightHaptic();
+        onExit();
+        return;
+      }
+      if (target >= total) {
+        triggerLightHaptic();
+        onFinish();
+        return;
+      }
+      if (target !== from) {
+        triggerLightHaptic();
+        settle(target);
+      }
+    },
+    [onExit, onFinish, settle, total],
+  );
+
+  const goTo = useCallback(
+    (target: number) => {
+      if (target < 0) {
+        onExit();
+        return;
+      }
+      if (target >= total) {
+        // Get Started: slide the last page out to the left, then show the form.
+        if (reduceMotion) {
+          onFinish();
+          return;
+        }
+        // A second tap restarts this; the cancelled run's callback has
+        // done=false, so onFinish still fires once.
+        x.value = withTiming(
+          -total * SW,
+          { duration: PAGE_ANIM_MS - 60, easing: Easing.in(Easing.cubic) },
+          (done) => {
+            if (done) runOnJS(onFinish)();
+          },
+        );
+        return;
+      }
+      settle(target);
+      if (reduceMotion) {
+        x.value = -target * SW;
+        return;
+      }
+      x.value = withTiming(-target * SW, {
+        duration: PAGE_ANIM_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    },
+    [onExit, onFinish, reduceMotion, settle, total, x],
+  );
+
+  // Android back = the back pill: previous page, or leave onboarding on page 1.
+  useHardwareBack(() => {
+    goTo(index - 1);
+    return true;
+  });
+
+  const pan = Gesture.Pan()
+    // Horizontal only: vertical drags fail fast so they never fight scrolling.
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-14, 14])
+    .onStart(() => {
+      cancelAnimation(x);
+      dragStartX.value = x.value;
+    })
+    .onUpdate((e) => {
+      const raw = dragStartX.value + e.translationX;
+      if (raw > 0) x.value = rubberBand(raw);
+      else if (raw < lastX) x.value = lastX + rubberBand(raw - lastX);
+      else x.value = raw;
+    })
+    .onEnd((e) => {
+      const projected = e.translationX + e.velocityX * SWIPE_VELOCITY_PROJECTION;
+      // If the drag began mid-slide (e.g. right after tapping Continue), round
+      // toward the direction of the swipe so a fling back lands one page back
+      // instead of skipping past page 1 and leaving onboarding.
+      const startPage = -dragStartX.value / SW;
+      const from = projected > 0 ? Math.ceil(startPage - 0.001) : Math.floor(startPage + 0.001);
+      let target = from;
+      if (projected < -SW * SWIPE_COMMIT_FRACTION) target = from + 1;
+      else if (projected > SW * SWIPE_COMMIT_FRACTION) target = from - 1;
+
+      if (target < 0 || target >= total) {
+        // Off either end: back out / Get Started. Spring the row home so it
+        // isn't left dangling while the next screen takes over.
+        x.value = withSpring(-from * SW, { damping: 22, stiffness: 220 });
+        runOnJS(onSwipeCommit)(target, from);
+        return;
+      }
+      const dest = -target * SW;
+      x.value = reduceMotion
+        ? dest
+        : withSpring(dest, {
+            damping: 26,
+            stiffness: 230,
+            mass: 0.9,
+            velocity: e.velocityX,
+            overshootClamping: true,
+          });
+      runOnJS(onSwipeCommit)(target, from);
     });
-  }, [onContinue]);
+
+  const rowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+  }));
+  const enterStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: enterY.value }],
+  }));
 
   return (
-    <View style={[styles.screen, { backgroundColor: '#F6F3F1' }]}>
+    <View style={[styles.screen, styles.introBg]}>
       <StatusBar style="dark" />
 
-      {/* Floating mockup pinned near the top: 85% width, 10% top margin */}
-      <Animated.Image
-        source={step.mockup}
-        resizeMode="contain"
-        style={[
-          {
-            position: 'absolute',
-            top: MOCKUP_TOP,
-            left: (SW - MOCKUP_WIDTH) / 2,
-            width: MOCKUP_WIDTH,
-            height: SH * 0.75,
-          },
-          mockupStyle,
-        ]}
-      />
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[StyleSheet.absoluteFill, enterStyle]}>
+          <Animated.View style={[styles.pagerRow, { width: SW * total }, rowStyle]}>
+            {STEPS.map((s, i) => (
+              <IntroPage
+                key={i}
+                step={s}
+                index={i}
+                total={total}
+                x={x}
+                active={i === index}
+                bottomInset={insets.bottom}
+                onContinue={() => {
+                  triggerLightHaptic();
+                  goTo(i + 1);
+                }}
+              />
+            ))}
+          </Animated.View>
+        </Animated.View>
+      </GestureDetector>
 
-      {/* Top-left back pill */}
-      <SafeAreaView style={styles.backWrap} edges={['top']}>
+      {/* Back pill: outside the swiping row so it stays fixed. Positioned from
+          the safe-area context (known on the first frame) rather than a
+          SafeAreaView, whose padding can land a frame late on Android. */}
+      <View style={[styles.backWrap, { top: insets.top }]}>
         <TouchableOpacity
           style={styles.backPill}
-          onPress={withLightHaptic(onBack)}
+          onPress={withLightHaptic(() => goTo(index - 1))}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={BACK_PILL_ICON} color="#000" />
         </TouchableOpacity>
-      </SafeAreaView>
-
-      {/* Bottom-pinned info card */}
-      <SafeAreaView edges={['bottom']} style={styles.bottomSafe}>
-        <Animated.View style={[styles.cardWrap, textStyle]}>
-          <View style={styles.cardShadow}>
-            <View style={[styles.card, styles.cardStroke]}>
-              <View style={styles.headerRow}>
-                <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
-              </View>
-
-              <Text style={styles.heading}>
-                {step.titlePre}
-                <Text style={styles.italic}>{step.titleItalic}</Text>
-                {step.titlePost ?? ''}
-              </Text>
-
-              <Text style={styles.body}>{step.body}</Text>
-
-              <View style={styles.continueRow}>
-                <TouchableOpacity
-                  style={styles.continueButton}
-                  activeOpacity={0.85}
-                  onPress={handleContinue}
-                >
-                  <Text style={styles.continueText}>
-                    {index === total - 1 ? 'Get Started' : 'Continue'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.dotsRow}>
-                {Array.from({ length: total }).map((_, i) => (
-                  <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
-                ))}
-              </View>
-            </View>
-          </View>
-        </Animated.View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
 
+function IntroPage({
+  step,
+  index,
+  total,
+  x,
+  active,
+  bottomInset,
+  onContinue,
+}: {
+  step: IntroStep;
+  index: number;
+  total: number;
+  x: SharedValue<number>;
+  active: boolean;
+  bottomInset: number;
+  onContinue: () => void;
+}) {
+  return (
+    <View
+      style={styles.page}
+      // Only the visible page is reachable by screen readers.
+      importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
+      accessibilityElementsHidden={!active}
+    >
+      <Image
+        source={step.mockup}
+        resizeMode="contain"
+        style={styles.mockup}
+        accessibilityIgnoresInvertColors
+      />
+
+      <View style={[styles.bottomPin, { paddingBottom: bottomInset + CARD_BOTTOM_MARGIN }]}>
+        <View style={styles.cardShadow}>
+          <View style={[styles.card, styles.introCardFill, styles.cardStroke]}>
+            <View style={styles.headerRow}>
+              <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
+            </View>
+
+            <Text style={styles.heading} accessibilityRole="header">
+              {step.titlePre}
+              <Text style={styles.italic}>{step.titleItalic}</Text>
+              {step.titlePost ?? ''}
+            </Text>
+
+            <Text style={styles.body}>{step.body}</Text>
+
+            <View style={styles.continueRow}>
+              <TouchableOpacity
+                style={styles.continueButton}
+                activeOpacity={0.85}
+                onPress={onContinue}
+                accessibilityRole="button"
+              >
+                <Text style={styles.continueText}>
+                  {index === total - 1 ? 'Get Started' : 'Continue'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View
+              style={styles.dotsRow}
+              accessible
+              accessibilityLabel={`Page ${index + 1} of ${total}`}
+            >
+              {Array.from({ length: total }).map((_, i) => (
+                <PageDot key={i} dot={i} x={x} />
+              ))}
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// A page-indicator dot that tracks the row position, so it stretches and
+// darkens continuously while the finger drags between pages.
+function PageDot({ dot, x }: { dot: number; x: SharedValue<number> }) {
+  const style = useAnimatedStyle(() => {
+    const progress = -x.value / SW;
+    const t = Math.max(0, 1 - Math.abs(progress - dot));
+    return {
+      width: 6 + 10 * t,
+      backgroundColor: interpolateColor(t, [0, 1], ['rgba(0,0,0,0.25)', 'rgba(0,0,0,0.85)']),
+    };
+  });
+  return <Animated.View style={[styles.dot, style]} />;
+}
+
 // ── Final signup step ───────────────────────────────────────────────────────
 function SignupStep({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets();
+  // Android back returns to the last intro page, like the back pill.
+  useHardwareBack(() => {
+    onBack();
+    return true;
+  });
+  // Bottom of the back pill plus a margin: the form never rises above this.
+  const backClearance = insets.top + BACK_PILL_SIZE + BACK_PILL_MARGIN * 2;
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // Set (to the normalized address) when sign-up says the email already has an
+  // account: shows "Sign in instead" / "Reset password" under the error.
+  const [inUseEmail, setInUseEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
   const translateY = useSharedValue(SH * 0.45);
@@ -295,20 +506,29 @@ function SignupStep({ onBack }: { onBack: () => void }) {
 
   const handleSignup = async () => {
     triggerLightHaptic();
-    if (!fullName || !email || !password) {
+    const name = fullName.trim();
+    if (!name || !email.trim() || !password) {
       setError('Please fill in all fields.');
       return;
     }
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setError('');
+    setInUseEmail('');
     setLoading(true);
     const { error: err } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
-      options: { data: { full_name: fullName } },
+      options: { data: { full_name: name } },
     });
     setLoading(false);
     if (err) {
-      if (err.message === 'User already registered') setError('Email already in use.');
-      else if (err.message === 'Password should be at least 6 characters.')
+      if (isEmailInUseError(err)) {
+        setError('That email already has a SpotOn account.');
+        setInUseEmail(normalizeEmail(email));
+      } else if (err.message === 'Password should be at least 6 characters.')
         setError('Password must be at least 6 characters.');
       else setError(err.message);
       return;
@@ -321,92 +541,156 @@ function SignupStep({ onBack }: { onBack: () => void }) {
       <StatusBar style="dark" />
       <ImageBackground source={signinBg} style={StyleSheet.absoluteFill} resizeMode="cover" />
 
-      <SafeAreaView style={styles.backWrap} edges={['top']}>
+      <View style={[styles.backWrap, { top: insets.top }]}>
         <TouchableOpacity
           style={styles.backPill}
           onPress={withLightHaptic(onBack)}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={BACK_PILL_ICON} color="#000" />
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
 
       <Pressable style={StyleSheet.absoluteFill} onPress={Keyboard.dismiss}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.kav}
+          style={[styles.kav, { paddingTop: backClearance }]}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
-          {/* Flow layout (not absolute) so KeyboardAvoidingView can push the card up. */}
-          <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
-            <Animated.View style={[styles.cardShadow, cardAnimStyle]}>
-              <View style={[styles.card, styles.cardStroke]}>
-                <View style={styles.headerRow}>
-                  <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
-                </View>
+          {/* Flow layout (not absolute) so KeyboardAvoidingView can push the card up.
+              The scroll area starts below the back button: when the keyboard
+              (plus the QuickType / password bar, an error line, a small phone)
+              leaves too little room, the card scrolls instead of riding up
+              over the back button. */}
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.formScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <SafeAreaView edges={['bottom']} style={{ paddingBottom: CARD_BOTTOM_MARGIN, paddingHorizontal: CARD_SIDE_MARGIN }}>
+              <Animated.View style={[styles.cardShadow, styles.cardShadowOverPhoto, cardAnimStyle]}>
+                <View style={[styles.card, styles.cardStroke]}>
+                  <View style={styles.headerRow}>
+                    <Image source={spotonLogoAsset} style={styles.headerLogo} resizeMode="contain" />
+                  </View>
 
-                <Text style={styles.heading}>
-                  Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s get you started.
-                </Text>
+                  <Text style={styles.heading}>
+                    Making parking <Text style={styles.italic}>infinite</Text>. Let&apos;s get you started.
+                  </Text>
 
-                <TextInput
-                  style={styles.input}
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="Name"
-                  placeholderTextColor="rgba(0,0,0,0.45)"
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="Email"
-                  placeholderTextColor="rgba(0,0,0,0.45)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                />
-                <View style={styles.passwordRow}>
+                  {/* Uncontrolled on purpose (no `value` prop): nothing here ever
+                      sets these fields programmatically, and without a JS-owned
+                      value the native text can't be overwritten by a stale
+                      state echo when input arrives faster than the JS thread
+                      (autofill, the iOS strong-password sheet, a busy JS thread).
+                      onChangeText still mirrors the text into state for submit. */}
                   <TextInput
-                    style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
-                    value={password}
-                    onChangeText={setPassword}
-                    placeholder="Password"
+                    style={styles.input}
+                    defaultValue=""
+                    onChangeText={setFullName}
+                    placeholder="Name"
                     placeholderTextColor="rgba(0,0,0,0.45)"
-                    secureTextEntry
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    textContentType="name"
+                    autoComplete="name"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    defaultValue=""
+                    onChangeText={(t) => {
+                      setEmail(t);
+                      // The actions below are for the address that was rejected.
+                      if (inUseEmail) setInUseEmail('');
+                    }}
+                    placeholder="Email"
+                    placeholderTextColor="rgba(0,0,0,0.45)"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    returnKeyType="go"
-                    onSubmitEditing={handleSignup}
+                    keyboardType="email-address"
+                    textContentType="username"
+                    autoComplete="email"
                   />
-                  <TouchableOpacity
-                    style={styles.arrowButton}
-                    onPress={handleSignup}
-                    activeOpacity={0.7}
-                    disabled={loading}
-                  >
-                    <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
-                  </TouchableOpacity>
-                </View>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, { paddingRight: SW * 0.13, marginBottom: 0 }]}
+                      defaultValue=""
+                      onChangeText={setPassword}
+                      placeholder="Password"
+                      placeholderTextColor="rgba(0,0,0,0.45)"
+                      secureTextEntry
+                      // "newPassword" makes iOS suggest a strong password and offer
+                      // to save it to the keychain on sign-up.
+                      textContentType="newPassword"
+                      autoComplete="new-password"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="go"
+                      onSubmitEditing={handleSignup}
+                    />
+                    <TouchableOpacity
+                      style={styles.arrowButton}
+                      onPress={handleSignup}
+                      activeOpacity={0.7}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign up"
+                      accessibilityState={{ disabled: loading }}
+                    >
+                      {/* The asset used to be "enter arrow.png": iOS didn't load
+                          the image because of the space in its filename, so the
+                          arrow was invisible there (Android was fine). Keep
+                          asset filenames free of spaces. */}
+                      <Image source={enterArrowAsset} style={styles.arrowIcon} resizeMode="contain" />
+                    </TouchableOpacity>
+                  </View>
 
-                {!!error && <Text style={styles.errorText}>{error}</Text>}
+                  {!!error && <Text style={styles.errorText}>{error}</Text>}
 
-                <Text style={styles.legalText}>
-                  By signing up you agree to our{' '}
-                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
-                    Terms
-                  </Text>{' '}
-                  and{' '}
-                  <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
-                    Privacy Policy
+                  {!!inUseEmail && (
+                    <View style={styles.inUseRow}>
+                      <TouchableOpacity
+                        style={[styles.inUseButton, styles.inUseButtonPrimary]}
+                        activeOpacity={0.85}
+                        onPress={withLightHaptic(() =>
+                          router.push({ pathname: '/SignIn', params: { email: inUseEmail } }),
+                        )}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.inUseText, styles.inUseTextPrimary]}>Sign in instead</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.inUseButton}
+                        activeOpacity={0.85}
+                        onPress={withLightHaptic(() =>
+                          router.push({ pathname: '/ResetPassword', params: { email: inUseEmail } }),
+                        )}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.inUseText}>Reset password</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <Text style={styles.legalText}>
+                    By signing up you agree to our{' '}
+                    <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/terms')}>
+                      Terms
+                    </Text>{' '}
+                    and{' '}
+                    <Text style={styles.legalLink} onPress={() => Linking.openURL('https://spot-on.software/privacy')}>
+                      Privacy Policy
+                    </Text>
+                    .
                   </Text>
-                  .
-                </Text>
-              </View>
-            </Animated.View>
-          </SafeAreaView>
+                </View>
+              </Animated.View>
+            </SafeAreaView>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Pressable>
     </View>
@@ -416,6 +700,8 @@ function SignupStep({ onBack }: { onBack: () => void }) {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   kav: { flex: 1, justifyContent: 'flex-end' },
+  formScroll: { flex: 1 },
+  formScrollContent: { flexGrow: 1, justifyContent: 'flex-end' },
 
   // Top-left back pill (search.tsx parity)
   backWrap: { position: 'absolute', top: 0, left: 0, zIndex: 10 },
@@ -429,16 +715,26 @@ const styles = StyleSheet.create({
     margin: BACK_PILL_MARGIN,
   },
 
-  // Bottom area — absolute pin so the card sits at the bottom (mockup/back are also absolute)
-  bottomSafe: {
+  // Intro pager: one row of full-width pages that translates horizontally.
+  introBg: { backgroundColor: INTRO_BG },
+  pagerRow: { position: 'absolute', top: 0, bottom: 0, left: 0, flexDirection: 'row' },
+  page: { width: SW, height: '100%' },
+  // Floating mockup pinned near the top: 85% width, 10% top margin
+  mockup: {
+    position: 'absolute',
+    top: MOCKUP_TOP,
+    left: (SW - MOCKUP_WIDTH) / 2,
+    width: MOCKUP_WIDTH,
+    height: SH * 0.75,
+  },
+  // Bottom area — absolute pin so the card sits at the bottom
+  bottomPin: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: CARD_BOTTOM_MARGIN,
     paddingHorizontal: CARD_SIDE_MARGIN,
   },
-  cardWrap: { width: '100%' },
 
   cardShadow: {
     width: '100%',
@@ -458,6 +754,11 @@ const styles = StyleSheet.create({
     paddingBottom: CARD_PADDING_V,
     overflow: 'hidden',
   },
+  introCardFill: { backgroundColor: INTRO_CARD_FILL },
+  // Over the sign-in photo there's no single colour to make the fill opaque
+  // with, so on Android the card drops its elevation instead (no shadow to
+  // show through the 80% fill as a lighter box). The stroke still outlines it.
+  cardShadowOverPhoto: Platform.OS === 'android' ? { elevation: 0 } : {},
   cardStroke: {
     borderWidth: STROKE_WIDTH,
     borderColor: STROKE_COLOR,
@@ -501,7 +802,6 @@ const styles = StyleSheet.create({
 
   dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: SW * 0.04, gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.25)' },
-  dotActive: { width: 16, backgroundColor: 'rgba(0,0,0,0.85)' },
 
   // Inputs
   input: {
@@ -535,6 +835,24 @@ const styles = StyleSheet.create({
     color: 'rgba(190,0,0,1)',
     marginTop: SW * 0.02,
   },
+
+  inUseRow: { flexDirection: 'row', gap: SW * 0.025, marginTop: SW * 0.03 },
+  inUseButton: {
+    flex: 1,
+    height: INPUT_H * 0.85,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: STROKE_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inUseButtonPrimary: { backgroundColor: '#000' },
+  inUseText: {
+    fontFamily: CustomFonts.SwitzerSemibold,
+    fontSize: SW * 0.034,
+    color: '#000',
+  },
+  inUseTextPrimary: { color: '#FFFFFF' },
 
   legalText: {
     fontFamily: CustomFonts.SwitzerLight,

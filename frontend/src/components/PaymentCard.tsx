@@ -21,8 +21,9 @@ import { supabase } from '@/src/utils/supabase';
 import { triggerLightHaptic, withLightHaptic } from '@/src/utils/haptics';
 import { CustomFonts } from '../constants/theme';
 import { SLIDE_MS, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE } from './activity/motion';
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
-import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
+import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '../constants/sheet';
+import { paymentSheetErrorCopy, paymentSheetInitErrorCopy } from '../utils/paymentErrors';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle_disc.png';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
@@ -124,7 +125,9 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             });
             if (initError) {
                 await stripe.releaseHold(params.holdId);
-                Alert.alert(`Error: ${initError.code}`, initError.message);
+                console.warn('[PaymentCard] initPaymentSheet failed', initError);
+                const copy = paymentSheetInitErrorCopy();
+                Alert.alert(copy.title, copy.message);
                 return;
             }
 
@@ -133,7 +136,9 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
             if (payError) {
                 await stripe.releaseHold(params.holdId);
                 if (payError.code !== 'Canceled') {
-                    Alert.alert(`Error: ${payError.code}`, payError.message);
+                    console.warn('[PaymentCard] presentPaymentSheet failed', payError);
+                    const copy = paymentSheetErrorCopy(payError);
+                    Alert.alert(copy.title, copy.message);
                 }
                 return;
             }
@@ -183,9 +188,9 @@ export default function PaymentCard ({ listingId, listerId, price, hours, vehicl
                     style={[
                         styles.popupCard,
                         {
-                            bottom: SHEET_BOTTOM,
+                            bottom: sheetBottom(insets.bottom),
                             paddingTop: W * 0.08,
-                            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+                            paddingBottom: W * 0.06 + sheetContentPad(insets.bottom),
                             paddingHorizontal: W * 0.08,
                             transform: [{ translateY: popupAnim }],
                         },

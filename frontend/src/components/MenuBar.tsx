@@ -17,8 +17,10 @@ import {
   TouchableOpacity,
   View,
   Alert,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useSegments } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import Reanimated, {
@@ -33,17 +35,17 @@ import { api } from '../utils/api';
 import { CustomFonts } from '../constants/theme';
 import { type TimerData, formatRemaining } from '../utils/timeFormat';
 import { setAvatarUrl, useAvatarUrl } from '../utils/avatar';
+import { addListingIntroKey, hasSeenIntro, markIntroSeen } from '../utils/introFlags';
 import { EASE_IN_SLIDE, EASE_OUT_SLIDE, RN_EASE_IN_SLIDE, RN_EASE_OUT_SLIDE, SLIDE_MS } from './activity/motion';
 
-import { SHEET_BOTTOM, SHEET_INSET, SHEET_RADIUS, sheetBottomPad } from '../constants/sheet';
+import { SHEET_INSET, SHEET_RADIUS, sheetBottom, sheetContentPad } from '../constants/sheet';
 
-import profileDefault from '../../assets/images/temprofileicon.png';
 import homeWhite from '../../assets/images/menubar/home_white.png';
 import homeBlack from '../../assets/images/menubar/home_black.png';
 import messagesWhite from '../../assets/images/menubar/messages_white.png';
 import messagesBlack from '../../assets/images/menubar/messages_black.png';
 import addWhite from '../../assets/images/menubar/add_white.png';
-import spotonLogoCircle from '../../assets/images/spotonlogocircle.png';
+import spotonLogoCircle from '../../assets/images/spotonlogocircle_disc.png';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ▼▼▼ SIZE CONTROLS ▼▼▼
@@ -304,7 +306,10 @@ export default function MenuBar() {
 
   // ── Slide below the screen edge on back-button screens (UI thread) ──────────
   // Distance covers the bar, the bottom safe area and its shadow, so nothing peeks.
-  const hiddenY = BAR_HEIGHT + insets.bottom + BOTTOM_OFFSET + 48;
+  // Android: the system navigation bar (gesture handle / 3-button bar) is drawn
+  // over the app, so float the bar a small gap above it. iOS is unchanged.
+  const barBottom = insets.bottom + BOTTOM_OFFSET + (Platform.OS === 'android' ? SHEET_INSET : 0);
+  const hiddenY = BAR_HEIGHT + barBottom + 48;
   const reducedMotion = useReducedMotion();
   const slideY = useSharedValue(hidden ? hiddenY : 0);
   const wasVisible = useRef(false);
@@ -338,7 +343,7 @@ export default function MenuBar() {
       if (cancelled || !user) return;
 
       // Avatar lives in profiles.avatar_url — that's the source of truth the
-      // Profile page writes to. Falls through to temprofileicon if not set.
+      // Profile page writes to. Falls back to a car icon if not set.
       const { data: profileRow } = await supabase
         .from('profiles')
         .select('avatar_url')
@@ -450,7 +455,14 @@ export default function MenuBar() {
       }
 
       // Zero-friction listing: no Stripe account required up front. Show a quick
-      // heads-up about deferred payout setup, then enter the create-listing flow.
+      // heads-up about deferred payout setup the first time only (per user,
+      // persisted), then go straight to the create-listing flow on later taps.
+      const introKey = addListingIntroKey(session.user.id);
+      if (hasSeenIntro(introKey)) {
+        router.push({ pathname: '/CreateListing2', params: { animation } } as any);
+        return;
+      }
+      markIntroSeen(introKey);
       openAddInfo(animation);
       return;
     }
@@ -473,7 +485,7 @@ export default function MenuBar() {
       pointerEvents={hidden ? 'none' : 'box-none'}
       accessibilityElementsHidden={hidden}
       importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
-      style={[styles.wrapper, { bottom: insets.bottom + BOTTOM_OFFSET }, slideStyle]}
+      style={[styles.wrapper, { bottom: barBottom }, slideStyle]}
     >
       <View style={styles.barRow}>
         {/* Main pill — profile, home, messages */}
@@ -512,20 +524,43 @@ export default function MenuBar() {
           />
 
           {/* Icon cluster — profile, home, messages */}
-          <View style={[styles.iconRow, { left: clusterOffset + D.hPad, height: barH }]}>
+          <View
+            style={[styles.iconRow, { left: clusterOffset + D.hPad, height: barH }]}
+            accessibilityRole="tablist"
+          >
             {/* Profile */}
             <TouchableOpacity
               activeOpacity={0.7}
               onPressIn={() => pressIn('profile')}
               onPressOut={() => pressOut('profile')}
               onPress={() => handlePress('profile')}
+              accessibilityRole="tab"
+              accessibilityLabel="Profile"
+              accessibilityState={{ selected: activeTab === 'profile' }}
               style={{ width: D.slot, height: barH, alignItems: 'center', justifyContent: 'center' }}
             >
               <Animated.View style={{ transform: [{ scale: scales.profile }] }}>
-                <Image
-                  source={avatarUrl ? { uri: avatarUrl } : profileDefault}
-                  style={{ width: D.profileSize, height: D.profileSize, borderRadius: D.profileSize / 2 }}
-                />
+                {avatarUrl ? (
+                  <Image
+                    source={{ uri: avatarUrl }}
+                    style={{ width: D.profileSize, height: D.profileSize, borderRadius: D.profileSize / 2 }}
+                  />
+                ) : (
+                  // Same car-on-light-disc placeholder as the Profile card
+                  // (replaces the temporary cartoon image).
+                  <View
+                    style={{
+                      width: D.profileSize,
+                      height: D.profileSize,
+                      borderRadius: D.profileSize / 2,
+                      backgroundColor: '#F2F1EE',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name='car-sport' size={D.profileSize * 0.5} color='#1A1A1A' />
+                  </View>
+                )}
               </Animated.View>
             </TouchableOpacity>
 
@@ -535,6 +570,9 @@ export default function MenuBar() {
               onPressIn={() => pressIn('home')}
               onPressOut={() => pressOut('home')}
               onPress={() => handlePress('home')}
+              accessibilityRole="tab"
+              accessibilityLabel="Home"
+              accessibilityState={{ selected: activeTab === 'home' }}
               style={{ width: D.slot, height: barH, alignItems: 'center', justifyContent: 'center' }}
             >
               <Animated.View style={{ transform: [{ scale: scales.home }] }}>
@@ -552,6 +590,9 @@ export default function MenuBar() {
               onPressIn={() => pressIn('messages')}
               onPressOut={() => pressOut('messages')}
               onPress={() => handlePress('messages')}
+              accessibilityRole="tab"
+              accessibilityLabel="Messages"
+              accessibilityState={{ selected: activeTab === 'messages' }}
               style={{ width: D.slot, height: barH, alignItems: 'center', justifyContent: 'center' }}
             >
               <Animated.View style={{ transform: [{ scale: scales.messages }] }}>
@@ -571,6 +612,8 @@ export default function MenuBar() {
           onPressIn={() => pressIn('add')}
           onPressOut={() => pressOut('add')}
           onPress={() => handlePress('add')}
+          accessibilityRole="button"
+          accessibilityLabel="List a spot"
           style={[
             styles.addCircle,
             {
@@ -603,9 +646,9 @@ export default function MenuBar() {
         style={[
           styles.addInfoCard,
           {
-            bottom: SHEET_BOTTOM,
+            bottom: sheetBottom(insets.bottom),
             paddingTop: W * 0.08,
-            paddingBottom: W * 0.06 + sheetBottomPad(insets.bottom),
+            paddingBottom: W * 0.06 + sheetContentPad(insets.bottom),
             paddingHorizontal: W * 0.08,
             transform: [{ translateY: addInfoAnim }],
           },

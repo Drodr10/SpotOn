@@ -46,3 +46,34 @@ export async function geocodeQuery(query: string, options: GeocodeOptions = {}):
 }
 
 export default geocodeQuery;
+
+/** The subset of expo-location's LocationGeocodedAddress we format. */
+export type ReverseGeocodeParts = {
+  streetNumber?: string | null;
+  street?: string | null;
+  name?: string | null;
+  city?: string | null;
+  region?: string | null;
+};
+
+const clean = (s: string | null | undefined): string => (typeof s === 'string' ? s.trim() : '');
+
+/**
+ * Formats a reverse-geocode result as "1201 Brickell Ave, Miami, FL".
+ * The street number and street are one address line (space-joined); only the
+ * line, city and region are comma-separated. Missing parts are skipped. With no
+ * street at all, falls back to `name` (often a place or a full street line).
+ * Returns '' when nothing usable is present.
+ */
+export function formatReverseGeocodeAddress(r: ReverseGeocodeParts | null | undefined): string {
+  if (!r) return '';
+  const street = clean(r.street);
+  const line1 = street ? [clean(r.streetNumber), street].filter(Boolean).join(' ') : clean(r.name);
+  const city = clean(r.city);
+  const region = clean(r.region);
+  return [line1, city, region]
+    .filter(Boolean)
+    // Drop a part that repeats the previous one (e.g. name === city).
+    .filter((part, i, arr) => i === 0 || part !== arr[i - 1])
+    .join(', ');
+}

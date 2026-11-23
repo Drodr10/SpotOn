@@ -59,7 +59,7 @@ export default function SuggestionsList({ refreshKey }: SuggestionsListProps) {
     setLoading(false);
   };
 
-  // Re-fetch every time this screen comes into focus (e.g. returning from CreateListing)
+  // Re-fetch every time this screen comes into focus (e.g. returning from CreateListing2)
   useFocusEffect(
     useCallback(() => {
       fetchListings();

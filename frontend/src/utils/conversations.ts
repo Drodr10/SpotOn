@@ -6,6 +6,7 @@
  * existing message-owner flow.
  */
 import { supabase } from './supabase';
+import { fetchPublicProfile } from './publicProfiles';
 
 export interface ConversationLookupResult {
   conversationId: string;
@@ -14,7 +15,7 @@ export interface ConversationLookupResult {
 
 /**
  * Find existing conversation for (renter, owner) or insert one. Returns its id
- * plus the owner's display name (queried from `profiles`).
+ * plus the owner's display name (via the `get_public_profiles` RPC).
  *
  * Throws on unrecoverable error so callers can surface a useful Alert.
  */
@@ -50,11 +51,8 @@ export async function findOrCreateConversation(
     conversationId = created.id;
   }
 
-  const { data: ownerProfile } = await supabase
-    .from('profiles')
-    .select('full_name')
-    .eq('id', ownerId)
-    .single();
+  // Public fields only, via RPC — other users' profile rows aren't readable.
+  const ownerProfile = await fetchPublicProfile(ownerId);
 
   return {
     conversationId,

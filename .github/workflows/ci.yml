@@ -145,17 +145,54 @@ jobs:
           done
           exit $fail
 
-      # NOT DONE HERE, deliberately: actually APPLYING the migrations. The first
-      # one (20260421001633_remote_schema.sql) is a `supabase db pull` dump that
+      # NOT DONE HERE: actually APPLYING the migrations. The first one
+      # (20260421001633_remote_schema.sql) is a `supabase db pull` dump that
       # references platform schemas and objects it never creates, so replaying it
       # on a bare Postgres image does not work — attempted, and it dies on
       # `schema "extensions" does not exist` plus a missing public.listing_images
-      # well before reaching any of our own SQL.
+      # well before reaching any of our own SQL. The `database` job below does it
+      # properly, through the Supabase CLI's own Postgres image.
+
+  database:
+    name: database (pgTAP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This job is what stops the money-path rules from regressing silently.
+      # Bookings are inserted only AFTER the renter has paid, so every rule the
+      # database enforces at that insert — the car still exists, the rate tier
+      # and availability window still match, the spot is still active — is a
+      # charge-then-refund if something upstream lets it drift mid-checkout. The
+      # triggers that freeze vehicles and listings during a live hold or booking
+      # (20261116140000, 20261116150000) exist only in SQL; nothing in
+      # tests/backend or __tests__ can see them. supabase/tests/database asserts
+      # them against a real database, as the real roles (renter, host, anon,
+      # service_role), under RLS.
       #
-      # The right way is the Supabase CLI, which is what we already run locally:
-      #     - uses: supabase/setup-cli@v1
-      #     - run: supabase db start     # applies every migration in order
-      # Worth adding, but it needs a real run to verify rather than a guess, so
-      # it is left as a follow-up instead of shipped untested. Until then the
-      # reservation rules are covered by tests/backend, which exercises the
-      # pricing engine and the pre-charge validation path.
+      # Pinned to the CLI version the suite was verified with locally, so a CLI
+      # release that changes `db start` or the Postgres image can't turn this red
+      # (or green) without a commit that says so.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.106.0
+
+      # `db start` boots ONLY the Postgres container — no auth, storage, studio —
+      # and applies every file in supabase/migrations in order on a fresh volume.
+      # That is the replay the `migrations` job can't do, so a migration that no
+      # longer applies cleanly fails here too, before any test runs.
+      #
+      # config.toml needs nothing for this: its env() references (Apple sign-in
+      # secret, Twilio token, Studio's OpenAI key, OrioleDB S3) belong to
+      # services that are disabled or not started by `db start`. The local stack
+      # the suite was verified on runs with none of them defined. (No seed.sql
+      # exists; the CLI only warns about that.)
+      - name: Start Postgres and apply migrations
+        run: supabase db start
+
+      # Each test file is one transaction that ROLLBACKs, so files can't leak
+      # fixtures into each other. pg_prove exits non-zero on any failed or
+      # missing assertion (plan() count mismatch included), so an emptied or
+      # half-run file can't pass.
+      - name: Run pgTAP tests
+        run: supabase test db
