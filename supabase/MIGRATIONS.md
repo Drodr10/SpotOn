@@ -16,9 +16,10 @@ and the `listing-photos` bucket never existed, so no listing photo ever uploaded
 3. Open a PR. CI runs:
    - **migrations (naming + order)**: timestamps ordered and unique
    - **database (pgTAP)**: applies every migration to a fresh database and runs the tests
-   - **migrations (production check)**: what this PR would apply to production,
-     and whether production has changes the repo doesn't (drift)
-4. Merge. **Merging does not touch production.**
+4. Merge. **Merging does not touch production.** On `main`,
+   **migrations (production check)** then lists what a deploy would apply and
+   fails if production has changes the repo doesn't (drift). It also runs daily.
+   It doesn't run on PRs: PR code could read the production credentials.
 
 ## Deploying to production
 
@@ -59,11 +60,22 @@ exceptions go in `supabase/migrations-remote-only.txt`, each with a reason.
 
 ## One-time setup (repo admin)
 
-- **Secrets** (Settings → Secrets and variables → Actions → New repository secret):
-  - `SUPABASE_ACCESS_TOKEN`: supabase.com → Account → Access Tokens
-  - `SUPABASE_DB_PASSWORD`: the production database password
-- **Environment** (Settings → Environments → New environment → `production`):
-  add required reviewers, and limit deployment branches to `main`.
+Credentials are **environment** secrets, never repository secrets: a repository
+secret is readable by any workflow run, including one edited in a PR.
+
+Settings → Environments, create two:
+
+| Environment | Deployment branches | Required reviewers | Secrets |
+|---|---|---|---|
+| `production` | `main` only | yes | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` |
+| `production-check` | `main` only | no (it runs daily) | the same two |
+
+- `SUPABASE_ACCESS_TOKEN`: supabase.com → Account → Access Tokens
+- `SUPABASE_DB_PASSWORD`: the production database password
+
+Protect `main` (require PR review) so nobody can push workflow changes straight
+to it. Follow-up worth doing: give `production-check` a read-only database
+role instead of the full password.
 
 ## Checking what's really live
 
